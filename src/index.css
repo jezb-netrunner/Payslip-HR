@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  /* Brand: deep corporate navy (Paylocity-like) */
+  --color-brand-50: #eff4fa;
+  --color-brand-100: #dbe6f3;
+  --color-brand-200: #bccfe8;
+  --color-brand-300: #90afd8;
+  --color-brand-400: #5d88c3;
+  --color-brand-500: #3b6aae;
+  --color-brand-600: #2c5292;
+  --color-brand-700: #264377;
+  --color-brand-800: #233a63;
+  --color-brand-900: #122d55;
+  --color-brand-950: #0c1e3a;
+
+  /* Accent: warm orange */
+  --color-accent-50: #fff5ec;
+  --color-accent-100: #ffe8d3;
+  --color-accent-200: #ffcda5;
+  --color-accent-300: #ffab6d;
+  --color-accent-400: #fb8b3c;
+  --color-accent-500: #f6862e;
+  --color-accent-600: #e06614;
+  --color-accent-700: #b94e12;
+  --color-accent-800: #933f17;
+  --color-accent-900: #773615;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-100 text-slate-800 font-sans antialiased;
+}
+
+/* Thin scrollbars for tables */
+.scroll-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgb(246 134 46 / 0.5); }
+  80% { box-shadow: 0 0 0 14px rgb(246 134 46 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(246 134 46 / 0); }
+}
+.animate-pulse-ring { animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }

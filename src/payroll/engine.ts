@@ -1,0 +1,477 @@
+// The payroll engine: turns attendance facts + statutory tables + employee
+// pay data into a full payslip computation with an auditable trace.
+//
+// Legal basis implemented here (single-entity PH private sector):
+//  - Labor Code premium pay: rest day/special day 130%, special+rest 150%,
+//    regular holiday 200%, regular holiday+rest 260%; OT +25% ordinary days,
+//    +30% of the day rate on rest days/special days/holidays; night shift
+//    differential +10% (10pm–6am).
+//  - SSS (RA 11199), PhilHealth (RA 11223), Pag-IBIG (RA 9679) from the
+//    versioned tables passed in.
+//  - Withholding tax on compensation: BIR revised tables (TRAIN, RR 11-2018
+//    as amended), monthly/semi-monthly. Minimum wage earners are exempt.
+//  - 13th month pay (PD 851): 1/12 of basic salary earned in the calendar
+//    year; tax-exempt together with other benefits up to the statutory cap.
+
+import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax, taxFromBrackets } from './statutory'
+import {
+  round2,
+  type DayComputation,
+  type DayType,
+  type PayLine,
+  type PayrollEmployeeInput,
+  type PayrollSettingsInput,
+  type PayslipComputation,
+  type PeriodInput,
+  type RunType,
+  type StatutoryComputation,
+  type StatutoryTables,
+} from './types'
+
+export const DAY_MULT: Record<DayType, number> = {
+  regular: 1,
+  rest_day: 1.3,
+  special_day: 1.3,
+  special_day_rest: 1.5,
+  regular_holiday: 2.0,
+  regular_holiday_rest: 2.6,
+}
+
+/**
+ * Portion of the day multiplier already covered by the monthly rate for
+ * monthly-paid employees (divisor-261 style factors treat scheduled days,
+ * regular holidays and special days as paid whether or not worked).
+ */
+const BUILT_IN_MULT: Record<DayType, number> = {
+  regular: 1,
+  rest_day: 0,
+  special_day: 1,
+  special_day_rest: 0,
+  regular_holiday: 1,
+  regular_holiday_rest: 0,
+}
+
+function otMultiplier(dayType: DayType): number {
+  return dayType === 'regular' ? 1.25 : DAY_MULT[dayType] * 1.3
+}
+
+export interface ComputePayslipParams {
+  employee: PayrollEmployeeInput
+  settings: PayrollSettingsInput
+  period: PeriodInput
+  tables: StatutoryTables
+  days: DayComputation[]
+  runType: RunType
+  /** Basic pay earned so far this calendar year (needed for 13th month runs). */
+  ytdBasicPay?: number
+  /** Other taxable-cap benefits already granted this year (bonuses etc.). */
+  ytdOtherBenefits?: number
+}
+
+export function deriveRates(
+  employee: PayrollEmployeeInput,
+  settings: PayrollSettingsInput,
+): { daily: number; hourly: number; statutoryMonthlyBase: number } {
+  const daily =
+    employee.payType === 'monthly'
+      ? (employee.monthlyRate * 12) / settings.workingDaysDivisor
+      : employee.dailyRate
+  const hourly = daily / settings.standardHoursPerDay
+  const statutoryMonthlyBase =
+    employee.payType === 'monthly'
+      ? employee.monthlyRate
+      : round2((employee.dailyRate * settings.workingDaysDivisor) / 12)
+  return { daily, hourly, statutoryMonthlyBase }
+}
+
+export function computeStatutory(
+  statutoryMonthlyBase: number,
+  settings: PayrollSettingsInput,
+  period: PeriodInput,
+  tables: StatutoryTables,
+): StatutoryComputation {
+  let periodFactor: number
+  if (settings.payFrequency === 'monthly' || period.half === 'full') {
+    periodFactor = 1
+  } else if (settings.contributionTiming === 'split') {
+    periodFactor = 0.5
+  } else if (settings.contributionTiming === 'first_half') {
+    periodFactor = period.half === 'first' ? 1 : 0
+  } else {
+    periodFactor = period.half === 'second' ? 1 : 0
+  }
+
+  const sss = computeSss(statutoryMonthlyBase, tables.sss)
+  const ph = computePhilHealth(statutoryMonthlyBase, tables.philhealth)
+  const pi = computePagibig(statutoryMonthlyBase, tables.pagibig)
+
+  return {
+    monthlyBase: statutoryMonthlyBase,
+    sss,
+    philhealthEe: ph.ee,
+    philhealthEr: ph.er,
+    pagibigEe: pi.ee,
+    pagibigEr: pi.er,
+    periodFactor,
+  }
+}
+
+export function computePayslip(params: ComputePayslipParams): PayslipComputation {
+  const { employee, settings, period, tables, days, runType } = params
+  if (runType === 'thirteenth_month') return computeThirteenthMonth(params)
+
+  const notes: string[] = []
+  const warnings: string[] = []
+  const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
+  const perMinute = hourly / 60
+  const isSemi = settings.payFrequency === 'semi_monthly'
+
+  if (daily + 0.005 < settings.minimumWageDaily && !employee.isMinimumWageEarner) {
+    warnings.push(
+      `Derived daily rate ₱${daily.toFixed(2)} is below the configured minimum wage ₱${settings.minimumWageDaily.toFixed(2)}.`,
+    )
+  }
+
+  // ---- aggregate attendance ----
+  let daysWorked = 0
+  let hoursWorked = 0
+  let otHours = 0
+  let ndHours = 0
+  let lateMin = 0
+  let undertimeMin = 0
+  let absentDays = 0
+  let paidLeaveDays = 0
+  let unpaidLeaveDays = 0
+  let unworkedRegularHolidays = 0
+
+  let otPay = 0
+  let ndPay = 0
+  let restDayPay = 0
+  let specialDayPremium = 0
+  let holidayPremium = 0
+  let dailyBasic = 0 // daily-paid only
+
+  const stdMin = settings.standardHoursPerDay * 60
+
+  for (const d of days) {
+    const worked = d.workedMinutes > 0
+    const fraction = Math.min(1, d.payableMinutes / stdMin)
+    if (worked) {
+      daysWorked += 1
+      hoursWorked += d.workedMinutes / 60
+      otHours += d.otMinutes / 60
+      ndHours += d.nightDiffMinutes / 60
+      lateMin += d.lateMinutes
+      undertimeMin += d.undertimeMinutes
+    }
+    if (d.absent) absentDays += 1
+    if (d.onPaidLeave) paidLeaveDays += 1
+    if (d.onUnpaidLeave) unpaidLeaveDays += 1
+
+    if (employee.payType === 'monthly') {
+      if (worked) {
+        const extraMult = DAY_MULT[d.dayType] - BUILT_IN_MULT[d.dayType]
+        const extra = extraMult * hourly * (d.payableMinutes / 60)
+        if (d.dayType === 'rest_day') restDayPay += extra
+        else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
+          specialDayPremium += extra
+        else if (d.dayType === 'regular_holiday' || d.dayType === 'regular_holiday_rest')
+          holidayPremium += extra
+      }
+      // Unworked regular holidays / special days are deemed paid inside the
+      // monthly rate (divisor-based factor) — no extra line, no deduction.
+      if (!worked && (d.dayType === 'regular_holiday' || d.dayType === 'regular_holiday_rest')) {
+        unworkedRegularHolidays += 1
+      }
+    } else {
+      // daily-paid: no work, no pay — each worked day is paid at its multiplier
+      if (worked) {
+        dailyBasic += 1.0 * daily * fraction
+        const premium = (DAY_MULT[d.dayType] - 1) * daily * fraction
+        if (d.dayType === 'rest_day') restDayPay += premium
+        else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
+          specialDayPremium += premium
+        else if (d.dayType === 'regular_holiday' || d.dayType === 'regular_holiday_rest')
+          holidayPremium += premium
+      } else if (d.dayType === 'regular_holiday' && !d.onUnpaidLeave) {
+        // Unworked regular holiday: 100% of daily wage (PD 851 / Labor Code
+        // Art. 94), assuming the employee qualifies (present or on paid leave
+        // on the workday before the holiday — tracked as a simplification).
+        holidayPremium += daily
+        unworkedRegularHolidays += 1
+      }
+      if (d.onPaidLeave) dailyBasic += daily
+    }
+
+    if (worked && d.otMinutes > 0) {
+      otPay += (d.otMinutes / 60) * hourly * otMultiplier(d.dayType)
+    }
+    if (worked && d.nightDiffMinutes > 0) {
+      ndPay += (d.nightDiffMinutes / 60) * hourly * settings.nightDiffRate * DAY_MULT[d.dayType]
+    }
+  }
+
+  // ---- earnings ----
+  const earnings: PayLine[] = []
+  let basicPay: number
+
+  if (employee.payType === 'monthly') {
+    basicPay = round2(isSemi ? employee.monthlyRate / 2 : employee.monthlyRate)
+    earnings.push({ code: 'basic', label: 'Basic Pay', amount: basicPay, taxable: true })
+    const absenceDeduction = round2((absentDays + unpaidLeaveDays) * daily)
+    if (absenceDeduction > 0) {
+      earnings.push({
+        code: 'absence',
+        label: `Absences (${absentDays + unpaidLeaveDays} day/s)`,
+        amount: -absenceDeduction,
+        taxable: true,
+      })
+    }
+    if (lateMin > 0) {
+      earnings.push({
+        code: 'late',
+        label: `Tardiness (${lateMin} min)`,
+        amount: -round2(lateMin * perMinute),
+        taxable: true,
+      })
+    }
+    if (undertimeMin > 0) {
+      earnings.push({
+        code: 'undertime',
+        label: `Undertime (${undertimeMin} min)`,
+        amount: -round2(undertimeMin * perMinute),
+        taxable: true,
+      })
+    }
+  } else {
+    basicPay = round2(dailyBasic)
+    earnings.push({
+      code: 'basic',
+      label: `Basic Pay (${daysWorked} day/s worked${paidLeaveDays ? ` + ${paidLeaveDays} paid leave` : ''})`,
+      amount: basicPay,
+      taxable: true,
+    })
+    notes.push('Daily-paid: tardiness/undertime is reflected in payable hours rather than deducted separately.')
+  }
+
+  if (otPay > 0)
+    earnings.push({ code: 'ot', label: 'Overtime Pay', amount: round2(otPay), hours: round2(otHours), taxable: true })
+  if (ndPay > 0)
+    earnings.push({ code: 'nd', label: 'Night Differential', amount: round2(ndPay), hours: round2(ndHours), taxable: true })
+  if (restDayPay > 0)
+    earnings.push({ code: 'restday', label: 'Rest Day Pay', amount: round2(restDayPay), taxable: true })
+  if (specialDayPremium > 0)
+    earnings.push({ code: 'special', label: 'Special Day Premium', amount: round2(specialDayPremium), taxable: true })
+  if (holidayPremium > 0)
+    earnings.push({ code: 'holiday', label: 'Holiday Pay', amount: round2(holidayPremium), taxable: true })
+
+  const allowanceFactor = isSemi ? 0.5 : 1
+  for (const a of employee.allowances) {
+    const amt = round2(a.monthlyAmount * allowanceFactor)
+    if (amt === 0) continue
+    const taxable = a.taxable && !a.deMinimis
+    earnings.push({
+      code: 'allowance',
+      label: `${a.label}${taxable ? '' : ' (non-taxable)'}`,
+      amount: amt,
+      taxable,
+    })
+  }
+
+  const grossPay = round2(earnings.reduce((s, l) => s + l.amount, 0))
+  const grossTaxable = round2(
+    earnings.filter((l) => l.taxable).reduce((s, l) => s + l.amount, 0),
+  )
+
+  // ---- statutory deductions ----
+  const stat = computeStatutory(statutoryMonthlyBase, settings, period, tables)
+  const f = stat.periodFactor
+  const sssEe = round2(stat.sss.ee * f)
+  const sssMpfEe = round2(stat.sss.mpfEe * f)
+  const philhealthEe = round2(stat.philhealthEe * f)
+  const pagibigEe = round2(stat.pagibigEe * f)
+  const sssEr = round2(stat.sss.er * f)
+  const sssMpfEr = round2(stat.sss.mpfEr * f)
+  const sssEcEr = round2(stat.sss.ecEr * f)
+  const philhealthEr = round2(stat.philhealthEr * f)
+  const pagibigEr = round2(stat.pagibigEr * f)
+
+  if (f === 0) {
+    notes.push('Statutory contributions are deducted on the other half of the month (per company settings).')
+  } else if (f === 0.5) {
+    notes.push('Statutory contributions are split evenly across the two payroll periods of the month.')
+  }
+  notes.push(
+    `SSS MSC ₱${stat.sss.msc.toLocaleString()} on statutory monthly base ₱${statutoryMonthlyBase.toLocaleString()}.`,
+  )
+
+  const deductions: PayLine[] = []
+  if (sssEe > 0) deductions.push({ code: 'sss', label: 'SSS Contribution', amount: sssEe })
+  if (sssMpfEe > 0) deductions.push({ code: 'sss_mpf', label: 'SSS MPF (WISP)', amount: sssMpfEe })
+  if (philhealthEe > 0) deductions.push({ code: 'philhealth', label: 'PhilHealth Premium', amount: philhealthEe })
+  if (pagibigEe > 0) deductions.push({ code: 'pagibig', label: 'Pag-IBIG Contribution', amount: pagibigEe })
+
+  // ---- withholding tax ----
+  const taxableIncome = round2(
+    Math.max(0, grossTaxable - sssEe - sssMpfEe - philhealthEe - pagibigEe),
+  )
+  let withholdingTax = 0
+  if (employee.isMinimumWageEarner) {
+    notes.push('Minimum wage earner: exempt from withholding tax on compensation (incl. OT, ND, holiday pay).')
+  } else {
+    withholdingTax = computeWithholdingTax(
+      taxableIncome,
+      isSemi ? 'semi_monthly' : 'monthly',
+      tables.bir_wht,
+    )
+  }
+  if (withholdingTax > 0)
+    deductions.push({ code: 'wht', label: 'Withholding Tax', amount: withholdingTax })
+
+  // ---- other deductions ----
+  let otherDeductionsTotal = 0
+  for (const d of employee.extraDeductions) {
+    const amt = round2(d.amount)
+    if (amt <= 0) continue
+    otherDeductionsTotal += amt
+    deductions.push({ code: `other:${d.category}`, label: d.label, amount: amt, meta: d.id })
+  }
+  otherDeductionsTotal = round2(otherDeductionsTotal)
+
+  const totalDeductions = round2(deductions.reduce((s, l) => s + l.amount, 0))
+  const netPay = round2(grossPay - totalDeductions)
+
+  if (netPay < 0) warnings.push('Net pay is negative — review deductions for this employee.')
+  if (unworkedRegularHolidays > 0) {
+    notes.push(`${unworkedRegularHolidays} unworked regular holiday/s in this period.`)
+  }
+
+  return {
+    employeeId: employee.id,
+    runType,
+    daysWorked,
+    hoursWorked: round2(hoursWorked),
+    overtimeHours: round2(otHours),
+    nightDiffHours: round2(ndHours),
+    lateMinutes: Math.round(lateMin),
+    undertimeMinutes: Math.round(undertimeMin),
+    absentDays: absentDays + unpaidLeaveDays,
+    earnings,
+    deductions,
+    basicPay,
+    grossPay,
+    taxableIncome,
+    sssEe,
+    sssEr,
+    sssEcEr,
+    sssMpfEe,
+    sssMpfEr,
+    philhealthEe,
+    philhealthEr,
+    pagibigEe,
+    pagibigEr,
+    withholdingTax,
+    otherDeductionsTotal,
+    totalDeductions,
+    netPay,
+    trace: {
+      dailyRate: round2(daily),
+      hourlyRate: round2(hourly),
+      statutoryMonthlyBase,
+      notes,
+      warnings,
+      days,
+    },
+  }
+}
+
+/**
+ * 13th month pay run (PD 851): 1/12 of basic salary earned within the
+ * calendar year. Tax-exempt together with "other benefits" up to the cap in
+ * the annual tax table version (₱90,000); the excess is taxed as supplemental
+ * compensation at the employee's marginal rate.
+ */
+function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputation {
+  const { employee, settings, tables, days, runType } = params
+  const notes: string[] = []
+  const warnings: string[] = []
+  const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
+
+  const ytdBasic = params.ytdBasicPay ?? 0
+  const otherBenefits = params.ytdOtherBenefits ?? 0
+  const gross13 = round2(ytdBasic / 12)
+  const cap = tables.bir_annual.other_benefits_exemption_cap
+  const exemptRemaining = Math.max(0, cap - otherBenefits)
+  const taxable13 = round2(Math.max(0, gross13 - exemptRemaining))
+
+  notes.push(`13th month = 1/12 of YTD basic pay ₱${ytdBasic.toLocaleString()} (PD 851).`)
+  notes.push(
+    `Tax-exempt cap for 13th month + other benefits: ₱${cap.toLocaleString()}; other benefits already granted: ₱${otherBenefits.toLocaleString()}.`,
+  )
+  if (ytdBasic === 0) warnings.push('YTD basic pay is zero — no finalized payslips found for this year.')
+
+  const earnings: PayLine[] = [
+    { code: 'thirteenth', label: '13th Month Pay', amount: gross13, taxable: false },
+  ]
+
+  let withholdingTax = 0
+  if (taxable13 > 0 && !employee.isMinimumWageEarner) {
+    // Supplemental compensation: marginal tax = tax(regular + excess) - tax(regular)
+    const stat = computeStatutory(statutoryMonthlyBase, { ...settings, payFrequency: 'monthly' }, { start: '', end: '', half: 'full' }, tables)
+    const monthlyTaxable = Math.max(
+      0,
+      statutoryMonthlyBase - stat.sss.ee - stat.sss.mpfEe - stat.philhealthEe - stat.pagibigEe,
+    )
+    withholdingTax = round2(
+      taxFromBrackets(monthlyTaxable + taxable13, tables.bir_wht.monthly) -
+        taxFromBrackets(monthlyTaxable, tables.bir_wht.monthly),
+    )
+    notes.push(
+      `₱${taxable13.toLocaleString()} of the 13th month pay exceeds the exemption cap and is taxed as supplemental compensation.`,
+    )
+  }
+
+  const deductions: PayLine[] = []
+  if (withholdingTax > 0)
+    deductions.push({ code: 'wht', label: 'Withholding Tax (13th month excess)', amount: withholdingTax })
+
+  const totalDeductions = round2(deductions.reduce((s, l) => s + l.amount, 0))
+
+  return {
+    employeeId: employee.id,
+    runType,
+    daysWorked: 0,
+    hoursWorked: 0,
+    overtimeHours: 0,
+    nightDiffHours: 0,
+    lateMinutes: 0,
+    undertimeMinutes: 0,
+    absentDays: 0,
+    earnings,
+    deductions,
+    basicPay: gross13,
+    grossPay: gross13,
+    taxableIncome: taxable13,
+    sssEe: 0,
+    sssEr: 0,
+    sssEcEr: 0,
+    sssMpfEe: 0,
+    sssMpfEr: 0,
+    philhealthEe: 0,
+    philhealthEr: 0,
+    pagibigEe: 0,
+    pagibigEr: 0,
+    withholdingTax,
+    otherDeductionsTotal: 0,
+    totalDeductions,
+    netPay: round2(gross13 - totalDeductions),
+    trace: {
+      dailyRate: round2(daily),
+      hourlyRate: round2(hourly),
+      statutoryMonthlyBase,
+      notes,
+      warnings,
+      days,
+    },
+  }
+}
