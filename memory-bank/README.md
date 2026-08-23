@@ -22,6 +22,7 @@ sessions have self-reinforcing context.
 
 | Note | One-liner |
 |---|---|
+| `project-state.md` | What is actually deployed/seeded on the live Supabase project, and open items |
 | `statutory-figures-2026.md` | Verified 2026 PH statutory figures, sources, and what to re-verify when |
 | `philhealth-odd-centavo-split.md` | PhilHealth odd centavo goes to the employer, not the employee |
 | `sss-ec-keys-off-msc.md` | SSS EC ₱10/₱30 threshold applies to the mapped MSC, not raw salary |
