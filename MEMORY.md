@@ -36,10 +36,13 @@ what previous instances **did** (session log), what is **true right now**
   payslips with PDF).
 - Smoke-tested: build/tests/lint green; login page renders (Playwright);
   ran Supabase security advisors and fixed findings.
-- Launched a 5-dimension adversarial code-review workflow (statutory math,
+- Ran a 5-dimension adversarial code-review workflow (statutory math,
   attendance engine, service/data layer, security/RLS, React UI), each
-  dimension's findings verified by a skeptic agent. **Results pending at the
-  time of writing — fold confirmed findings and fixes into this log.**
+  dimension's findings re-verified by a skeptic agent: **22 confirmed
+  findings** (statutory 4, attendance/engine 12, security 6; service and UI
+  clean). All fixed the same day — see the "Adversarial review findings"
+  lesson; regression tests added (44 total, green); migration
+  `security_and_integrity_fixes` applied; edge function redeployed as v2.
 
 **Found (the important discoveries are the Lessons below):** two from-memory
 statutory values were wrong before research (NCR wage, PhilHealth centavo
@@ -52,11 +55,12 @@ refactored to security-definer helpers.
 ## Current deployed state (update when it changes)
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1):
-- All migrations in `supabase/migrations/` are **applied** (verified via
-  `list_migrations`; versions match filenames). Statutory versions, 2026
-  holidays, leave types, and company settings (min wage ₱755, WO NCR-27) are
-  **seeded**.
-- Edge function **`admin-users` deployed** (verify_jwt on, v1); repo copy at
+- All 8 migrations in `supabase/migrations/` are **applied** (verified via
+  `list_migrations`; versions match filenames — latest:
+  `security_and_integrity_fixes`). Statutory versions, 2026 holidays, leave
+  types, and company settings (min wage ₱755, WO NCR-27) are **seeded**.
+- Edge function **`admin-users` deployed at v2** (verify_jwt on; v2 adds the
+  co-admin protection guard); repo copy at
   `supabase/functions/admin-users/index.ts` matches.
 - Private storage buckets `punch-selfies` and `employee-photos` exist.
 - Security advisors clean except intentional WARNs on `clock_in`/`clock_out`/
@@ -246,6 +250,61 @@ rendering, not live auth. The adversarial pass is not decoration: it caught
 a date nuance (RR 4-2025 effectivity) and confirmed all 24 WHT brackets
 digit-by-digit. A human should still eyeball the actual circular PDFs once
 before betting the company on a figure.
+
+### Adversarial review findings (2026-08-23) — all fixed, all regression-tested
+
+> A 5-dimension review workflow with skeptic verification confirmed 22 real defects in the "finished" system; the bug classes below are the ones future changes are most likely to reintroduce.
+
+Engine/attendance (fixed in `attendance.ts` / `engine.ts`, each with a test):
+- **Holiday × rest-day interactions**: unworked regular holidays falling on
+  rest days paid ₱0 for both pay types (Art. 94 grants 100% regardless);
+  `BUILT_IN_MULT` also hardcoded divisor-261 semantics — under divisor 365
+  rest-day work double-paid the base 100%. Built-in coverage is now
+  divisor-aware (`builtInFor`).
+- **Leave flags were dayType-gated in attendance**, making the engine's
+  unpaid-leave-on-holiday guard dead code. Flags are now set for every
+  covered day; the engine decides per day type what they mean.
+- **Overnight schedules** (22:00–06:00) never detected lateness/undertime —
+  minutes-of-day comparisons need the schedule normalized onto a continuous
+  axis (+1440 past midnight).
+- **Break double-deduction**: employees who clock out for lunch had the
+  scheduled break deducted again; the break is now reduced by off-the-clock
+  gaps between same-day entries.
+- **Deduction caps**: tardiness/undertime deductions are capped at the
+  unworked portion of the day (standard − payable), which also waives them
+  when total hours meet the standard and keeps the unpaid break out of the
+  tardiness charge.
+- **ND must stack on the OT rate** for night hours beyond the standard day
+  (overlap attributed to OT first).
+- **Centavo discipline**: PhilHealth splits must use integer-centavo
+  arithmetic (binary-float flooring dropped centavos on even splits), and
+  split-month contribution halves must sum EXACTLY to the monthly table
+  amount (`periodShare`: floor-half first, remainder second).
+- **13th month**: `basic_pay` now stores EARNED basic (net of
+  absence/late/undertime lines) because PD 851 counts basic salary *earned*.
+- **Full-month runs under semi-monthly settings** (half='full') now compute
+  with monthly semantics end-to-end (basic, allowances, contributions, WHT
+  table) instead of half-basic + full contributions.
+- **Loan deductions** are capped at the remaining balance, and reopening a
+  finalized run restores the balances it decremented.
+
+Security (fixed in migration `security_and_integrity_fixes` + edge fn v2):
+- `review_time_correction` could modify ANY time entry by id → now verifies
+  the entry belongs to the requesting employee (cross-employee tampering).
+- Punch RPCs accepted arbitrary selfie paths → now must be in the caller's
+  folder, must exist in storage, and stale (>10 min) uploads are flagged.
+- Employees could read whole `payroll_runs` rows (company-wide totals/notes)
+  → policy dropped; run info is denormalized onto payslips instead.
+- `time_entries` INSERTs are now audit-logged (were update/delete only).
+- Edge function: one admin could reset/ban a co-admin → protected targets.
+- Residual (documented, not code-fixable here): first-signup-becomes-admin
+  bootstrap can be raced while public sign-ups are enabled — README tells the
+  owner to sign up immediately and then disable public sign-ups in Supabase
+  Auth settings.
+
+Why it mattered: every one of these passed the original 32 tests; only
+adversarial review with independent verification caught them. When touching
+the engine, re-read this list — these are the semantics most easily broken.
 
 ### React: don't define components inside components
 

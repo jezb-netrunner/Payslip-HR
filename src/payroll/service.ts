@@ -149,7 +149,11 @@ export async function computeRun(run: PayrollRun): Promise<RunComputationResult>
                 id: d.id as string,
                 label: d.label as string,
                 category: d.category as string,
-                amount: Number(d.amount_per_period),
+                // Never deduct more than what's left of a tracked balance.
+                amount:
+                  d.balance !== null && d.balance !== undefined
+                    ? Math.min(Number(d.amount_per_period), Math.max(0, Number(d.balance)))
+                    : Number(d.amount_per_period),
               })),
       },
       settings: engineSettings,
@@ -173,6 +177,12 @@ export async function computeRun(run: PayrollRun): Promise<RunComputationResult>
   const rows = results.map(({ employee: e, slip }) => ({
     payroll_run_id: run.id,
     employee_id: e.id,
+    // Run info denormalized onto the payslip so employees never need read
+    // access to payroll_runs rows (which carry company-wide totals/notes).
+    period_start: run.period_start,
+    period_end: run.period_end,
+    pay_date: run.pay_date,
+    run_type: run.run_type,
     employee_snapshot: {
       name: `${e.first_name} ${e.middle_name ? e.middle_name + ' ' : ''}${e.last_name}${e.suffix ? ' ' + e.suffix : ''}`,
       employee_no: e.employee_no,
@@ -296,6 +306,37 @@ export async function finalizeRun(run: PayrollRun): Promise<void> {
 }
 
 export async function reopenRun(runId: string): Promise<void> {
+  // Reverse the recurring-deduction balance decrements made at finalization,
+  // so a reopen + re-finalize cycle never double-decrements a loan.
+  const { data: slips, error: slipErr } = await supabase
+    .from('payslips')
+    .select('deductions')
+    .eq('payroll_run_id', runId)
+  if (slipErr) throw slipErr
+
+  const byDeduction = new Map<string, number>()
+  for (const s of slips ?? []) {
+    for (const line of (s.deductions ?? []) as { code: string; amount: number; meta?: string }[]) {
+      if (line.code.startsWith('other:') && line.meta) {
+        byDeduction.set(line.meta, (byDeduction.get(line.meta) ?? 0) + line.amount)
+      }
+    }
+  }
+  for (const [id, amount] of byDeduction) {
+    const { data: ded } = await supabase
+      .from('recurring_deductions')
+      .select('balance')
+      .eq('id', id)
+      .maybeSingle()
+    if (ded && ded.balance !== null) {
+      const restored = round2(Number(ded.balance) + amount)
+      await supabase
+        .from('recurring_deductions')
+        .update({ balance: restored, active: restored > 0 })
+        .eq('id', id)
+    }
+  }
+
   const { error } = await supabase
     .from('payroll_runs')
     .update({ status: 'draft', finalized_at: null, finalized_by: null })

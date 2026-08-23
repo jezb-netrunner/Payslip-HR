@@ -76,6 +76,15 @@ describe('PhilHealth (RA 11223, 5% premium)', () => {
     expect(c.ee).toBe(309.37)
     expect(c.er).toBe(309.38)
   })
+
+  it('splits an even-centavo premium exactly in half (no float truncation)', () => {
+    // 10,241.20 × 5% = 512.06 -> 256.03 / 256.03. Binary-float flooring used
+    // to drop a centavo from the employee here.
+    const c = computePhilHealth(10241.2, PHILHEALTH_2024)
+    expect(c.total).toBe(512.06)
+    expect(c.ee).toBe(256.03)
+    expect(c.er).toBe(256.03)
+  })
 })
 
 describe('Pag-IBIG (HDMF, ₱10,000 max fund salary from Feb 2024)', () => {

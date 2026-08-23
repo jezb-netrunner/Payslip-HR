@@ -94,7 +94,10 @@ npm run dev
 ```
 
 1. Open the app → **“First time here? Create the admin account.”** The first
-   account ever created becomes the administrator.
+   account ever created becomes the administrator — do this immediately after
+   deploying, then **disable public sign-ups** in the Supabase dashboard
+   (Authentication → Sign In / Up) so the bootstrap can't be raced; all
+   employee accounts are provisioned by the admin from inside the app.
 2. Settings → fill in company identity, employer numbers, pay policy.
 3. Employees → add employees → each employee's **Login Account** tab → create
    their login (they sign in and punch from their own account).

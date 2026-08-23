@@ -53,9 +53,15 @@ export function computePhilHealth(
   t: PhilHealthData,
 ): { ee: number; er: number; total: number } {
   const base = Math.min(Math.max(monthlyBasicSalary, t.floor), t.ceiling)
-  const total = round2(base * t.rate)
-  const ee = Math.floor((total / 2) * 100) / 100
-  return { ee, er: round2(total - ee), total }
+  // Integer-centavo arithmetic: flooring the binary-float half can drop a
+  // centavo from the employee even on exact even splits.
+  const totalCents = Math.round(base * t.rate * 100)
+  const eeCents = Math.floor(totalCents / 2)
+  return {
+    ee: eeCents / 100,
+    er: (totalCents - eeCents) / 100,
+    total: totalCents / 100,
+  }
 }
 
 /** Pag-IBIG (HDMF) monthly savings. Compensation is capped at the max fund salary. */

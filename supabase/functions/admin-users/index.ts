@@ -1,6 +1,7 @@
 // Admin-only user provisioning for Payslip-HR.
 // Actions: create_employee_account, reset_password, set_active.
 // The caller's JWT must belong to an active admin profile.
+// Admin accounts cannot be reset/deactivated by other admins.
 // Deployed with verify_jwt = true.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -47,6 +48,18 @@ Deno.serve(async (req: Request) => {
       .single();
     if (!profile || profile.role !== "admin" || !profile.is_active) {
       return json({ error: "Admin access required" }, 403);
+    }
+
+    // Guard: admin accounts can only be managed by themselves, never by a
+    // co-admin — prevents one admin hijacking or locking out another.
+    async function isProtectedTarget(user_id: string): Promise<boolean> {
+      if (user_id === userData!.user!.id) return false;
+      const { data: target } = await admin
+        .from("profiles")
+        .select("role")
+        .eq("id", user_id)
+        .maybeSingle();
+      return target?.role === "admin";
     }
 
     const body = await req.json();
@@ -114,6 +127,12 @@ Deno.serve(async (req: Request) => {
       if (typeof password !== "string" || password.length < 8) {
         return json({ error: "Password must be at least 8 characters" }, 400);
       }
+      if (await isProtectedTarget(user_id)) {
+        return json(
+          { error: "Another administrator's account cannot be managed here" },
+          403,
+        );
+      }
       const { error: updErr } = await admin.auth.admin.updateUserById(user_id, {
         password,
       });
@@ -128,6 +147,12 @@ Deno.serve(async (req: Request) => {
       }
       if (user_id === userData.user.id && !active) {
         return json({ error: "You cannot deactivate your own account" }, 400);
+      }
+      if (await isProtectedTarget(user_id)) {
+        return json(
+          { error: "Another administrator's account cannot be managed here" },
+          403,
+        );
       }
       const { error: banErr } = await admin.auth.admin.updateUserById(user_id, {
         ban_duration: active ? "none" : "876000h",

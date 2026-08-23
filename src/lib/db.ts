@@ -203,6 +203,12 @@ export interface Payslip {
   id: string
   payroll_run_id: string
   employee_id: string
+  // Run info denormalized at compute time so employees don't need read
+  // access to payroll_runs (which carries company-wide totals/notes).
+  period_start: string | null
+  period_end: string | null
+  pay_date: string | null
+  run_type: PayrollRun['run_type'] | null
   employee_snapshot: Record<string, unknown>
   days_worked: number
   hours_worked: number

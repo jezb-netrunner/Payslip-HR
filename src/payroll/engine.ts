@@ -39,8 +39,11 @@ export const DAY_MULT: Record<DayType, number> = {
 
 /**
  * Portion of the day multiplier already covered by the monthly rate for
- * monthly-paid employees (divisor-261 style factors treat scheduled days,
- * regular holidays and special days as paid whether or not worked).
+ * monthly-paid employees. Divisor-261/313 style factors treat scheduled
+ * days, regular holidays and special days as paid whether or not worked,
+ * but NOT rest days; a 365 divisor deems every calendar day (rest days
+ * included) paid inside the monthly rate — so rest-day coverage depends on
+ * the configured divisor (see builtInFor below).
  */
 const BUILT_IN_MULT: Record<DayType, number> = {
   regular: 1,
@@ -49,6 +52,17 @@ const BUILT_IN_MULT: Record<DayType, number> = {
   special_day_rest: 0,
   regular_holiday: 1,
   regular_holiday_rest: 0,
+}
+
+function builtInFor(dayType: DayType, workingDaysDivisor: number): number {
+  const base = BUILT_IN_MULT[dayType]
+  if (base > 0) return base
+  // Divisor 365: rest days are already paid inside the monthly rate.
+  return workingDaysDivisor >= 365 ? 1 : 0
+}
+
+function isRegularHolidayType(dayType: DayType): boolean {
+  return dayType === 'regular_holiday' || dayType === 'regular_holiday_rest'
 }
 
 function otMultiplier(dayType: DayType): number {
@@ -82,6 +96,23 @@ export function deriveRates(
       ? employee.monthlyRate
       : round2((employee.dailyRate * settings.workingDaysDivisor) / 12)
   return { daily, hourly, statutoryMonthlyBase }
+}
+
+/**
+ * Slice a monthly statutory amount for one pay period so the two halves of a
+ * split month sum EXACTLY to the monthly table amount: the first half takes
+ * the floor of the half-centavo, the second half takes the remainder.
+ */
+export function periodShare(
+  monthlyAmount: number,
+  factor: number,
+  half: PeriodInput['half'],
+): number {
+  if (factor >= 1) return round2(monthlyAmount)
+  if (factor <= 0) return 0
+  const cents = Math.round(monthlyAmount * 100)
+  const first = Math.floor(cents / 2) / 100
+  return half === 'first' ? first : round2(monthlyAmount - first)
 }
 
 export function computeStatutory(
@@ -124,7 +155,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const warnings: string[] = []
   const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
   const perMinute = hourly / 60
-  const isSemi = settings.payFrequency === 'semi_monthly'
+  // A run whose period spans the whole month (half === 'full') is computed
+  // with monthly semantics even under semi-monthly settings, so basic pay,
+  // allowances, contributions and the WHT table all stay consistent.
+  const isSemi = settings.payFrequency === 'semi_monthly' && period.half !== 'full'
 
   if (daily + 0.005 < settings.minimumWageDaily && !employee.isMinimumWageEarner) {
     warnings.push(
@@ -156,6 +190,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   for (const d of days) {
     const worked = d.workedMinutes > 0
     const fraction = Math.min(1, d.payableMinutes / stdMin)
+    const builtIn = builtInFor(d.dayType, settings.workingDaysDivisor)
     if (worked) {
       daysWorked += 1
       hoursWorked += d.workedMinutes / 60
@@ -165,23 +200,32 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       undertimeMin += d.undertimeMinutes
     }
     if (d.absent) absentDays += 1
-    if (d.onPaidLeave) paidLeaveDays += 1
-    if (d.onUnpaidLeave) unpaidLeaveDays += 1
+    // Leave flags exist on every covered day; only ordinary scheduled days
+    // translate into paid-leave credit / unpaid-leave deductions.
+    if (d.onPaidLeave && d.dayType === 'regular') paidLeaveDays += 1
+    if (d.onUnpaidLeave && d.dayType === 'regular') unpaidLeaveDays += 1
 
     if (employee.payType === 'monthly') {
       if (worked) {
-        const extraMult = DAY_MULT[d.dayType] - BUILT_IN_MULT[d.dayType]
+        const extraMult = DAY_MULT[d.dayType] - builtIn
         const extra = extraMult * hourly * (d.payableMinutes / 60)
         if (d.dayType === 'rest_day') restDayPay += extra
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += extra
-        else if (d.dayType === 'regular_holiday' || d.dayType === 'regular_holiday_rest')
-          holidayPremium += extra
-      }
-      // Unworked regular holidays / special days are deemed paid inside the
-      // monthly rate (divisor-based factor) — no extra line, no deduction.
-      if (!worked && (d.dayType === 'regular_holiday' || d.dayType === 'regular_holiday_rest')) {
+        else if (isRegularHolidayType(d.dayType)) holidayPremium += extra
+      } else if (isRegularHolidayType(d.dayType)) {
         unworkedRegularHolidays += 1
+        if (d.onUnpaidLeave) {
+          // On leave without pay over the holiday: not entitled — deduct the
+          // day if the monthly rate would otherwise have covered it.
+          if (builtIn > 0) unpaidLeaveDays += 1
+        } else if (builtIn === 0) {
+          // Holiday on a day the divisor does NOT deem paid (e.g. a rest day
+          // under divisor 261): Art. 94 still grants 100% of the daily wage.
+          holidayPremium += daily
+        }
+        // builtIn > 0 and not on unpaid leave: already paid inside the
+        // monthly rate — no extra line, no deduction.
       }
     } else {
       // daily-paid: no work, no pay — each worked day is paid at its multiplier
@@ -191,23 +235,30 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         if (d.dayType === 'rest_day') restDayPay += premium
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += premium
-        else if (d.dayType === 'regular_holiday' || d.dayType === 'regular_holiday_rest')
-          holidayPremium += premium
-      } else if (d.dayType === 'regular_holiday' && !d.onUnpaidLeave) {
-        // Unworked regular holiday: 100% of daily wage (PD 851 / Labor Code
-        // Art. 94), assuming the employee qualifies (present or on paid leave
-        // on the workday before the holiday — tracked as a simplification).
-        holidayPremium += daily
+        else if (isRegularHolidayType(d.dayType)) holidayPremium += premium
+      } else if (isRegularHolidayType(d.dayType)) {
         unworkedRegularHolidays += 1
+        // Unworked regular holiday: 100% of daily wage (Labor Code Art. 94),
+        // whether or not it falls on the rest day; forfeited when the
+        // employee is on leave without pay over the holiday (simplification
+        // of the presence-on-preceding-workday condition).
+        if (!d.onUnpaidLeave) holidayPremium += daily
       }
-      if (d.onPaidLeave) dailyBasic += daily
+      if (d.onPaidLeave && d.dayType === 'regular') dailyBasic += daily
     }
 
     if (worked && d.otMinutes > 0) {
       otPay += (d.otMinutes / 60) * hourly * otMultiplier(d.dayType)
     }
     if (worked && d.nightDiffMinutes > 0) {
-      ndPay += (d.nightDiffMinutes / 60) * hourly * settings.nightDiffRate * DAY_MULT[d.dayType]
+      // ND stacks on the applicable rate: night minutes that are also OT earn
+      // 10% of the OT rate. Attendance reports the two buckets independently;
+      // overlap is attributed to OT first (OT hours extend into the night).
+      const ndOt = Math.min(d.nightDiffMinutes, d.otMinutes)
+      const ndRegular = d.nightDiffMinutes - ndOt
+      ndPay +=
+        (ndRegular / 60) * hourly * settings.nightDiffRate * DAY_MULT[d.dayType] +
+        (ndOt / 60) * hourly * settings.nightDiffRate * otMultiplier(d.dayType)
     }
   }
 
@@ -286,15 +337,16 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // ---- statutory deductions ----
   const stat = computeStatutory(statutoryMonthlyBase, settings, period, tables)
   const f = stat.periodFactor
-  const sssEe = round2(stat.sss.ee * f)
-  const sssMpfEe = round2(stat.sss.mpfEe * f)
-  const philhealthEe = round2(stat.philhealthEe * f)
-  const pagibigEe = round2(stat.pagibigEe * f)
-  const sssEr = round2(stat.sss.er * f)
-  const sssMpfEr = round2(stat.sss.mpfEr * f)
-  const sssEcEr = round2(stat.sss.ecEr * f)
-  const philhealthEr = round2(stat.philhealthEr * f)
-  const pagibigEr = round2(stat.pagibigEr * f)
+  const share = (monthlyAmount: number) => periodShare(monthlyAmount, f, period.half)
+  const sssEe = share(stat.sss.ee)
+  const sssMpfEe = share(stat.sss.mpfEe)
+  const philhealthEe = share(stat.philhealthEe)
+  const pagibigEe = share(stat.pagibigEe)
+  const sssEr = share(stat.sss.er)
+  const sssMpfEr = share(stat.sss.mpfEr)
+  const sssEcEr = share(stat.sss.ecEr)
+  const philhealthEr = share(stat.philhealthEr)
+  const pagibigEr = share(stat.pagibigEr)
 
   if (f === 0) {
     notes.push('Statutory contributions are deducted on the other half of the month (per company settings).')
@@ -341,6 +393,15 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const totalDeductions = round2(deductions.reduce((s, l) => s + l.amount, 0))
   const netPay = round2(grossPay - totalDeductions)
 
+  // Earned basic = basic net of absence/tardiness/undertime lines. Stored as
+  // the payslip's basic_pay because PD 851 counts only "basic salary earned"
+  // toward 13th month pay.
+  const earnedBasic = round2(
+    earnings
+      .filter((l) => ['basic', 'absence', 'late', 'undertime'].includes(l.code))
+      .reduce((s, l) => s + l.amount, 0),
+  )
+
   if (netPay < 0) warnings.push('Net pay is negative — review deductions for this employee.')
   if (unworkedRegularHolidays > 0) {
     notes.push(`${unworkedRegularHolidays} unworked regular holiday/s in this period.`)
@@ -358,7 +419,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     absentDays: absentDays + unpaidLeaveDays,
     earnings,
     deductions,
-    basicPay,
+    basicPay: earnedBasic,
     grossPay,
     taxableIncome,
     sssEe,

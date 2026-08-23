@@ -40,7 +40,7 @@ function overlapMinutes(aStart: number, aEnd: number, bStart: number, bEnd: numb
 function nightDiffMinutesFor(dateStr: string, inMs: number, outMs: number): number {
   let total = 0
   // Windows that can overlap a shift anchored to work_date: the 22:00 window
-  // of the previous day (ends 06:00 today), today's, and tomorrow morning's.
+  // of the previous day (ends 06:00 today), and today's (ends 06:00 tomorrow).
   for (const offset of [-1, 0]) {
     const d = new Date(Date.UTC(
       Number(dateStr.slice(0, 4)),
@@ -92,7 +92,10 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
 
   const standardMinutes = standardHoursPerDay * 60
   const schedStart = hhmmToMinutes(schedule.start)
-  const schedEnd = hhmmToMinutes(schedule.end)
+  const schedEndRaw = hhmmToMinutes(schedule.end)
+  // Normalize overnight schedules (e.g. 22:00–06:00) onto a continuous axis.
+  const overnight = schedEndRaw <= schedStart
+  const schedEnd = overnight ? schedEndRaw + 1440 : schedEndRaw
 
   const holidayByDate = new Map<string, HolidayLite>()
   for (const h of holidays) holidayByDate.set(h.holiday_date, h)
@@ -121,6 +124,8 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
 
     let rawMinutes = 0
     let ndMinutes = 0
+    let gapMinutes = 0 // off-the-clock gaps between same-day entries
+    let prevOutMs: number | null = null
     let firstInMin: number | null = null
     let lastOutMin: number | null = null
 
@@ -128,24 +133,34 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       const inMs = new Date(e.clock_in).getTime()
       const outMs = new Date(e.clock_out as string).getTime()
       if (outMs <= inMs) continue
+      if (prevOutMs !== null && inMs > prevOutMs) gapMinutes += (inMs - prevOutMs) / 60000
+      prevOutMs = Math.max(prevOutMs ?? outMs, outMs)
       rawMinutes += (outMs - inMs) / 60000
       ndMinutes += nightDiffMinutesFor(date, inMs, outMs)
-      const inMin = manilaMinutesOfDay(new Date(e.clock_in))
-      const outMin = manilaMinutesOfDay(new Date(e.clock_out as string))
+
+      // Minutes-of-day on the schedule's continuous axis: for overnight
+      // schedules a punch after midnight belongs to the tail of the shift.
+      let inMin = manilaMinutesOfDay(new Date(e.clock_in))
+      if (overnight && inMin < schedStart - 720) inMin += 1440
+      let outMin = manilaMinutesOfDay(new Date(e.clock_out as string))
+      if (outMin <= inMin) outMin += 1440 // clock-out past midnight
       if (firstInMin === null || inMin < firstInMin) firstInMin = inMin
-      // A clock-out past midnight reads as an early minute-of-day; treat it
-      // as end-of-day for undertime purposes.
-      const effectiveOut = outMin < inMin ? 24 * 60 : outMin
-      if (lastOutMin === null || effectiveOut > lastOutMin) lastOutMin = effectiveOut
+      if (lastOutMin === null || outMin > lastOutMin) lastOutMin = outMin
     }
 
-    // Unpaid break is deducted only for shifts long enough to include it.
+    // Deduct the unpaid break only to the extent it wasn't already taken
+    // off the clock (multiple entries with gaps = employee clocked out for
+    // the break themselves).
+    const effectiveBreak = Math.max(0, schedule.break_minutes - gapMinutes)
     const netMinutes =
-      rawMinutes >= 6 * 60 ? Math.max(0, rawMinutes - schedule.break_minutes) : rawMinutes
+      rawMinutes >= 6 * 60 ? Math.max(0, rawMinutes - effectiveBreak) : rawMinutes
     ndMinutes = Math.min(ndMinutes, netMinutes)
 
     const worked = netMinutes > 0
     const leave = leaveFor(date)
+
+    const payableMinutes = Math.min(netMinutes, standardMinutes)
+    const otMinutes = Math.max(0, netMinutes - standardMinutes)
 
     let lateMinutes = 0
     let undertimeMinutes = 0
@@ -156,17 +171,17 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       if (lastOutMin !== null && lastOutMin < schedEnd) {
         undertimeMinutes = Math.round(schedEnd - lastOutMin)
       }
-      const cap = standardMinutes
-      if (lateMinutes + undertimeMinutes > cap) {
-        undertimeMinutes = Math.max(0, cap - lateMinutes)
-      }
+      // Deduct only the true hours shortfall: an employee who completed the
+      // standard day (even shifted, or with early clock-in covering a late
+      // departure) owes nothing; a short day is never docked more than the
+      // unworked portion (which also keeps the unpaid break out of the
+      // tardiness charge).
+      const maxDeduct = Math.max(0, Math.round(standardMinutes - payableMinutes))
+      lateMinutes = Math.min(lateMinutes, maxDeduct)
+      undertimeMinutes = Math.min(undertimeMinutes, Math.max(0, maxDeduct - lateMinutes))
     }
 
-    const payableMinutes = Math.min(netMinutes, standardMinutes)
-    const otMinutes = Math.max(0, netMinutes - standardMinutes)
-
-    const absent =
-      scheduled && !worked && dayType === 'regular' && !leave
+    const absent = scheduled && !worked && dayType === 'regular' && !leave
 
     out.push({
       date,
@@ -180,8 +195,11 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       lateMinutes,
       undertimeMinutes,
       absent,
-      onPaidLeave: !worked && !!leave && leave.paid && scheduled && dayType === 'regular',
-      onUnpaidLeave: !worked && !!leave && !leave.paid && scheduled && dayType === 'regular',
+      // Leave flags are set for every unworked day the leave covers; the
+      // engine decides per day type what they mean (deduction on regular
+      // days, holiday-pay qualification on holidays).
+      onPaidLeave: !worked && !!leave && leave.paid,
+      onUnpaidLeave: !worked && !!leave && !leave.paid,
       leaveType: !worked && leave ? leave.type_name : undefined,
     })
   }
