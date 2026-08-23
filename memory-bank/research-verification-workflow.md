@@ -3,6 +3,10 @@
 > PH statutory data was verified with a parallel research workflow (one agent per domain: BIR / SSS / PhilHealth / Pag-IBIG / labor standards) each followed by an adversarial fact-checker agent told to refute the findings — worth repeating whenever tables are due for re-verification.
 
 Findings from the process itself:
+- The sandbox egress proxy also blocks `*.supabase.co` from local processes
+  (curl/browser get CONNECT 403), so end-to-end login tests can't run inside
+  the remote session — backend verification must go through the Supabase MCP
+  tools, and UI smoke tests can only confirm rendering, not live auth.
 - The sandbox egress proxy blocked ALL direct fetches of .gov.ph sites
   (philhealth.gov.ph, sss.gov.ph, dole.gov.ph, officialgazette.gov.ph…);
   research had to rely on server-side WebSearch extraction cross-checked

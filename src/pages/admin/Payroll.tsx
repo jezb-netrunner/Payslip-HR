@@ -226,6 +226,15 @@ function NewRunModal({
             (from finalized regular runs). Due not later than December 24 (PD 851).
           </p>
         )}
+        {(f.run_type === 'special' || f.run_type === 'final_pay') && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Special and final-pay runs compute the chosen period exactly like a regular run
+            (attendance, contributions, tax). Use them for off-cycle corrections or a separated
+            employee's last period — don't overlap a period that a finalized regular run already
+            paid, or basic pay and contributions will be charged twice. Final-pay extras (SIL
+            conversion, prorated 13th month) can be added as allowances beforehand.
+          </p>
+        )}
         <Button className="w-full" disabled={busy} onClick={create}>
           {busy ? 'Creating…' : 'Create draft run'}
         </Button>
