@@ -3,17 +3,20 @@
 Single-entity PH HR & Payroll system. React+TS+Tailwind front end, Supabase
 backend (project ref `ruuhpghcgccvezkjhisy`, ap-southeast-1).
 
-## Read the memory bank first
+## Read MEMORY.md first
 
-`memory-bank/` holds one-lesson-per-file notes (corrections, verified legal
-facts, design decisions with reasons). **Read `memory-bank/README.md` and any
-note relevant to your task before changing code.** Maintain it as you work:
+`MEMORY.md` is the single running memory log: a dated session log of what
+previous instances did and found, the current deployed-backend state, and
+one-entry-per-lesson notes (corrections, verified legal facts, design
+decisions with reasons). **Read it before changing code.** Maintain it as you
+work:
 
-- Record new corrections and confirmed approaches, one lesson per file, with a
-  one-line summary at the top and *why it mattered*.
+- Append a dated session-log entry for each session that changed something.
+- Record new corrections and confirmed approaches as lesson entries with a
+  one-line summary and *why it mattered*.
 - Don't save what the repo or chat history already records.
-- Update an existing note rather than creating a duplicate; delete notes that
-  turn out to be wrong. Keep the index table in `memory-bank/README.md` current.
+- Update an existing entry rather than adding a near-duplicate; delete
+  entries that turn out to be wrong. Keep the deployed-state section current.
 
 ## Commands
 

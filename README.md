@@ -124,7 +124,7 @@ src/
   lib/            # supabase client, auth, api helpers, Manila-time utils
   pdf/            # payslip PDF generation
 supabase/         # migrations + edge functions (source of truth for schema)
-memory-bank/      # running memory notes for AI/HR context (one lesson per file)
+MEMORY.md         # running memory log: session history, deployed state, lessons
 ```
 
 ## Disclaimers & known simplifications
