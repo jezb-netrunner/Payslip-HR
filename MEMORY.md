@@ -100,8 +100,9 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1):
 - Security advisors clean except intentional WARNs on `clock_in`/`clock_out`/
   `review_time_correction` being callable by `authenticated` — that IS the
   punch API; do not "fix".
-- **No auth users exist yet.** The first signup becomes the admin — never
-  create throwaway accounts; that would steal the owner's admin bootstrap.
+- **The owner's admin account exists** (created 2026-08-24, confirmed,
+  role=admin via the first-signup bootstrap). Never create additional
+  accounts except through the app's admin provisioning flow.
 - **GitHub Pages deployment** is wired via
   `.github/workflows/deploy-pages.yml` (build with `--base=/Payslip-HR/`,
   Router basename from `import.meta.env.BASE_URL`, `404.html` SPA fallback).
@@ -347,6 +348,20 @@ Security (fixed in migration `security_and_integrity_fixes` + edge fn v2):
 Why it mattered: every one of these passed the original 32 tests; only
 adversarial review with independent verification caught them. When touching
 the engine, re-read this list — these are the semantics most easily broken.
+
+### Supabase Auth Site URL defaults to localhost:3000
+
+> The first confirmation email's link "failed" with Unable to Connect to localhost:3000 — the token was already verified server-side; only the post-verification redirect goes to the project's Site URL, which every new Supabase project defaults to http://localhost:3000.
+
+Fix: Authentication → URL Configuration → Site URL =
+`https://jezb-netrunner.github.io/Payslip-HR/` (also added under Redirect
+URLs). Affects every auth email (confirmations, password resets, magic
+links). The account itself is always fine after clicking such a link — check
+`auth.users.email_confirmed_at` before assuming a failed signup. Why it
+mattered: it looks like a broken deployment to the user, but nothing is
+actually wrong with the app; only the dashboard setting needs updating —
+which no migration or API in this project's toolset can set, so it must be
+done by hand on any new project.
 
 ### React: don't define components inside components
 
