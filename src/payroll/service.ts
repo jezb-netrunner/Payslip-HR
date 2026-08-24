@@ -263,6 +263,24 @@ function round2(v: number): number {
 }
 
 export async function finalizeRun(run: PayrollRun): Promise<void> {
+  // Conditional transition draft -> finalized FIRST, so a double-click or a
+  // stale screen can never decrement loan balances twice for the same run.
+  const { data: userData } = await supabase.auth.getUser()
+  const { data: flipped, error: flipErr } = await supabase
+    .from('payroll_runs')
+    .update({
+      status: 'finalized',
+      finalized_at: new Date().toISOString(),
+      finalized_by: userData.user?.id ?? null,
+    })
+    .eq('id', run.id)
+    .eq('status', 'draft')
+    .select('id')
+  if (flipErr) throw flipErr
+  if (!flipped || flipped.length === 0) {
+    throw new Error('This run is not a draft — it may already be finalized.')
+  }
+
   // Decrement recurring deduction balances captured in this run's payslips.
   const { data: slips, error } = await supabase
     .from('payslips')
@@ -292,20 +310,22 @@ export async function finalizeRun(run: PayrollRun): Promise<void> {
         .eq('id', id)
     }
   }
-
-  const { data: userData } = await supabase.auth.getUser()
-  const { error: updErr } = await supabase
-    .from('payroll_runs')
-    .update({
-      status: 'finalized',
-      finalized_at: new Date().toISOString(),
-      finalized_by: userData.user?.id ?? null,
-    })
-    .eq('id', run.id)
-  if (updErr) throw updErr
 }
 
 export async function reopenRun(runId: string): Promise<void> {
+  // Conditional transition finalized/paid -> draft FIRST: restoring balances
+  // must happen exactly once per actual reopen (never on an already-draft run).
+  const { data: flipped, error: flipErr } = await supabase
+    .from('payroll_runs')
+    .update({ status: 'draft', finalized_at: null, finalized_by: null })
+    .eq('id', runId)
+    .in('status', ['finalized', 'paid'])
+    .select('id')
+  if (flipErr) throw flipErr
+  if (!flipped || flipped.length === 0) {
+    throw new Error('This run is not finalized — nothing to reopen.')
+  }
+
   // Reverse the recurring-deduction balance decrements made at finalization,
   // so a reopen + re-finalize cycle never double-decrements a loan.
   const { data: slips, error: slipErr } = await supabase
@@ -336,10 +356,4 @@ export async function reopenRun(runId: string): Promise<void> {
         .eq('id', id)
     }
   }
-
-  const { error } = await supabase
-    .from('payroll_runs')
-    .update({ status: 'draft', finalized_at: null, finalized_by: null })
-    .eq('id', runId)
-  if (error) throw error
 }
