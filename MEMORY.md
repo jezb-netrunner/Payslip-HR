@@ -102,6 +102,12 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1):
   punch API; do not "fix".
 - **No auth users exist yet.** The first signup becomes the admin — never
   create throwaway accounts; that would steal the owner's admin bootstrap.
+- **GitHub Pages deployment** is wired via
+  `.github/workflows/deploy-pages.yml` (build with `--base=/Payslip-HR/`,
+  Router basename from `import.meta.env.BASE_URL`, `404.html` SPA fallback).
+  Triggers on `main` and the build branch; one-time repo setting: Pages
+  source = GitHub Actions. Site URL:
+  https://jezb-netrunner.github.io/Payslip-HR/
 
 Known-open items (deliberate scope cuts, also in README disclaimers):
 year-end tax annualization / BIR 2316 true-up not automated; unworked

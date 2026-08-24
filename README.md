@@ -109,6 +109,27 @@ npm run build      # typecheck + production build
 npm run lint       # oxlint
 ```
 
+## Deploying to GitHub Pages
+
+The app is a static SPA (Supabase is the backend), so GitHub Pages hosts it
+directly. A workflow at `.github/workflows/deploy-pages.yml` builds and
+deploys on every push to `main` (tests must pass first).
+
+1. One-time: repo **Settings → Pages → Source: “GitHub Actions”** (the
+   workflow also attempts to enable this automatically on first run).
+2. Push to `main` (or run the workflow manually from the Actions tab).
+3. The app goes live at `https://<your-username>.github.io/Payslip-HR/`.
+
+How it works: the build passes `--base=/Payslip-HR/` so assets resolve under
+the project path, React Router picks the same basename from
+`import.meta.env.BASE_URL`, and `index.html` is copied to `404.html` so deep
+links (e.g. `/admin/payroll`) survive refreshes — Pages has no SPA rewrites.
+No secrets are needed in CI: the Supabase URL and anon key are public by
+design (RLS protects all data).
+
+Right after the first deploy, open the site, create the admin account, and
+disable public sign-ups in Supabase (see Getting started).
+
 ### Database
 
 The applied migrations are in `supabase/migrations/` (schema, RLS, RPCs,
