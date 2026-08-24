@@ -128,11 +128,13 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
     let prevOutMs: number | null = null
     let firstInMin: number | null = null
     let lastOutMin: number | null = null
+    const intervals: { inMs: number; outMs: number }[] = []
 
     for (const e of dayEntries) {
       const inMs = new Date(e.clock_in).getTime()
       const outMs = new Date(e.clock_out as string).getTime()
       if (outMs <= inMs) continue
+      intervals.push({ inMs, outMs })
       if (prevOutMs !== null && inMs > prevOutMs) gapMinutes += (inMs - prevOutMs) / 60000
       prevOutMs = Math.max(prevOutMs ?? outMs, outMs)
       rawMinutes += (outMs - inMs) / 60000
@@ -162,6 +164,23 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
     const payableMinutes = Math.min(netMinutes, standardMinutes)
     const otMinutes = Math.max(0, netMinutes - standardMinutes)
 
+    // Night-diff minutes that fall inside the OVERTIME portion of the day
+    // (the chronological tail of worked time) — the engine prices these at
+    // 10% of the OT rate instead of the plain day rate. Break placement
+    // inside a continuous span is unknown, so this is a close approximation.
+    let ndOtMinutes = 0
+    if (otMinutes > 0 && ndMinutes > 0) {
+      let otRemaining = otMinutes
+      for (let i = intervals.length - 1; i >= 0 && otRemaining > 0; i--) {
+        const span = (intervals[i].outMs - intervals[i].inMs) / 60000
+        const take = Math.min(span, otRemaining)
+        const tailStartMs = intervals[i].outMs - take * 60000
+        ndOtMinutes += nightDiffMinutesFor(date, tailStartMs, intervals[i].outMs)
+        otRemaining -= take
+      }
+      ndOtMinutes = Math.min(ndOtMinutes, ndMinutes)
+    }
+
     let lateMinutes = 0
     let undertimeMinutes = 0
     if (worked && dayType === 'regular') {
@@ -171,14 +190,16 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       if (lastOutMin !== null && lastOutMin < schedEnd) {
         undertimeMinutes = Math.round(schedEnd - lastOutMin)
       }
-      // Deduct only the true hours shortfall: an employee who completed the
-      // standard day (even shifted, or with early clock-in covering a late
-      // departure) owes nothing; a short day is never docked more than the
-      // unworked portion (which also keeps the unpaid break out of the
-      // tardiness charge).
+      // Deduct exactly the true hours shortfall: an employee who completed
+      // the standard day (even shifted, or with early clock-in covering a
+      // late departure) owes nothing; a short day is docked exactly the
+      // unworked portion — including interior off-the-clock gaps beyond the
+      // scheduled break, which edge-based late/undertime cannot see.
       const maxDeduct = Math.max(0, Math.round(standardMinutes - payableMinutes))
       lateMinutes = Math.min(lateMinutes, maxDeduct)
       undertimeMinutes = Math.min(undertimeMinutes, Math.max(0, maxDeduct - lateMinutes))
+      const interiorShortfall = maxDeduct - lateMinutes - undertimeMinutes
+      if (interiorShortfall > 0) undertimeMinutes += interiorShortfall
     }
 
     const absent = scheduled && !worked && dayType === 'regular' && !leave
@@ -192,6 +213,7 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       payableMinutes: Math.round(payableMinutes),
       otMinutes: Math.round(otMinutes),
       nightDiffMinutes: Math.round(ndMinutes),
+      ndOtMinutes: Math.round(ndOtMinutes),
       lateMinutes,
       undertimeMinutes,
       absent,

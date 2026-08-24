@@ -451,6 +451,70 @@ describe('review fixes: attendance edge cases', () => {
     expect(d?.otMinutes).toBe(180)
     expect(d?.undertimeMinutes).toBe(0)
     expect(d?.nightDiffMinutes).toBe(60) // 05:00–06:00 is within the ND window
+    // ...but that night hour is chronologically INSIDE the standard day —
+    // the OT tail is 14:00–17:00 — so it must NOT get the OT stack.
+    expect(d?.ndOtMinutes).toBe(0)
+  })
+
+  it('prices morning night-work at the day rate, not the OT rate', () => {
+    // Same 05:00–17:00 shift: ND pay = 1h × hourly × 10% × 1.0 = 17.24
+    const entries = WORKDAYS.map((d) =>
+      d === '2026-08-18'
+        ? { work_date: d, clock_in: '2026-08-17T21:00:00Z', clock_out: '2026-08-18T09:00:00Z' }
+        : entry(d),
+    )
+    const slip = computePayslip({
+      employee: monthlyEmployee,
+      settings,
+      period,
+      tables: DEFAULT_TABLES,
+      days: attendance(entries),
+      runType: 'regular',
+    })
+    const nd = slip.earnings.find((l) => l.code === 'nd')
+    expect(nd?.amount).toBe(17.24)
+  })
+
+  it('docks interior off-the-clock gaps beyond the scheduled break', () => {
+    // 09:00–12:00 and 15:00–18:00 (3h interior gap, 60-min break allowed):
+    // 6h worked -> 2h shortfall charged as undertime.
+    const days = attendance([
+      { work_date: '2026-08-18', clock_in: '2026-08-18T01:00:00Z', clock_out: '2026-08-18T04:00:00Z' },
+      { work_date: '2026-08-18', clock_in: '2026-08-18T07:00:00Z', clock_out: '2026-08-18T10:00:00Z' },
+    ])
+    const d = days.find((x) => x.date === '2026-08-18')
+    expect(d?.workedMinutes).toBe(360)
+    expect(d?.lateMinutes).toBe(0)
+    expect(d?.undertimeMinutes).toBe(120)
+  })
+
+  it('deducts unpaid leave over rest days when divisor 365 deems them paid', () => {
+    const s365 = { ...settings, workingDaysDivisor: 365 }
+    const days = computeAttendance({
+      periodStart: period.start,
+      periodEnd: period.end,
+      schedule: monthlyEmployee.schedule,
+      standardHoursPerDay: 8,
+      gracePeriodMinutes: 0,
+      entries: WORKDAYS.filter((d) => d >= '2026-08-24').map((d) => entry(d)),
+      holidays: [],
+      approvedLeaves: [
+        // unpaid leave Sat Aug 22 – Sun Aug 23 (rest days)
+        { start_date: '2026-08-22', end_date: '2026-08-23', paid: false, type_name: 'LWOP' },
+      ],
+    })
+    const slip = computePayslip({
+      employee: monthlyEmployee,
+      settings: s365,
+      period,
+      tables: DEFAULT_TABLES,
+      days,
+      runType: 'regular',
+    })
+    // Under 365 the rate pays rest days, so LWOP over them is deducted;
+    // Aug 17–21 have no entries either (absent) — assert the leave days
+    // specifically via absentDays = 5 absents + 2 unpaid-leave days.
+    expect(slip.absentDays).toBe(7)
   })
 
   it('caps tardiness deductions at the unworked portion of the day', () => {

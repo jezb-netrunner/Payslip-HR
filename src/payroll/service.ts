@@ -18,11 +18,20 @@ import type {
 
 function periodHalf(run: PayrollRun, settings: CompanySettings): PeriodHalf {
   if (settings.pay_frequency === 'monthly') return 'full'
+  const sameMonth = run.period_start.slice(0, 7) === run.period_end.slice(0, 7)
   const startDay = Number(run.period_start.slice(8, 10))
   const endDay = Number(run.period_end.slice(8, 10))
-  if (startDay <= 15 && endDay <= 15) return 'first'
-  if (startDay >= 16) return 'second'
-  return 'full'
+  const [y, m] = run.period_end.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  // 'full' means EXACTLY a calendar month — anything else that crosses the
+  // 15th/16th boundary would silently pay a full month's basic for a partial
+  // period, so refuse it instead of guessing.
+  if (sameMonth && startDay === 1 && endDay === lastDay) return 'full'
+  if (sameMonth && endDay <= 15) return 'first'
+  if (sameMonth && startDay >= 16) return 'second'
+  throw new Error(
+    'Semi-monthly payroll periods must be the 1st–15th, the 16th–end of month, or one exact calendar month. Adjust the run dates.',
+  )
 }
 
 export interface RunComputationResult {
@@ -263,97 +272,19 @@ function round2(v: number): number {
 }
 
 export async function finalizeRun(run: PayrollRun): Promise<void> {
-  // Conditional transition draft -> finalized FIRST, so a double-click or a
-  // stale screen can never decrement loan balances twice for the same run.
-  const { data: userData } = await supabase.auth.getUser()
-  const { data: flipped, error: flipErr } = await supabase
-    .from('payroll_runs')
-    .update({
-      status: 'finalized',
-      finalized_at: new Date().toISOString(),
-      finalized_by: userData.user?.id ?? null,
-    })
-    .eq('id', run.id)
-    .eq('status', 'draft')
-    .select('id')
-  if (flipErr) throw flipErr
-  if (!flipped || flipped.length === 0) {
-    throw new Error('This run is not a draft — it may already be finalized.')
-  }
-
-  // Decrement recurring deduction balances captured in this run's payslips.
-  const { data: slips, error } = await supabase
-    .from('payslips')
-    .select('deductions')
-    .eq('payroll_run_id', run.id)
+  // Atomic DB RPC: the draft->finalized flip and the recurring-deduction
+  // balance decrements happen in ONE transaction, exactly once per
+  // transition — a double-click, stale screen, or mid-flight network
+  // failure can neither double-decrement nor leave half-applied state.
+  const { error } = await supabase.rpc('finalize_payroll_run', { p_run: run.id })
   if (error) throw error
-
-  const byDeduction = new Map<string, number>()
-  for (const s of slips ?? []) {
-    for (const line of (s.deductions ?? []) as { code: string; amount: number; meta?: string }[]) {
-      if (line.code.startsWith('other:') && line.meta) {
-        byDeduction.set(line.meta, (byDeduction.get(line.meta) ?? 0) + line.amount)
-      }
-    }
-  }
-  for (const [id, amount] of byDeduction) {
-    const { data: ded } = await supabase
-      .from('recurring_deductions')
-      .select('balance')
-      .eq('id', id)
-      .maybeSingle()
-    if (ded && ded.balance !== null) {
-      const newBalance = round2(Number(ded.balance) - amount)
-      await supabase
-        .from('recurring_deductions')
-        .update({ balance: newBalance, active: newBalance > 0 })
-        .eq('id', id)
-    }
-  }
 }
 
 export async function reopenRun(runId: string): Promise<void> {
-  // Conditional transition finalized/paid -> draft FIRST: restoring balances
-  // must happen exactly once per actual reopen (never on an already-draft run).
-  const { data: flipped, error: flipErr } = await supabase
-    .from('payroll_runs')
-    .update({ status: 'draft', finalized_at: null, finalized_by: null })
-    .eq('id', runId)
-    .in('status', ['finalized', 'paid'])
-    .select('id')
-  if (flipErr) throw flipErr
-  if (!flipped || flipped.length === 0) {
-    throw new Error('This run is not finalized — nothing to reopen.')
-  }
-
-  // Reverse the recurring-deduction balance decrements made at finalization,
-  // so a reopen + re-finalize cycle never double-decrements a loan.
-  const { data: slips, error: slipErr } = await supabase
-    .from('payslips')
-    .select('deductions')
-    .eq('payroll_run_id', runId)
-  if (slipErr) throw slipErr
-
-  const byDeduction = new Map<string, number>()
-  for (const s of slips ?? []) {
-    for (const line of (s.deductions ?? []) as { code: string; amount: number; meta?: string }[]) {
-      if (line.code.startsWith('other:') && line.meta) {
-        byDeduction.set(line.meta, (byDeduction.get(line.meta) ?? 0) + line.amount)
-      }
-    }
-  }
-  for (const [id, amount] of byDeduction) {
-    const { data: ded } = await supabase
-      .from('recurring_deductions')
-      .select('balance')
-      .eq('id', id)
-      .maybeSingle()
-    if (ded && ded.balance !== null) {
-      const restored = round2(Number(ded.balance) + amount)
-      await supabase
-        .from('recurring_deductions')
-        .update({ balance: restored, active: restored > 0 })
-        .eq('id', id)
-    }
-  }
+  // Atomic DB RPC: flips finalized/paid -> draft and restores the loan
+  // balances this run had decremented, in one transaction. Manually paused
+  // deductions stay paused; only loans auto-deactivated at zero balance are
+  // re-activated.
+  const { error } = await supabase.rpc('reopen_payroll_run', { p_run: runId })
+  if (error) throw error
 }

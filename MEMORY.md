@@ -50,15 +50,49 @@ split); two of my own test vectors were wrong, not the code (SSS EC tier);
 nested React components caused remount bugs; RLS policies recursed until
 refactored to security-definer helpers.
 
+### 2026-08-24 — Verification round (user-requested double-check)
+
+**Did:** systematic verification of everything shipped: live DB probes
+confirmed every security fix landed (policies, triggers, function bodies,
+privileges); RLS simulated as a signed-in non-admin (all writes blocked, no
+payroll_runs/audit rows visible, statutory tables readable); deployed edge
+function diffed against the repo copy; tests/build re-run; then an
+independent code-review pass over the post-workflow-review commits.
+
+**Found and fixed (8 more real defects, mostly in the *fix* code itself):**
+finalize/reopen were non-atomic and non-idempotent → moved into atomic DB
+RPCs (`finalize_payroll_run` / `reopen_payroll_run` +
+`adjust_run_deduction_balances`); the co-admin guard was bypassable by
+demote-then-reset via the unrestricted profiles UPDATE policy → DB trigger
+`profiles_protect_admins` (also blocks removing the last active admin);
+`periodHalf` classified partial boundary-crossing periods as 'full'
+(double pay) → now throws for irregular semi-monthly periods; interior
+off-the-clock gaps beyond the break were never docked → charged as
+undertime; ND-in-OT was attributed by `min()` instead of chronology →
+attendance now computes `ndOtMinutes` from the OT tail; divisor-365 LWOP
+over rest days wasn't deducted → unified builtIn-aware unpaid-leave rule;
+reopen no longer un-pauses manually paused loans; defensive payslip
+run-info backfill added. 47 tests green. Migration
+`run_lifecycle_and_admin_protection` applied.
+
+**Lesson reinforced:** the reviewers' fixes needed reviewing too — the
+verification round found most of its defects in code written to fix the
+previous round's defects.
+
 ---
 
 ## Current deployed state (update when it changes)
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1):
-- All 8 migrations in `supabase/migrations/` are **applied** (verified via
+- All 9 migrations in `supabase/migrations/` are **applied** (verified via
   `list_migrations`; versions match filenames — latest:
-  `security_and_integrity_fixes`). Statutory versions, 2026 holidays, leave
-  types, and company settings (min wage ₱755, WO NCR-27) are **seeded**.
+  `run_lifecycle_and_admin_protection`). Statutory versions, 2026 holidays,
+  leave types, and company settings (min wage ₱755, WO NCR-27) are **seeded**.
+- Payroll finalize/reopen go through the atomic DB RPCs, never direct status
+  updates. Admin profiles are trigger-protected: to manage a departed
+  co-admin's account, the DB owner must temporarily
+  `alter table profiles disable trigger profiles_protect_admins;` in the SQL
+  editor (deliberate escape hatch — document any use in the audit trail).
 - Edge function **`admin-users` deployed at v2** (verify_jwt on; v2 adds the
   co-admin protection guard); repo copy at
   `supabase/functions/admin-users/index.ts` matches.

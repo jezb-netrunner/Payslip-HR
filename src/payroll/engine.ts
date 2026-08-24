@@ -200,10 +200,18 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       undertimeMin += d.undertimeMinutes
     }
     if (d.absent) absentDays += 1
-    // Leave flags exist on every covered day; only ordinary scheduled days
-    // translate into paid-leave credit / unpaid-leave deductions.
+    // Leave flags exist on every covered day. Paid-leave credit applies to
+    // ordinary scheduled days. Unpaid leave deducts every day the pay basis
+    // would otherwise cover: for monthly-paid, any day the divisor deems
+    // paid inside the rate (regular days always; holidays; rest days too
+    // under divisor 365); for daily-paid it is a statistic on scheduled days
+    // (no work already means no pay).
     if (d.onPaidLeave && d.dayType === 'regular') paidLeaveDays += 1
-    if (d.onUnpaidLeave && d.dayType === 'regular') unpaidLeaveDays += 1
+    if (d.onUnpaidLeave && !worked) {
+      if (employee.payType === 'monthly' ? builtIn > 0 : d.dayType === 'regular') {
+        unpaidLeaveDays += 1
+      }
+    }
 
     if (employee.payType === 'monthly') {
       if (worked) {
@@ -215,17 +223,15 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         else if (isRegularHolidayType(d.dayType)) holidayPremium += extra
       } else if (isRegularHolidayType(d.dayType)) {
         unworkedRegularHolidays += 1
-        if (d.onUnpaidLeave) {
-          // On leave without pay over the holiday: not entitled — deduct the
-          // day if the monthly rate would otherwise have covered it.
-          if (builtIn > 0) unpaidLeaveDays += 1
-        } else if (builtIn === 0) {
-          // Holiday on a day the divisor does NOT deem paid (e.g. a rest day
-          // under divisor 261): Art. 94 still grants 100% of the daily wage.
+        // On leave without pay over the holiday: not entitled — the general
+        // unpaid-leave rule above already deducts the day when the monthly
+        // rate covers it. Otherwise, a holiday on a day the divisor does NOT
+        // deem paid (e.g. a rest day under divisor 261) still earns 100% of
+        // the daily wage (Art. 94); a covered day is already paid inside the
+        // monthly rate — no extra line, no deduction.
+        if (!d.onUnpaidLeave && builtIn === 0) {
           holidayPremium += daily
         }
-        // builtIn > 0 and not on unpaid leave: already paid inside the
-        // monthly rate — no extra line, no deduction.
       }
     } else {
       // daily-paid: no work, no pay — each worked day is paid at its multiplier
@@ -251,10 +257,11 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       otPay += (d.otMinutes / 60) * hourly * otMultiplier(d.dayType)
     }
     if (worked && d.nightDiffMinutes > 0) {
-      // ND stacks on the applicable rate: night minutes that are also OT earn
-      // 10% of the OT rate. Attendance reports the two buckets independently;
-      // overlap is attributed to OT first (OT hours extend into the night).
-      const ndOt = Math.min(d.nightDiffMinutes, d.otMinutes)
+      // ND stacks on the applicable rate: night minutes inside the OT tail
+      // of the day earn 10% of the OT rate; attendance attributes the
+      // overlap chronologically (ndOtMinutes), so morning night-work inside
+      // the standard day is not mistaken for night overtime.
+      const ndOt = Math.min(d.ndOtMinutes ?? Math.min(d.nightDiffMinutes, d.otMinutes), d.nightDiffMinutes)
       const ndRegular = d.nightDiffMinutes - ndOt
       ndPay +=
         (ndRegular / 60) * hourly * settings.nightDiffRate * DAY_MULT[d.dayType] +

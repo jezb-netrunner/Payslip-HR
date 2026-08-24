@@ -115,6 +115,8 @@ export interface DayComputation {
   payableMinutes: number
   otMinutes: number
   nightDiffMinutes: number
+  /** Portion of nightDiffMinutes falling inside the OT tail of the day. */
+  ndOtMinutes: number
   lateMinutes: number
   undertimeMinutes: number
   absent: boolean
