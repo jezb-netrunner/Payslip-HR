@@ -105,8 +105,10 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1):
 - **GitHub Pages deployment** is wired via
   `.github/workflows/deploy-pages.yml` (build with `--base=/Payslip-HR/`,
   Router basename from `import.meta.env.BASE_URL`, `404.html` SPA fallback).
-  Triggers on `main` and the build branch; one-time repo setting: Pages
-  source = GitHub Actions. Site URL:
+  Deploys from `main` ONLY — the auto-created `github-pages` environment
+  rejects other branches (2-second no-runner failure), so ship by
+  fast-forwarding/merging `main`. Pages source = GitHub Actions (enabled by
+  the owner 2026-08-24; the workflow token cannot enable it itself). Site:
   https://jezb-netrunner.github.io/Payslip-HR/
 
 Known-open items (deliberate scope cuts, also in README disclaimers):
