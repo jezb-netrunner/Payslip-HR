@@ -112,40 +112,48 @@ applied; login codes were recoverable offline from the admin-readable
 email hash. Every DB/RPC error message was hidden behind generic "Failed"
 toasts (supabase-js error objects aren't `Error`s). See the lessons below.
 
+**Go-live (2026-10-20):** owner ran both migrations in the SQL editor;
+recorded them in the migration history, verified the live schema against
+the local replica, deployed `admin-users` v3, ran the security advisors.
+The `main` merge (front end) awaits the owner.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**Live ≠ repo since 2026-10-19.** The repo (branch
-`claude/trusting-dirac-fqodu6`) is multi-client; the live backend and the
-Pages site are still the single-company version. Ship all three together —
-the old front end breaks on the new schema and vice versa:
-1. apply `20261019120000_multi_client_schema.sql` then
-   `20261019120100_multi_client_security.sql` (MCP `apply_migration` needs
-   the owner to approve the destructive-statement prompt — see lesson; or
-   paste them into the SQL editor). Precondition re-checked 2026-10-20: no
-   employees / time entries / runs / payslips / leave rows exist, one
-   profile (the owner, role `admin` → becomes `company_admin`); the schema
-  migration now refuses to run if any HR/payroll rows exist. Afterwards
-   rename the repo files to the versions `list_migrations` reports, run the
-   security advisors;
-2. deploy edge function `admin-users` v3 (verify_jwt on);
-3. merge the branch to `main` (Pages deploys from `main` only).
+**Backend is multi-client since 2026-10-20; the Pages site is not yet.**
+The live site (`main`) still serves the old single-company front end,
+which does NOT work against the new schema — merging
+`claude/trusting-dirac-fqodu6` into `main` (owner's go-ahead pending) makes
+the live app usable again. Nothing else is outstanding for the backend.
 
-Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1), as of 2026-10-20:
-- Applied: the first 9 migrations (latest `20260824001426`
-  `run_lifecycle_and_admin_protection`). Statutory versions, 2026 holidays,
-  leave types and company settings are seeded. The multi-client migration
-  keeps statutory versions, turns the holidays into the national list and
-  the leave types into global templates (copied into each new client), and
-  drops `company_settings` — each client carries its own policy, including
-  minimum-wage region/rate (no default; set per client).
-- Edge function **`admin-users` v2** live (verify_jwt on); the repo copy is
-  v3 and does NOT match until step 2 above.
+Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-20:
+- **All 11 migrations applied.** The two multi-client ones were run by the
+  owner in the SQL editor (MCP could not — see lesson) and then recorded in
+  `supabase_migrations.schema_migrations` under the repo versions
+  `20261019120000 multi_client_schema` / `20261019120100
+  multi_client_security`. Verified with `supabase/tests/fingerprint.sql`:
+  tables, columns, constraints, indexes, policies, functions, grants and
+  triggers all match the local replica (function bodies arrived with CRLF
+  line endings from the paste — harmless). Data after migration: owner =
+  `company_admin`, 5 statutory versions, 9 global leave templates, 21
+  national 2026 holidays; `company_settings` gone; RLS on every table.
+  No clients, employees or payroll data yet; each client carries its own
+  policy incl. minimum-wage region/rate (no default).
+- Edge function **`admin-users` v3** live (verify_jwt on), deployed
+  2026-10-20; deployed source = repo copy.
+- Security advisors after the migration: 9 intentional WARNs (RLS helpers
+  `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
+  `current_employee_id` / `current_employee_entity_id` / `run_is_finalized`
+  and the RPCs `finalize_payroll_run` / `reopen_payroll_run` /
+  `review_time_correction` are executable by `authenticated` by design) and
+  "Leaked password protection disabled" (Auth dashboard setting, owner's
+  call).
 - Private storage buckets `punch-selfies` and `employee-photos` exist; after
   the migration nothing uses `punch-selfies` (empty; safe to delete).
-- **The owner's account exists** (created 2026-08-24, confirmed, role
-  `admin`). Never create additional accounts except through the app.
+- **The owner's account exists** (created 2026-08-24, confirmed; role
+  `company_admin` since the migration). Never create additional accounts
+  except through the app (Admin Users / employee Login tab).
 - To manage a departed co-admin's account the DB owner may need to disable
   the admin-protection trigger temporarily in the SQL editor (deliberate
   escape hatch — document any use in the audit trail).
@@ -312,7 +320,9 @@ Checklist: pin `search_path` on every function; trigger functions →
 run as table owner); RLS helpers → revoke `anon` only; intentional RPCs
 (`finalize_payroll_run` / `reopen_payroll_run` / `review_time_correction`,
 which check the caller's rights inside) keep authenticated EXECUTE by design
-and will WARN — leave them; `revoke_user_sessions` is service-role only.
+and will WARN — leave them, as will the RLS helpers under lint 0029
+("Signed-in users can execute SECURITY DEFINER function": they only report
+the caller's own access); `revoke_user_sessions` is service-role only.
 
 ### Employee logins: code → synthetic email, provisioned by the admin-users edge function
 
@@ -424,17 +434,21 @@ Hit in `EmployeeDetail.tsx` (Profile/Career/Comp/Account tabs); fixed by
 hoisting to top level with `useToast()` inside each. Why it mattered: forms
 silently losing in-progress edits whenever the parent re-rendered.
 
-### Supabase MCP waits for a human on destructive SQL
+### Supabase MCP can't run destructive SQL from cloud sessions — use the SQL editor
 
-> `apply_migration` / `execute_sql` hold any statement containing DROP (even inside a larger migration) for the user to confirm in their client; unattended, the call times out after ~60 s and nothing is applied.
+> The Supabase MCP asks for a form confirmation ("elicitation") before SQL it detects as destructive (any DROP, even `drop table if exists` on a missing table); that form never reaches the user in a Claude Code cloud session, so `apply_migration` / `execute_sql` time out after 60 s and nothing is applied — approving the tool call itself is not that confirmation.
 
-Seen 2026-10-19 with the multi-client migrations (they drop the old policies,
-punch RPCs and `company_settings`). Non-destructive DDL and reads go through
-immediately. Verify nothing landed after a timeout (`list_migrations`,
-`to_regclass`) — it is all-or-nothing. Plan for it: validate locally first
-(next lesson), then apply while the owner is present to approve, or hand
-them the files for the SQL editor. Why it mattered: a "hung" migration looks
-like a broken database; it is just an unanswered prompt.
+Seen 2026-10-19/20 (three attempts; documented by Supabase: "SQL
+confirmations do not appear in your MCP client"). Reads, INSERTs and
+non-destructive DDL work. What worked: the owner pasted the migration files
+into the dashboard SQL editor (its "Potential issues" dialog: choose "Run
+and enable RLS" when a file creates tables), then the session recorded them
+in `supabase_migrations.schema_migrations` (version = repo file prefix, so
+no renaming) and verified with `supabase/tests/fingerprint.sql` against the
+local replica. Don't evade the confirmation (e.g. dynamic SQL to hide DROP);
+`skip_elicitations` in the connector URL exists but removes a safety check.
+Why it mattered: a "hung" migration looks like a broken database; it is an
+unreachable prompt, and the all-or-nothing timeout leaves nothing behind.
 
 ### Test migrations and RLS on a local Postgres replica first
 
