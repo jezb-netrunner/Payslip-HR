@@ -8,7 +8,7 @@ import type { Employee, Entity, Holiday, LeaveRequest, LeaveType } from '../../l
 import { useEntity } from '../../lib/entity'
 import { errorMessage } from '../../lib/errors'
 import { fmtDate, fullName, plural } from '../../lib/format'
-import { leaveDaysInYear, leaveWorkdays } from '../../lib/leave'
+import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 
@@ -579,7 +579,10 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
           </thead>
           <tbody className="divide-y divide-slate-100">
             {types.map((t) => {
-              const credit = (values[t.id] ?? '') === '' ? Number(t.default_annual_days) : Number(values[t.id])
+              const set = (values[t.id] ?? '') !== ''
+              const credit = set ? Number(values[t.id]) : Number(t.default_annual_days)
+              // event-based statutory leaves and unpaid types are not a yearly balance until HR sets one
+              const balance = t.paid && showsBalance(t, set ? Number(values[t.id]) : undefined)
               const u = used[t.id] ?? 0
               return (
                 <tr key={t.id}>
@@ -594,14 +597,16 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
                       min={0}
                       step="0.5"
                       aria-label={`${t.name} credits for ${year}`}
-                      placeholder={`default ${Number(t.default_annual_days)}`}
+                      placeholder={showsBalance(t, undefined) ? `default ${Number(t.default_annual_days)}` : 'per event'}
                       value={values[t.id] ?? ''}
                       onChange={(e) => setValues({ ...values, [t.id]: e.target.value })}
                       className="w-28"
                     />
                   </Td>
                   <Td className="text-right">{u}</Td>
-                  <Td className={`text-right font-semibold ${credit - u < 0 ? 'text-rose-600' : 'text-slate-700'}`}>{credit - u}</Td>
+                  <Td className={`text-right font-semibold ${balance && credit - u < 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                    {balance ? credit - u : '—'}
+                  </Td>
                 </tr>
               )
             })}
