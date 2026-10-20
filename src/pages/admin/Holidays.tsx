@@ -129,7 +129,7 @@ export default function Holidays() {
                   <Td className="text-xs text-slate-500">{kindLabels[h.kind].pay}</Td>
                   <Td>
                     {canEdit(h) && (
-                      <button onClick={() => remove(h)} className="text-slate-300 hover:text-rose-500">
+                      <button type="button" onClick={() => remove(h)} className="text-slate-300 hover:text-rose-500" title="Delete" aria-label={`Delete ${h.name}`}>
                         <Trash2 className="size-4" />
                       </button>
                     )}

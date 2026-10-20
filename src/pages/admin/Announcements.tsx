@@ -84,26 +84,26 @@ function AnnouncementList({ entity }: { entity: Entity }) {
             return (
               <Card key={a.id}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex gap-3">
+                  <div className="flex min-w-0 gap-3">
                     <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent-50">
                       {a.pinned ? <Pin className="size-4 text-accent-600" /> : <Megaphone className="size-4 text-accent-600" />}
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-slate-800">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-bold text-slate-800">
                         {a.title} <Badge tone={st.tone}>{st.label}</Badge>
                       </p>
                       <p className="text-xs text-slate-400">
                         {fmtDateTime(a.published_at)}
                         {a.expires_at && ` · until ${fmtDateTime(a.expires_at)}`}
                       </p>
-                      <p className="mt-2 whitespace-pre-line text-sm text-slate-600">{a.body}</p>
+                      <p className="mt-2 whitespace-pre-line break-words text-sm text-slate-600">{a.body}</p>
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    <button onClick={() => setEditing(a)} className="text-slate-400 hover:text-brand-700" title="Edit">
+                    <button type="button" onClick={() => setEditing(a)} className="text-slate-400 hover:text-brand-700" title="Edit" aria-label={`Edit ${a.title}`}>
                       <Pencil className="size-4" />
                     </button>
-                    <button onClick={() => remove(a)} className="text-slate-300 hover:text-rose-500" title="Delete">
+                    <button type="button" onClick={() => remove(a)} className="text-slate-300 hover:text-rose-500" title="Delete" aria-label={`Delete ${a.title}`}>
                       <Trash2 className="size-4" />
                     </button>
                   </div>
@@ -182,7 +182,7 @@ function EditModal({
         <Field label="Message">
           <Textarea rows={6} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Publish at (PH time)">
             <Input type="datetime-local" value={f.published} onChange={(e) => setF({ ...f, published: e.target.value })} />
           </Field>

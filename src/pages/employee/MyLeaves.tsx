@@ -25,30 +25,38 @@ export default function MyLeaves() {
 
   const year = Number(todayManila().slice(0, 4))
 
+  const [loadError, setLoadError] = useState('')
+
   const load = useCallback(async () => {
     if (!employee) return
-    const [{ data: t }, { data: r }, { data: ents }, hols] = await Promise.all([
-      supabase.from('leave_types').select('*').eq('active', true).order('code'),
-      supabase
-        .from('leave_requests')
-        .select('*')
-        .eq('employee_id', employee.id)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('employee_leave_entitlements')
-        .select('*')
-        .eq('employee_id', employee.id)
-        .eq('year', year),
-      // this year and next: leave can be filed ahead and across New Year
-      getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year + 1}-12-31`),
-    ])
-    setHolidays(hols)
-    setTypes((t ?? []) as LeaveType[])
-    setRequests((r ?? []) as LeaveRequest[])
-    const map: Record<string, number> = {}
-    for (const e of ents ?? []) map[e.leave_type_id as string] = Number(e.days)
-    setEntitlements(map)
-    setLoading(false)
+    setLoadError('')
+    try {
+      const [{ data: t }, { data: r }, { data: ents }, hols] = await Promise.all([
+        supabase.from('leave_types').select('*').eq('active', true).order('code'),
+        supabase
+          .from('leave_requests')
+          .select('*')
+          .eq('employee_id', employee.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('employee_leave_entitlements')
+          .select('*')
+          .eq('employee_id', employee.id)
+          .eq('year', year),
+        // this year and next: leave can be filed ahead and across New Year
+        getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year + 1}-12-31`),
+      ])
+      setHolidays(hols)
+      setTypes((t ?? []) as LeaveType[])
+      setRequests((r ?? []) as LeaveRequest[])
+      const map: Record<string, number> = {}
+      for (const e of ents ?? []) map[e.leave_type_id as string] = Number(e.days)
+      setEntitlements(map)
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Failed to load your leaves'))
+    } finally {
+      setLoading(false)
+    }
   }, [employee, year])
 
   useEffect(() => {
@@ -92,17 +100,30 @@ export default function MyLeaves() {
   }
 
   async function cancel(id: string) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('leave_requests')
       .update({ status: 'cancelled' })
       .eq('id', id)
-    if (error) toast('error', error.message)
-    else {
-      toast('success', 'Request cancelled.')
-      await load()
-    }
+      .eq('status', 'pending')
+      .select('id')
+    if (error) toast('error', errorMessage(error, 'Could not cancel the request'))
+    else if (!data || data.length === 0) toast('error', 'This request was already reviewed — it can no longer be cancelled.')
+    else toast('success', 'Request cancelled.')
+    await load()
   }
 
+  if (loadError) {
+    return (
+      <Card>
+        <p className="text-sm text-rose-600">
+          {loadError}{' '}
+          <button type="button" onClick={load} className="font-semibold underline">
+            Try again
+          </button>
+        </p>
+      </Card>
+    )
+  }
   if (loading || !employee) return <Spinner />
 
   const usedByType: Record<string, number> = {}
@@ -159,16 +180,16 @@ export default function MyLeaves() {
               const type = types.find((t) => t.id === r.leave_type_id)
               return (
                 <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-slate-700">
                       {type?.name ?? 'Leave'} · {plural(Number(r.days), 'day')}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="break-words text-xs text-slate-500">
                       {fmtDate(r.start_date)} → {fmtDate(r.end_date)}
                       {r.reason ? ` · ${r.reason}` : ''}
                     </p>
                     {r.review_notes && (
-                      <p className="text-xs italic text-slate-400">Admin: {r.review_notes}</p>
+                      <p className="break-words text-xs italic text-slate-400">Admin: {r.review_notes}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2">

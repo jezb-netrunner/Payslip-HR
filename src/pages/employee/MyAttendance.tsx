@@ -88,15 +88,16 @@ export default function MyAttendance() {
   }
 
   async function cancelRequest(id: string) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('time_correction_requests')
       .update({ status: 'cancelled' })
       .eq('id', id)
+      .eq('status', 'pending')
+      .select('id')
     if (error) toast('error', errorMessage(error, 'Could not cancel the request'))
-    else {
-      toast('success', 'Request cancelled.')
-      await load()
-    }
+    else if (!data || data.length === 0) toast('error', 'This request was already reviewed — it can no longer be cancelled.')
+    else toast('success', 'Request cancelled.')
+    await load()
   }
 
   if (!employee) return <Spinner />
@@ -186,7 +187,7 @@ export default function MyAttendance() {
               <div className="divide-y divide-slate-100">
                 {requests.map((r) => (
                   <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm font-semibold text-slate-700">
                         {fmtDate(r.work_date)}{' '}
                         <span className="font-normal text-slate-500">
@@ -194,9 +195,9 @@ export default function MyAttendance() {
                           {r.requested_clock_out ? fmtTime(r.requested_clock_out) : '—'}
                         </span>
                       </p>
-                      <p className="text-xs text-slate-500">{r.reason}</p>
+                      <p className="break-words text-xs text-slate-500">{r.reason}</p>
                       {r.review_notes && (
-                        <p className="text-xs italic text-slate-400">Admin: {r.review_notes}</p>
+                        <p className="break-words text-xs italic text-slate-400">Admin: {r.review_notes}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
@@ -238,7 +239,7 @@ export default function MyAttendance() {
               onChange={(e) => setForm({ ...form, work_date: e.target.value })}
             />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Correct clock in">
               <Input
                 type="datetime-local"

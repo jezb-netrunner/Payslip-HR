@@ -34,10 +34,10 @@ export default function MyAnnouncements() {
                 <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent-50">
                   {a.pinned ? <Pin className="size-4 text-accent-600" /> : <Megaphone className="size-4 text-accent-600" />}
                 </div>
-                <div>
-                  <p className="text-sm font-bold text-slate-800">{a.title}</p>
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-bold text-slate-800">{a.title}</p>
                   <p className="text-xs text-slate-400">{fmtDateTime(a.published_at)}</p>
-                  <p className="mt-2 whitespace-pre-line text-sm text-slate-600">{a.body}</p>
+                  <p className="mt-2 whitespace-pre-line break-words text-sm text-slate-600">{a.body}</p>
                 </div>
               </div>
             </Card>

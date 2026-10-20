@@ -1,10 +1,12 @@
 // Admin-entered time in / time out. Two grids over the same row editor:
 // one date for every employee (daily logbook entry), or one employee over a
-// date range (a DTR for the cutoff). Times are Manila wall time; an out time
-// earlier than the in time is the next morning (overnight shift). Paid
-// periods are locked by the database.
+// date range (a DTR for the cutoff). Each row is one in/out pair; a split
+// shift adds pairs to the day. Times are Manila wall time; an out time
+// earlier than the in time is the next morning (overnight shift). Approved
+// leaves and holidays are shown and skipped by Fill. Paid periods are
+// locked by the database.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, Lock, Save, Wand2, XCircle } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, NoClient, PageHeader, Select, Spinner, TableShell, Tabs, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
@@ -46,16 +48,25 @@ export default function Timesheets() {
 
 // ---------- shared row model ----------
 
+/** An approved leave covering a row's date. */
+interface LeaveMark {
+  name: string
+  paid: boolean
+}
+
+/** One time in/out pair. A day can hold several (split shift). */
 interface Row {
   key: string
+  /** employee|date — paid-period locks and leaves are per day */
+  dayKey: string
   employee: Employee
   date: string
   entry: TimeEntry | null
-  extra: TimeEntry[]
   timeIn: string
   timeOut: string
   locked: boolean
   holiday?: Holiday
+  leave?: LeaveMark
 }
 
 function rowKey(employeeId: string, date: string) {
@@ -64,6 +75,11 @@ function rowKey(employeeId: string, date: string) {
 
 function isScheduled(e: Employee, date: string) {
   return e.work_schedule.days.includes(isoWeekday(date))
+}
+
+/** Holidays nobody is expected to work: a blank day there is not an absence. */
+function isDayOff(h: Holiday | undefined): boolean {
+  return !!h && h.kind !== 'special_working'
 }
 
 /** Minutes worked (before break) for an in/out pair; out ≤ in = next day. */
@@ -75,7 +91,7 @@ function spanMinutes(timeIn: string, timeOut: string): number | null {
 }
 
 async function lockedKeys(entityId: string, start: string, end: string): Promise<Set<string>> {
-  const { data: runs } = await supabase
+  const { data: runs, error } = await supabase
     .from('payroll_runs')
     .select('id, period_start, period_end')
     .eq('entity_id', entityId)
@@ -83,12 +99,14 @@ async function lockedKeys(entityId: string, start: string, end: string): Promise
     .in('run_type', ['regular', 'special', 'final_pay'])
     .lte('period_start', end)
     .gte('period_end', start)
+  if (error) throw error
   const out = new Set<string>()
   if (!runs?.length) return out
-  const { data: slips } = await supabase
+  const { data: slips, error: slipErr } = await supabase
     .from('payslips')
     .select('employee_id, payroll_run_id')
     .in('payroll_run_id', runs.map((r) => r.id))
+  if (slipErr) throw slipErr
   for (const s of slips ?? []) {
     const r = runs.find((x) => x.id === s.payroll_run_id)
     if (!r) continue
@@ -99,33 +117,76 @@ async function lockedKeys(entityId: string, start: string, end: string): Promise
   return out
 }
 
+/** Approved leaves in a date range, by employee|date. */
+async function leaveMarks(entityId: string, start: string, end: string, employeeId?: string): Promise<Map<string, LeaveMark>> {
+  let q = supabase
+    .from('leave_requests')
+    .select('employee_id, start_date, end_date, leave_types(name, paid)')
+    .eq('entity_id', entityId)
+    .eq('status', 'approved')
+    .lte('start_date', end)
+    .gte('end_date', start)
+  if (employeeId) q = q.eq('employee_id', employeeId)
+  const { data, error } = await q
+  if (error) throw error
+  const out = new Map<string, LeaveMark>()
+  for (const l of (data ?? []) as unknown as { employee_id: string; start_date: string; end_date: string; leave_types: { name: string; paid: boolean } | null }[]) {
+    for (const d of eachDate(l.start_date > start ? l.start_date : start, l.end_date < end ? l.end_date : end)) {
+      out.set(rowKey(l.employee_id, d), { name: l.leave_types?.name ?? 'Leave', paid: l.leave_types?.paid ?? false })
+    }
+  }
+  return out
+}
+
 function buildRows(
   pairs: { employee: Employee; date: string }[],
   entries: TimeEntry[],
   locked: Set<string>,
   holidays: Holiday[],
+  leaves: Map<string, LeaveMark>,
 ): Row[] {
   const byKey = new Map<string, TimeEntry[]>()
   for (const t of entries) {
     const k = rowKey(t.employee_id, t.work_date)
     byKey.set(k, [...(byKey.get(k) ?? []), t].sort((a, b) => a.clock_in.localeCompare(b.clock_in)))
   }
-  return pairs.map(({ employee, date }) => {
-    const k = rowKey(employee.id, date)
-    const list = byKey.get(k) ?? []
-    const entry = list[0] ?? null
-    return {
-      key: k,
+  return pairs.flatMap(({ employee, date }): Row[] => {
+    const dayKey = rowKey(employee.id, date)
+    const list = byKey.get(dayKey) ?? []
+    const base = {
+      dayKey,
       employee,
       date,
-      entry,
-      extra: list.slice(1),
-      timeIn: entry ? manilaHHMM(entry.clock_in) : '',
-      timeOut: entry?.clock_out ? manilaHHMM(entry.clock_out) : '',
-      locked: locked.has(k),
+      locked: locked.has(dayKey),
       holiday: holidays.find((h) => h.holiday_date === date),
+      leave: leaves.get(dayKey),
     }
+    if (list.length === 0) return [{ ...base, key: `${dayKey}|new`, entry: null, timeIn: '', timeOut: '' }]
+    return list.map((entry) => ({
+      ...base,
+      key: `${dayKey}|${entry.id}`,
+      entry,
+      timeIn: manilaHHMM(entry.clock_in),
+      timeOut: entry.clock_out ? manilaHHMM(entry.clock_out) : '',
+    }))
   })
+}
+
+/** A blank extra pair for the same day, right after that day's last row. */
+function withExtraPair(rows: Row[], after: Row): Row[] {
+  const last = rows.map((r) => r.dayKey).lastIndexOf(after.dayKey)
+  const extra: Row = { ...after, key: `${after.dayKey}|new${Date.now()}`, entry: null, timeIn: '', timeOut: '' }
+  return [...rows.slice(0, last + 1), extra, ...rows.slice(last + 1)]
+}
+
+/** Fill blank rows of scheduled working days with the shift (not leaves, holidays or paid days). */
+function filledWithSchedule(rows: Row[]): Row[] {
+  const daysWithTimes = new Set(rows.filter((r) => r.timeIn || r.timeOut).map((r) => r.dayKey))
+  return rows.map((r) =>
+    !r.locked && !daysWithTimes.has(r.dayKey) && !r.leave && !isDayOff(r.holiday) && isScheduled(r.employee, r.date)
+      ? { ...r, timeIn: r.employee.work_schedule.start, timeOut: r.employee.work_schedule.end }
+      : r,
+  )
 }
 
 /**
@@ -145,6 +206,12 @@ function changed(r: Row): boolean {
   const origIn = r.entry ? manilaHHMM(r.entry.clock_in) : ''
   const origOut = r.entry?.clock_out ? manilaHHMM(r.entry.clock_out) : ''
   return r.timeIn !== origIn || r.timeOut !== origOut
+}
+
+/** Leaving a page or switching date/employee drops unsaved edits: ask first. */
+function discardOk(rows: Row[]): boolean {
+  const dirty = rows.filter(changed).length
+  return dirty === 0 || window.confirm(`Discard ${plural(dirty, 'unsaved change')}?`)
 }
 
 /** Persist edited rows; returns the number saved and per-row errors. */
@@ -185,25 +252,47 @@ async function saveRows(rows: Row[]): Promise<{ saved: number; errors: string[] 
       }
       saved += 1
     } catch (err) {
-      errors.push(`${label}: ${errorMessage(err, 'failed')}`)
+      const msg = errorMessage(err, 'failed')
+      errors.push(
+        `${label}: ${
+          /one_open_per_employee/.test(msg)
+            ? 'only one entry per employee can be left without a time out — enter the time out'
+            : msg
+        }`,
+      )
     }
   }
   return { saved, errors }
 }
 
-function RowCells({ row, onChange }: { row: Row; onChange: (patch: Partial<Row>) => void }) {
+function RowCells({
+  row,
+  first,
+  last,
+  onChange,
+  onAddPair,
+}: {
+  row: Row
+  /** first pair of its day */
+  first: boolean
+  /** last pair of its day */
+  last: boolean
+  onChange: (patch: Partial<Row>) => void
+  onAddPair: () => void
+}) {
   const mins = spanMinutes(row.timeIn, row.timeOut)
   const net = mins === null ? null : mins >= 360 ? Math.max(0, mins - row.employee.work_schedule.break_minutes) : mins
   const inNext = !!row.timeIn && timeInNextDay(row)
   const overnight = !!row.timeIn && !!row.timeOut && (inNext || hhmmToMinutes(row.timeOut) <= hhmmToMinutes(row.timeIn))
-  const disabled = row.locked || row.extra.length > 0
+  const label = `${fullName(row.employee)} ${fmtDate(row.date)}`
   return (
     <>
       <Td>
         <Input
           type="time"
+          aria-label={`Time in, ${label}`}
           value={row.timeIn}
-          disabled={disabled}
+          disabled={row.locked}
           onChange={(e) => onChange({ timeIn: e.target.value })}
           className={`w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
         />
@@ -212,8 +301,9 @@ function RowCells({ row, onChange }: { row: Row; onChange: (patch: Partial<Row>)
       <Td>
         <Input
           type="time"
+          aria-label={`Time out, ${label}`}
           value={row.timeOut}
-          disabled={disabled}
+          disabled={row.locked}
           onChange={(e) => onChange({ timeOut: e.target.value })}
           className={`w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
         />
@@ -223,30 +313,39 @@ function RowCells({ row, onChange }: { row: Row; onChange: (patch: Partial<Row>)
         {net === null ? (row.timeIn && !row.timeOut ? <Badge tone="amber">no time out</Badge> : '—') : fmtHours(net)}
       </Td>
       <Td>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 whitespace-nowrap">
           {row.locked ? (
             <span className="flex items-center gap-1 text-[11px] text-slate-400" title="Paid in a finalized payroll run — reopen the run to edit">
               <Lock className="size-3.5" /> paid
             </span>
-          ) : row.extra.length > 0 ? (
-            <span className="text-[11px] text-amber-700">
-              split shift: +{row.extra.length} entr{row.extra.length > 1 ? 'ies' : 'y'} (
-              {row.extra.map((x) => `${manilaHHMM(x.clock_in)}–${x.clock_out ? manilaHHMM(x.clock_out) : '?'}`).join(', ')})
-            </span>
           ) : (
             <>
-              <button
-                onClick={() => onChange({ timeIn: row.employee.work_schedule.start, timeOut: row.employee.work_schedule.end })}
-                className="text-[11px] font-semibold text-brand-600 hover:text-brand-800"
-              >
-                Schedule
-              </button>
+              {first && last && (
+                <button
+                  type="button"
+                  onClick={() => onChange({ timeIn: row.employee.work_schedule.start, timeOut: row.employee.work_schedule.end })}
+                  className="text-[11px] font-semibold text-brand-600 hover:text-brand-800"
+                >
+                  Schedule
+                </button>
+              )}
               {(row.timeIn || row.timeOut) && (
                 <button
+                  type="button"
                   onClick={() => onChange({ timeIn: '', timeOut: '' })}
                   className="text-[11px] font-semibold text-slate-400 hover:text-rose-600"
                 >
                   Clear
+                </button>
+              )}
+              {last && (row.timeIn || row.entry) && (
+                <button
+                  type="button"
+                  onClick={onAddPair}
+                  title="Add another time in/out for this day (split shift)"
+                  className="text-[11px] font-semibold text-brand-600 hover:text-brand-800"
+                >
+                  + pair
                 </button>
               )}
             </>
@@ -257,6 +356,35 @@ function RowCells({ row, onChange }: { row: Row; onChange: (patch: Partial<Row>)
   )
 }
 
+/** Day notes shown next to a row: approved leave, holiday, rest day. */
+function DayBadges({ row, showHoliday }: { row: Row; showHoliday: boolean }) {
+  return (
+    <>
+      {!isScheduled(row.employee, row.date) && <Badge tone="slate">rest day</Badge>}
+      {showHoliday && row.holiday && (
+        <Badge tone={row.holiday.kind === 'regular' ? 'red' : 'amber'}>{row.holiday.name}</Badge>
+      )}
+      {row.leave && (
+        <Badge tone="violet">
+          {row.leave.name}
+          {row.leave.paid ? '' : ' (unpaid)'}
+        </Badge>
+      )}
+    </>
+  )
+}
+
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">
+      Couldn't load attendance: {message}{' '}
+      <button type="button" onClick={onRetry} className="font-semibold underline">
+        Try again
+      </button>
+    </div>
+  )
+}
+
 // ---------- daily sheet: every employee, one date ----------
 
 function DailySheet({ entity }: { entity: Entity }) {
@@ -264,20 +392,35 @@ function DailySheet({ entity }: { entity: Entity }) {
   const [date, setDate] = useState(todayManila())
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [busy, setBusy] = useState(false)
   const [onlyScheduled, setOnlyScheduled] = useState(false)
+  // only the latest request may fill the grid: an older response arriving
+  // last would put one day's rows under another day's date
+  const seq = useRef(0)
 
   const load = useCallback(async () => {
+    const my = ++seq.current
     setLoading(true)
-    const [emps, { data: ent }, locked, hols] = await Promise.all([
-      getEmployees(entity.id),
-      supabase.from('time_entries').select('*').eq('entity_id', entity.id).eq('work_date', date),
-      lockedKeys(entity.id, date, date),
-      getHolidaysBetween(entity.id, date, date),
-    ])
-    const active = emps.filter((e) => e.hire_date <= date && isActiveOn(e, date))
-    setRows(buildRows(active.map((employee) => ({ employee, date })), (ent ?? []) as TimeEntry[], locked, hols))
-    setLoading(false)
+    setLoadError('')
+    setRows([])
+    try {
+      const [emps, { data: ent, error: entErr }, locked, hols, leaves] = await Promise.all([
+        getEmployees(entity.id),
+        supabase.from('time_entries').select('*').eq('entity_id', entity.id).eq('work_date', date),
+        lockedKeys(entity.id, date, date),
+        getHolidaysBetween(entity.id, date, date),
+        leaveMarks(entity.id, date, date),
+      ])
+      if (entErr) throw entErr
+      if (my !== seq.current) return
+      const active = emps.filter((e) => e.hire_date <= date && isActiveOn(e, date))
+      setRows(buildRows(active.map((employee) => ({ employee, date })), (ent ?? []) as TimeEntry[], locked, hols, leaves))
+    } catch (err) {
+      if (my === seq.current) setLoadError(errorMessage(err, 'Failed to load'))
+    } finally {
+      if (my === seq.current) setLoading(false)
+    }
   }, [entity.id, date])
 
   useEffect(() => {
@@ -287,15 +430,8 @@ function DailySheet({ entity }: { entity: Entity }) {
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)))
   const shown = rows.filter((r) => !onlyScheduled || isScheduled(r.employee, date))
   const dirty = rows.filter(changed).length
-
-  function fillScheduled() {
-    setRows((rs) =>
-      rs.map((r) =>
-        !r.locked && !r.extra.length && !r.timeIn && !r.timeOut && isScheduled(r.employee, date)
-          ? { ...r, timeIn: r.employee.work_schedule.start, timeOut: r.employee.work_schedule.end }
-          : r,
-      ),
-    )
+  const goTo = (d: string) => {
+    if (d && d !== date && discardOk(rows)) setDate(d)
   }
 
   async function save() {
@@ -303,7 +439,7 @@ function DailySheet({ entity }: { entity: Entity }) {
     const { saved, errors } = await saveRows(rows)
     setBusy(false)
     if (errors.length) toast('error', errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ` (+${errors.length - 3} more)` : ''))
-    if (saved) toast('success', `Saved ${saved} row/s (audit-logged).`)
+    if (saved) toast('success', `Saved ${plural(saved, 'row')} (audit-logged).`)
     await load()
   }
 
@@ -313,32 +449,37 @@ function DailySheet({ entity }: { entity: Entity }) {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <Field label="Work date">
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-44" />
+            <Input type="date" value={date} onChange={(e) => goTo(e.target.value)} className="w-44" />
           </Field>
           <div className="flex gap-1 pb-0.5">
-            <Button variant="ghost" onClick={() => setDate(addDays(date, -1))}>‹ Prev</Button>
-            <Button variant="ghost" onClick={() => setDate(addDays(date, 1))}>Next ›</Button>
+            <Button variant="ghost" onClick={() => goTo(addDays(date, -1))}>‹ Prev</Button>
+            <Button variant="ghost" onClick={() => goTo(addDays(date, 1))}>Next ›</Button>
           </div>
           <label className="flex items-center gap-2 pb-2 text-sm text-slate-600">
             <input type="checkbox" checked={onlyScheduled} onChange={(e) => setOnlyScheduled(e.target.checked)} className="rounded border-slate-300" />
             Scheduled today only
           </label>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={fillScheduled}>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" disabled={loading} onClick={() => setRows(filledWithSchedule)}>
             <Wand2 className="size-4" /> Fill scheduled with shift times
           </Button>
-          <Button disabled={busy || dirty === 0} onClick={save}>
+          <Button disabled={busy || loading || dirty === 0} onClick={save}>
             <Save className="size-4" /> {busy ? 'Saving…' : `Save${dirty ? ` (${dirty})` : ''}`}
           </Button>
         </div>
       </div>
       {holiday && (
         <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {fmtDate(date)} is {holiday.name} ({holiday.kind.replaceAll('_', ' ')}) — work today earns holiday premiums.
+          {fmtDate(date)} is {holiday.name} ({holiday.kind.replaceAll('_', ' ')}).{' '}
+          {isDayOff(holiday)
+            ? 'Fill skips it: enter times only for those who actually worked — work today earns holiday premiums.'
+            : 'A working holiday: regular pay for work today.'}
         </p>
       )}
-      {loading ? (
+      {loadError ? (
+        <LoadError message={loadError} onRetry={load} />
+      ) : loading ? (
         <Spinner />
       ) : shown.length === 0 ? (
         <EmptyState title="No employees" sub="Nobody is employed on this date." />
@@ -355,27 +496,47 @@ function DailySheet({ entity }: { entity: Entity }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {shown.map((r) => (
-              <tr key={r.key} className={r.locked ? 'bg-slate-50/70' : ''}>
-                <Td>
-                  <p className="font-semibold text-slate-800">{fullName(r.employee)}</p>
-                  <p className="text-xs text-slate-400">{r.employee.employee_no}</p>
-                </Td>
-                <Td className="text-xs">
-                  {isScheduled(r.employee, date) ? (
-                    `${r.employee.work_schedule.start}–${r.employee.work_schedule.end}`
-                  ) : (
-                    <Badge tone="slate">rest day</Badge>
-                  )}
-                </Td>
-                <RowCells row={r} onChange={(p) => patch(r.key, p)} />
-              </tr>
-            ))}
+            {shown.map((r, i) => {
+              const first = shown[i - 1]?.dayKey !== r.dayKey
+              const last = shown[i + 1]?.dayKey !== r.dayKey
+              return (
+                <tr key={r.key} className={r.locked ? 'bg-slate-50/70' : ''}>
+                  <Td>
+                    {first ? (
+                      <>
+                        <p className="font-semibold text-slate-800">{fullName(r.employee)}</p>
+                        <p className="text-xs text-slate-400">{r.employee.employee_no}</p>
+                      </>
+                    ) : (
+                      <p className="pl-3 text-xs text-slate-400">↳ another pair</p>
+                    )}
+                  </Td>
+                  <Td className="text-xs">
+                    {first && (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {isScheduled(r.employee, date) && (
+                          <span className="whitespace-nowrap">{`${r.employee.work_schedule.start}–${r.employee.work_schedule.end}`}</span>
+                        )}
+                        <DayBadges row={r} showHoliday={false} />
+                      </div>
+                    )}
+                  </Td>
+                  <RowCells
+                    row={r}
+                    first={first}
+                    last={last}
+                    onChange={(p) => patch(r.key, p)}
+                    onAddPair={() => setRows((rs) => withExtraPair(rs, r))}
+                  />
+                </tr>
+              )
+            })}
           </tbody>
         </TableShell>
       )}
       <p className="mt-3 text-[11px] text-slate-400">
-        Leave a scheduled day blank for an absence (or file the employee's leave). Every change is audit-logged.
+        Leave a scheduled day blank for an absence (or file the employee's leave). Use “+ pair” for a split shift.
+        Every change is audit-logged.
       </p>
     </Card>
   )
@@ -391,31 +552,49 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
   const [to, setTo] = useState(todayManila())
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const [busy, setBusy] = useState(false)
+  const seq = useRef(0)
 
-  useEffect(() => {
-    getEmployees(entity.id).then((emps) => {
+  const loadEmployees = useCallback(async () => {
+    setLoadError('')
+    try {
+      const emps = await getEmployees(entity.id)
       setEmployees(emps)
       setEmployeeId((cur) => cur || emps.find((e) => isActiveOn(e, todayManila()))?.id || '')
-    })
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Failed to load employees'))
+    }
   }, [entity.id])
+
+  useEffect(() => {
+    loadEmployees()
+  }, [loadEmployees])
 
   const employee = useMemo(() => employees.find((e) => e.id === employeeId) ?? null, [employees, employeeId])
 
   const load = useCallback(async () => {
-    if (!employee || to < from) {
-      setRows([])
-      return
-    }
+    const my = ++seq.current
+    setRows([])
+    if (!employee || to < from) return
     setLoading(true)
-    const [{ data: ent }, locked, hols] = await Promise.all([
-      supabase.from('time_entries').select('*').eq('employee_id', employee.id).gte('work_date', from).lte('work_date', to),
-      lockedKeys(entity.id, from, to),
-      getHolidaysBetween(entity.id, from, to),
-    ])
-    const dates = eachDate(from, to).filter((d) => d >= employee.hire_date && isActiveOn(employee, d))
-    setRows(buildRows(dates.map((date) => ({ employee, date })), (ent ?? []) as TimeEntry[], locked, hols))
-    setLoading(false)
+    setLoadError('')
+    try {
+      const [{ data: ent, error: entErr }, locked, hols, leaves] = await Promise.all([
+        supabase.from('time_entries').select('*').eq('employee_id', employee.id).gte('work_date', from).lte('work_date', to),
+        lockedKeys(entity.id, from, to),
+        getHolidaysBetween(entity.id, from, to),
+        leaveMarks(entity.id, from, to, employee.id),
+      ])
+      if (entErr) throw entErr
+      if (my !== seq.current) return
+      const dates = eachDate(from, to).filter((d) => d >= employee.hire_date && isActiveOn(employee, d))
+      setRows(buildRows(dates.map((date) => ({ employee, date })), (ent ?? []) as TimeEntry[], locked, hols, leaves))
+    } catch (err) {
+      if (my === seq.current) setLoadError(errorMessage(err, 'Failed to load'))
+    } finally {
+      if (my === seq.current) setLoading(false)
+    }
   }, [employee, from, to, entity.id])
 
   useEffect(() => {
@@ -424,13 +603,16 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)))
   const dirty = rows.filter(changed).length
+  const guarded = (fn: () => void) => () => {
+    if (discardOk(rows)) fn()
+  }
 
   async function save() {
     setBusy(true)
     const { saved, errors } = await saveRows(rows)
     setBusy(false)
-    if (errors.length) toast('error', errors.slice(0, 3).join(' · '))
-    if (saved) toast('success', `Saved ${plural(saved, 'day')} (audit-logged).`)
+    if (errors.length) toast('error', errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ` (+${errors.length - 3} more)` : ''))
+    if (saved) toast('success', `Saved ${plural(saved, 'row')} (audit-logged).`)
     await load()
   }
 
@@ -445,7 +627,14 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <Field label="Employee">
-            <Select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} className="w-64">
+            <Select
+              value={employeeId}
+              onChange={(e) => {
+                const id = e.target.value
+                guarded(() => setEmployeeId(id))()
+              }}
+              className="w-64 max-w-full"
+            >
               {employees.map((e) => (
                 <option key={e.id} value={e.id}>
                   {fullName(e)} ({e.employee_no}){isActiveOn(e, todayManila()) ? '' : ' — separated'}
@@ -454,22 +643,50 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
             </Select>
           </Field>
           <Field label="From">
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-40" />
+            <Input
+              type="date"
+              value={from}
+              onChange={(e) => {
+                const v = e.target.value
+                guarded(() => setFrom(v))()
+              }}
+              className="w-40"
+            />
           </Field>
           <Field label="To">
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-40" />
+            <Input
+              type="date"
+              value={to}
+              onChange={(e) => {
+                const v = e.target.value
+                guarded(() => setTo(v))()
+              }}
+              className="w-40"
+            />
           </Field>
         </div>
-        <Button disabled={busy || dirty === 0} onClick={save}>
-          <Save className="size-4" /> {busy ? 'Saving…' : `Save${dirty ? ` (${dirty})` : ''}`}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" disabled={loading || rows.length === 0} onClick={() => setRows(filledWithSchedule)}>
+            <Wand2 className="size-4" /> Fill scheduled days
+          </Button>
+          <Button disabled={busy || loading || dirty === 0} onClick={save}>
+            <Save className="size-4" /> {busy ? 'Saving…' : `Save${dirty ? ` (${dirty})` : ''}`}
+          </Button>
+        </div>
       </div>
-      {!employee ? (
+      {loadError ? (
+        <LoadError message={loadError} onRetry={employees.length ? load : loadEmployees} />
+      ) : !employee ? (
         <EmptyState title="Pick an employee" />
       ) : loading ? (
         <Spinner />
       ) : (
         <>
+          {employee && (
+            <p className="mb-2 text-sm font-semibold text-slate-700">
+              {fullName(employee)} <span className="font-normal text-slate-400">{employee.employee_no}</span>
+            </p>
+          )}
           <TableShell>
             <thead className="bg-slate-50">
               <tr>
@@ -482,17 +699,32 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((r) => (
-                <tr key={r.key} className={r.locked ? 'bg-slate-50/70' : ''}>
-                  <Td className="whitespace-nowrap font-semibold">{fmtDate(r.date)}</Td>
-                  <Td className="text-xs">
-                    {new Date(`${r.date}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'short' })}{' '}
-                    {!isScheduled(r.employee, r.date) && <Badge tone="slate">rest</Badge>}
-                    {r.holiday && <Badge tone={r.holiday.kind === 'regular' ? 'red' : 'amber'}>{r.holiday.name}</Badge>}
-                  </Td>
-                  <RowCells row={r} onChange={(p) => patch(r.key, p)} />
-                </tr>
-              ))}
+              {rows.map((r, i) => {
+                const first = rows[i - 1]?.dayKey !== r.dayKey
+                const last = rows[i + 1]?.dayKey !== r.dayKey
+                return (
+                  <tr key={r.key} className={r.locked ? 'bg-slate-50/70' : ''}>
+                    <Td className="whitespace-nowrap font-semibold">{first ? fmtDate(r.date) : ''}</Td>
+                    <Td className="text-xs">
+                      {first ? (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span>{new Date(`${r.date}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'short' })}</span>
+                          <DayBadges row={r} showHoliday />
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">↳ another pair</span>
+                      )}
+                    </Td>
+                    <RowCells
+                      row={r}
+                      first={first}
+                      last={last}
+                      onChange={(p) => patch(r.key, p)}
+                      onAddPair={() => setRows((rs) => withExtraPair(rs, r))}
+                    />
+                  </tr>
+                )
+              })}
             </tbody>
           </TableShell>
           <p className="mt-3 text-xs text-slate-500">Total worked in range: <b>{fmtHours(totalMinutes)}</b> (after breaks)</p>
@@ -510,16 +742,31 @@ function Corrections({ entity }: { entity: Entity }) {
   const toast = useToast()
   const [requests, setRequests] = useState<RequestWithEmployee[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [reviewing, setReviewing] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('time_correction_requests')
-      .select('*, employees(*)')
-      .eq('entity_id', entity.id)
-      .order('created_at', { ascending: false })
-      .limit(100)
-    setRequests((data ?? []) as RequestWithEmployee[])
+    setLoadError('')
+    // every pending request (however old), then the latest reviewed ones
+    const [pending, recent] = await Promise.all([
+      supabase
+        .from('time_correction_requests')
+        .select('*, employees(*)')
+        .eq('entity_id', entity.id)
+        .eq('status', 'pending')
+        .order('created_at'),
+      supabase
+        .from('time_correction_requests')
+        .select('*, employees(*)')
+        .eq('entity_id', entity.id)
+        .neq('status', 'pending')
+        .order('created_at', { ascending: false })
+        .limit(50),
+    ])
+    const err = pending.error ?? recent.error
+    if (err) setLoadError(errorMessage(err, 'Failed to load'))
+    else setRequests([...(pending.data ?? []), ...(recent.data ?? [])] as RequestWithEmployee[])
     setLoading(false)
   }, [entity.id])
 
@@ -528,12 +775,15 @@ function Corrections({ entity }: { entity: Entity }) {
   }, [load])
 
   async function review(id: string, approve: boolean) {
+    if (reviewing) return
+    setReviewing(id)
     const { error } = await supabase.rpc('review_time_correction', {
       p_request_id: id,
       p_approve: approve,
       p_notes: notes[id] || null,
     })
-    if (error) toast('error', error.message)
+    setReviewing(null)
+    if (error) toast('error', errorMessage(error, 'Review failed'))
     else {
       toast('success', approve ? 'Correction applied.' : 'Request rejected.')
       await load()
@@ -541,6 +791,7 @@ function Corrections({ entity }: { entity: Entity }) {
   }
 
   if (loading) return <Spinner />
+  if (loadError) return <LoadError message={loadError} onRetry={load} />
   if (requests.length === 0)
     return (
       <Card>
@@ -552,7 +803,7 @@ function Corrections({ entity }: { entity: Entity }) {
       {requests.map((r) => (
         <Card key={r.id}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm font-bold text-slate-800">
                 {r.employees ? fullName(r.employees) : '—'}
                 <span className="ml-2 font-normal text-slate-500">{fmtDate(r.work_date)}</span>{' '}
@@ -565,20 +816,22 @@ function Corrections({ entity }: { entity: Entity }) {
                 {r.requested_clock_out ? fmtDateTime(r.requested_clock_out) : '—'}{' '}
                 {!r.time_entry_id && <Badge tone="blue">missing entry</Badge>}
               </p>
-              <p className="mt-1 text-xs italic text-slate-500">“{r.reason}”</p>
+              <p className="mt-1 break-words text-xs italic text-slate-500">“{r.reason}”</p>
+              {r.review_notes && <p className="mt-1 break-words text-xs text-slate-400">Note: {r.review_notes}</p>}
             </div>
             {r.status === 'pending' && (
-              <div className="flex items-center gap-2">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                 <Input
+                  aria-label="Review note"
                   placeholder="Review note (optional)"
                   value={notes[r.id] ?? ''}
                   onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })}
-                  className="w-52"
+                  className="w-full sm:w-52"
                 />
-                <Button onClick={() => review(r.id, true)}>
+                <Button disabled={reviewing !== null} onClick={() => review(r.id, true)}>
                   <CheckCircle2 className="size-4" /> Approve
                 </Button>
-                <Button variant="danger" onClick={() => review(r.id, false)}>
+                <Button variant="danger" disabled={reviewing !== null} onClick={() => review(r.id, false)}>
                   <XCircle className="size-4" /> Reject
                 </Button>
               </div>

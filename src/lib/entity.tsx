@@ -6,12 +6,15 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { supabase } from './supabase'
 import { useAuth } from './auth'
 import type { Entity } from './db'
+import { errorMessage } from './errors'
 
 interface EntityState {
   entities: Entity[]
   /** Currently selected client, or null when none exist / are assigned. */
   entity: Entity | null
   loading: boolean
+  /** The client list could not be loaded (not the same as having none). */
+  error: string
   setEntityId: (id: string) => void
   reload: () => Promise<void>
 }
@@ -20,6 +23,7 @@ const EntityContext = createContext<EntityState>({
   entities: [],
   entity: null,
   loading: true,
+  error: '',
   setEntityId: () => {},
   reload: async () => {},
 })
@@ -38,10 +42,15 @@ export function EntityProvider({ children }: { children: ReactNode }) {
   const [entities, setEntities] = useState<Entity[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(readStored)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
-    const { data } = await supabase.from('entities').select('*').order('name')
-    setEntities((data ?? []) as Entity[])
+    const { data, error: err } = await supabase.from('entities').select('*').order('name')
+    if (err) setError(errorMessage(err, 'Could not load your clients'))
+    else {
+      setEntities((data ?? []) as Entity[])
+      setError('')
+    }
     setLoading(false)
   }, [])
 
@@ -67,7 +76,7 @@ export function EntityProvider({ children }: { children: ReactNode }) {
     null
 
   return (
-    <EntityContext.Provider value={{ entities, entity, loading, setEntityId, reload }}>
+    <EntityContext.Provider value={{ entities, entity, loading, error, setEntityId, reload }}>
       {children}
     </EntityContext.Provider>
   )

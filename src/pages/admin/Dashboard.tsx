@@ -13,7 +13,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Badge, Card, NoClient, PageHeader, Spinner, StatCard } from '../../components/ui'
+import { Badge, Card, LoadFailed, NoClient, PageHeader, Spinner, StatCard } from '../../components/ui'
 import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
 import { fetchAll } from '../../lib/fetchAll'
 import { useAuth } from '../../lib/auth'
@@ -23,6 +23,7 @@ import { fmtDate, money, moneyWhole, plural } from '../../lib/format'
 import { FREQUENCY_LABELS } from '../../lib/labels'
 import { addDays, eachDate, isoWeekday, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 // Categorical palette — validated (dataviz six checks, light surface):
 // navy → orange → teal → violet, fixed assignment order.
@@ -41,7 +42,7 @@ export default function Dashboard() {
 
 function ClientsOverview({ onPick, currentId }: { onPick: (id: string) => void; currentId: string | null }) {
   const { entities } = useEntity()
-  const [stats, setStats] = useState<Record<string, { headcount: number; lastPay: string | null; drafts: number }>>({})
+  const [stats, setStats] = useState<Record<string, { headcount: number; lastPay: string | null; drafts: number }> | null>({})
 
   useEffect(() => {
     const today = todayManila()
@@ -62,7 +63,7 @@ function ClientsOverview({ onPick, currentId }: { onPick: (id: string) => void; 
         else if (!x.lastPay) x.lastPay = r.pay_date as string
       }
       setStats(s)
-    })
+    }).catch(() => setStats(null))
   }, [])
 
   const active = entities.filter((e) => e.is_active)
@@ -70,21 +71,23 @@ function ClientsOverview({ onPick, currentId }: { onPick: (id: string) => void; 
     <Card title={`Clients (${active.length})`} className="mb-6" actions={<Link to="/admin/clients" className="text-xs font-semibold text-brand-600">Manage clients</Link>}>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {active.map((e) => {
-          const st = stats[e.id]
+          const st = stats?.[e.id]
           return (
             <button
               key={e.id}
+              type="button"
               onClick={() => onPick(e.id)}
-              className={`rounded-xl border p-3 text-left transition-colors ${
+              className={`min-w-0 rounded-xl border p-3 text-left transition-colors ${
                 e.id === currentId ? 'border-accent-400 bg-accent-50/50' : 'border-slate-100 hover:border-brand-200 hover:bg-brand-50/40'
               }`}
             >
               <p className="truncate text-sm font-bold text-slate-800">{e.name}</p>
               <p className="text-xs text-slate-500">
-                <span className="font-mono">{e.code}</span> · {plural(st?.headcount ?? 0, 'employee')}
+                <span className="font-mono">{e.code}</span>
+                {stats ? ` · ${plural(st?.headcount ?? 0, 'employee')}` : ''}
               </p>
               <p className="mt-1 text-[11px] text-slate-400">
-                {st?.lastPay ? `Last payroll ${fmtDate(st.lastPay)}` : 'No finalized payroll yet'}
+                {!stats ? 'Figures unavailable' : st?.lastPay ? `Last payroll ${fmtDate(st.lastPay)}` : 'No finalized payroll yet'}
                 {st?.drafts ? ` · ${plural(st.drafts, 'draft run')}` : ''}
               </p>
             </button>
@@ -127,61 +130,69 @@ interface DashData {
 
 function ClientDashboard({ entity }: { entity: Entity }) {
   const [data, setData] = useState<DashData | null>(null)
+  const [loadError, setLoadError] = useState('')
   const today = todayManila()
 
   const load = useCallback(async () => {
-    const twoWeeksAgo = addDays(today, -13)
-    // six payroll months for the cost chart, plus the current one
-    const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
-    const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves] = await Promise.all([
-      getEmployees(entity.id),
-      fetchAll<TimeEntry>((from, to) =>
-        supabase
-          .from('time_entries')
-          .select('employee_id, work_date')
-          .eq('entity_id', entity.id)
-          .gte('work_date', twoWeeksAgo)
-          .order('id')
-          .range(from, to),
-      ),
-      supabase.from('payroll_runs').select('*').eq('entity_id', entity.id).order('period_end', { ascending: false }).limit(60),
-      fetchAll<DashSlip>((from, to) =>
-        supabase
-          .from('payslips')
-          .select(
-            'period_month, pay_date, net_pay, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, pagibig_ee, pagibig_er, withholding_tax, other_deductions_total, payroll_runs!inner(status)',
-          )
-          .eq('entity_id', entity.id)
-          .in('payroll_runs.status', ['finalized', 'paid'])
-          .gte('period_month', sinceMonth)
-          .order('id')
-          .range(from, to),
-      ),
-      getHolidaysBetween(entity.id, twoWeeksAgo, addDays(today, 45)),
-      fetchAll<{ employee_id: string; start_date: string; end_date: string }>((from, to) =>
-        supabase
-          .from('leave_requests')
-          .select('employee_id, start_date, end_date')
-          .eq('entity_id', entity.id)
-          .eq('status', 'approved')
-          .lte('start_date', today)
-          .gte('end_date', twoWeeksAgo)
-          .order('id')
-          .range(from, to),
-      ),
-      supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
-      supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
-    ])
-    setData({
-      employees: emps,
-      recentEntries: recentEnt,
-      runs: (runsRes.data ?? []) as PayrollRun[],
-      slips,
-      holidays: hols,
-      recentLeaves,
-      pendingCorrections: corr.count ?? 0,
-      pendingLeaves: leaves.count ?? 0,
-    })
+    setLoadError('')
+    try {
+      const twoWeeksAgo = addDays(today, -13)
+      // six payroll months for the cost chart, plus the current one
+      const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
+      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves] = await Promise.all([
+        getEmployees(entity.id),
+        fetchAll<TimeEntry>((from, to) =>
+          supabase
+            .from('time_entries')
+            .select('employee_id, work_date')
+            .eq('entity_id', entity.id)
+            .gte('work_date', twoWeeksAgo)
+            .order('id')
+            .range(from, to),
+        ),
+        supabase.from('payroll_runs').select('*').eq('entity_id', entity.id).order('period_end', { ascending: false }).limit(60),
+        fetchAll<DashSlip>((from, to) =>
+          supabase
+            .from('payslips')
+            .select(
+              'period_month, pay_date, net_pay, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, pagibig_ee, pagibig_er, withholding_tax, other_deductions_total, payroll_runs!inner(status)',
+            )
+            .eq('entity_id', entity.id)
+            .in('payroll_runs.status', ['finalized', 'paid'])
+            .gte('period_month', sinceMonth)
+            .order('id')
+            .range(from, to),
+        ),
+        getHolidaysBetween(entity.id, twoWeeksAgo, addDays(today, 45)),
+        fetchAll<{ employee_id: string; start_date: string; end_date: string }>((from, to) =>
+          supabase
+            .from('leave_requests')
+            .select('employee_id, start_date, end_date')
+            .eq('entity_id', entity.id)
+            .eq('status', 'approved')
+            .lte('start_date', today)
+            .gte('end_date', twoWeeksAgo)
+            .order('id')
+            .range(from, to),
+        ),
+        supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
+        supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
+      ])
+      const failed = runsRes.error ?? corr.error ?? leaves.error
+      if (failed) throw failed
+      setData({
+        employees: emps,
+        recentEntries: recentEnt,
+        runs: (runsRes.data ?? []) as PayrollRun[],
+        slips,
+        holidays: hols,
+        recentLeaves,
+        pendingCorrections: corr.count ?? 0,
+        pendingLeaves: leaves.count ?? 0,
+      })
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Could not load the dashboard'))
+    }
   }, [entity.id, today])
 
   useEffect(() => {
@@ -189,6 +200,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
   }, [load])
 
   const derived = useMemo(() => (data ? derive(data, entity, today) : null), [data, entity, today])
+  if (loadError) return <LoadFailed message={loadError} onRetry={load} />
   if (!data || !derived) return <Spinner />
 
   return (

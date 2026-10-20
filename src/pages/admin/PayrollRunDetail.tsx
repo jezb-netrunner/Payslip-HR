@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { AlertTriangle, ArrowLeft, Banknote, Calculator, Download, Eye, Lock, Plus, Trash2, Unlock } from 'lucide-react'
 import PayslipView, { runLabel } from '../../components/PayslipView'
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, StatCard, TableShell, Td, Th } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, PageHeader, Select, Spinner, StatCard, TableShell, Td, Th } from '../../components/ui'
+import { fetchAll } from '../../lib/fetchAll'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees } from '../../lib/api'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
@@ -29,6 +30,7 @@ export default function PayrollRunDetail() {
   const [adjustments, setAdjustments] = useState<PayrollAdjustment[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [computing, setComputing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<RunComputationResult | null>(null)
@@ -38,19 +40,32 @@ export default function PayrollRunDetail() {
 
   const load = useCallback(async () => {
     if (!id) return
-    const [{ data: r }, { data: s }, { data: a }] = await Promise.all([
-      supabase.from('payroll_runs').select('*').eq('id', id).maybeSingle(),
-      supabase.from('payslips').select('*').eq('payroll_run_id', id).order('created_at'),
-      supabase.from('payroll_adjustments').select('*').eq('payroll_run_id', id).order('created_at'),
-    ])
-    const runRow = (r as PayrollRun) ?? null
-    setRun(runRow)
-    setSlips(((s ?? []) as Payslip[]).sort((x, y) =>
-      String((x.employee_snapshot as Record<string, string>).name).localeCompare(String((y.employee_snapshot as Record<string, string>).name)),
-    ))
-    setAdjustments((a ?? []) as PayrollAdjustment[])
-    if (runRow) setEmployees(await getEmployees(runRow.entity_id))
-    setLoading(false)
+    setLoadError('')
+    try {
+      const [{ data: r, error: runErr }, s, a] = await Promise.all([
+        supabase.from('payroll_runs').select('*').eq('id', id).maybeSingle(),
+        // more than 1000 payslips arrive in pages: a cut-off list would block
+        // finalize and truncate the register
+        fetchAll<Payslip>((from, to) =>
+          supabase.from('payslips').select('*').eq('payroll_run_id', id).order('created_at').order('id').range(from, to),
+        ),
+        fetchAll<PayrollAdjustment>((from, to) =>
+          supabase.from('payroll_adjustments').select('*').eq('payroll_run_id', id).order('created_at').order('id').range(from, to),
+        ),
+      ])
+      if (runErr) throw runErr
+      const runRow = (r as PayrollRun) ?? null
+      setRun(runRow)
+      setSlips(s.sort((x, y) =>
+        String((x.employee_snapshot as Record<string, string>).name).localeCompare(String((y.employee_snapshot as Record<string, string>).name)),
+      ))
+      setAdjustments(a)
+      if (runRow) setEmployees(await getEmployees(runRow.entity_id))
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Could not load this payroll run'))
+    } finally {
+      setLoading(false)
+    }
   }, [id])
 
   useEffect(() => {
@@ -61,6 +76,7 @@ export default function PayrollRunDetail() {
   const covered = useMemo(() => (run ? employeesForRun(run, employees) : []), [run, employees])
 
   if (loading) return <Spinner />
+  if (loadError) return <LoadFailed message={loadError} onRetry={load} />
   if (!run || !entity) return <p className="text-sm text-slate-500">Run not found.</p>
 
   async function compute() {
@@ -202,7 +218,7 @@ export default function PayrollRunDetail() {
                 <Button variant="accent" onClick={doFinalize} disabled={busy || computing || !upToDate}>
                   <Lock className="size-4" /> Finalize
                 </Button>
-                <Button variant="ghost" onClick={deleteDraft} title="Delete draft run">
+                <Button variant="ghost" onClick={deleteDraft} title="Delete draft run" aria-label="Delete draft run">
                   <Trash2 className="size-4" />
                 </Button>
               </>
@@ -289,7 +305,7 @@ export default function PayrollRunDetail() {
                       {a.kind === 'deduction' ? '−' : ''}{money(Number(a.amount))}
                     </span>
                     {isDraft && (
-                      <button onClick={() => removeAdjustment(a.id)} className="text-slate-300 hover:text-rose-500">
+                      <button type="button" onClick={() => removeAdjustment(a.id)} className="text-slate-300 hover:text-rose-500" title="Remove" aria-label={`Remove ${a.label}`}>
                         <Trash2 className="size-4" />
                       </button>
                     )}

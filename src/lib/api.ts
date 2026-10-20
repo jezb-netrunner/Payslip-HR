@@ -1,4 +1,5 @@
 import { fetchAll } from './fetchAll'
+import { toCsv } from './csv'
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
 import type {
@@ -114,16 +115,14 @@ export async function callAdminUsers(
 }
 
 export function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {
-  const esc = (v: string | number | null | undefined) => {
-    const s = String(v ?? '')
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const csv = rows.map((r) => r.map(esc).join(',')).join('\n')
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+  const blob = new Blob(['﻿' + toCsv(rows)], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(url)
+  a.remove()
+  // revoking right away can cancel the download in some browsers
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

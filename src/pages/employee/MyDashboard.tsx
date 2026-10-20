@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, CalendarCheck, Eye, Megaphone, Pin, Wallet } from 'lucide-react'
 import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView'
-import { Card, EmptyState, Modal, Spinner, StatCard } from '../../components/ui'
+import { Card, EmptyState, LoadFailed, Modal, Spinner, StatCard } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
@@ -11,6 +11,7 @@ import { leaveDaysInYear, showsBalance } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { roundingLines } from '../../lib/payslip'
+import { errorMessage } from '../../lib/errors'
 
 export default function MyDashboard() {
   const { employee } = useAuth()
@@ -23,6 +24,7 @@ export default function MyDashboard() {
   const [ents, setEnts] = useState<Record<string, number>>({})
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [viewing, setViewing] = useState<Payslip | null>(null)
 
   const today = todayManila()
@@ -31,33 +33,42 @@ export default function MyDashboard() {
 
   const load = useCallback(async () => {
     if (!employee) return
-    const [ent, ps, an, te, lt, lr, le, hols] = await Promise.all([
-      supabase.from('entities').select('*').eq('id', employee.entity_id).maybeSingle(),
-      supabase.from('payslips').select('*').eq('employee_id', employee.id).order('pay_date', { ascending: false }).limit(60),
-      supabase.from('announcements').select('*').order('pinned', { ascending: false }).order('published_at', { ascending: false }).limit(5),
-      supabase.from('time_entries').select('*').eq('employee_id', employee.id).gte('work_date', `${month}-01`).lte('work_date', endOfMonth(`${month}-01`)),
-      supabase.from('leave_types').select('*').eq('active', true),
-      supabase.from('leave_requests').select('*').eq('employee_id', employee.id).eq('status', 'approved'),
-      supabase.from('employee_leave_entitlements').select('*').eq('employee_id', employee.id).eq('year', Number(year)),
-      getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year}-12-31`),
-    ])
-    setHolidays(hols)
-    setEntity((ent.data as Entity) ?? null)
-    setSlips((ps.data ?? []) as Payslip[])
-    setNews((an.data ?? []) as Announcement[])
-    setEntries((te.data ?? []) as TimeEntry[])
-    setTypes((lt.data ?? []) as LeaveType[])
-    setLeaves((lr.data ?? []) as LeaveRequest[])
-    const m: Record<string, number> = {}
-    for (const e of le.data ?? []) m[e.leave_type_id as string] = Number(e.days)
-    setEnts(m)
-    setLoading(false)
+    setLoadError('')
+    try {
+      const [ent, ps, an, te, lt, lr, le, hols] = await Promise.all([
+        supabase.from('entities').select('*').eq('id', employee.entity_id).maybeSingle(),
+        supabase.from('payslips').select('*').eq('employee_id', employee.id).order('pay_date', { ascending: false }).limit(60),
+        supabase.from('announcements').select('*').order('pinned', { ascending: false }).order('published_at', { ascending: false }).limit(5),
+        supabase.from('time_entries').select('*').eq('employee_id', employee.id).gte('work_date', `${month}-01`).lte('work_date', endOfMonth(`${month}-01`)),
+        supabase.from('leave_types').select('*').eq('active', true),
+        supabase.from('leave_requests').select('*').eq('employee_id', employee.id).eq('status', 'approved'),
+        supabase.from('employee_leave_entitlements').select('*').eq('employee_id', employee.id).eq('year', Number(year)),
+        getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year}-12-31`),
+      ])
+      const failed = [ent, ps, an, te, lt, lr, le].find((r) => r.error)?.error
+      if (failed) throw failed
+      setHolidays(hols)
+      setEntity((ent.data as Entity) ?? null)
+      setSlips((ps.data ?? []) as Payslip[])
+      setNews((an.data ?? []) as Announcement[])
+      setEntries((te.data ?? []) as TimeEntry[])
+      setTypes((lt.data ?? []) as LeaveType[])
+      setLeaves((lr.data ?? []) as LeaveRequest[])
+      const m: Record<string, number> = {}
+      for (const e of le.data ?? []) m[e.leave_type_id as string] = Number(e.days)
+      setEnts(m)
+    } catch (err) {
+      setLoadError(errorMessage(err, "Couldn't load your dashboard"))
+    } finally {
+      setLoading(false)
+    }
   }, [employee, month, year])
 
   useEffect(() => {
     load()
   }, [load])
 
+  if (loadError) return <LoadFailed message={loadError} onRetry={load} />
   if (!employee || loading) return <Spinner />
 
   const latest = slips[0]
@@ -96,11 +107,11 @@ export default function MyDashboard() {
           <div className="space-y-3">
             {news.slice(0, 3).map((a) => (
               <div key={a.id} className={`rounded-xl p-3 ${a.pinned ? 'bg-accent-50' : 'bg-slate-50'}`}>
-                <p className="flex items-center gap-1.5 text-sm font-bold text-slate-800">
-                  {a.pinned && <Pin className="size-3.5 text-accent-600" />} {a.title}
+                <p className="flex items-center gap-1.5 break-words text-sm font-bold text-slate-800">
+                  {a.pinned && <Pin className="size-3.5 shrink-0 text-accent-600" />} <span className="min-w-0">{a.title}</span>
                 </p>
                 <p className="text-[11px] text-slate-400">{fmtDateTime(a.published_at)}</p>
-                <p className="mt-1 line-clamp-3 whitespace-pre-line text-sm text-slate-600">{a.body}</p>
+                <p className="mt-1 line-clamp-3 whitespace-pre-line break-words text-sm text-slate-600">{a.body}</p>
               </div>
             ))}
           </div>

@@ -47,7 +47,7 @@ export function Card({
   return (
     <div className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}>
       {(title || actions) && (
-        <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
           <h3 className="text-sm font-bold text-slate-800">{title}</h3>
           {actions}
         </div>
@@ -361,10 +361,33 @@ export function TableShell({ children }: { children: ReactNode }) {
   )
 }
 
+/** A read that failed (network, expired session): say so instead of spinning or showing "nothing". */
+export function LoadFailed({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
+      {message}{' '}
+      <button type="button" onClick={onRetry} className="font-semibold underline">
+        Try again
+      </button>
+    </div>
+  )
+}
+
 /** Shown by client-scoped pages when no client is selected or assigned. */
 export function NoClient({ companyAdmin }: { companyAdmin: boolean }) {
+  const { loading, error, reload } = useEntity()
   // the client list is still loading: don't claim there are none
-  if (useEntity().loading) return <Spinner />
+  if (loading) return <Spinner />
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center text-sm text-rose-700">
+        {error}.{' '}
+        <button type="button" onClick={() => reload()} className="font-semibold underline">
+          Try again
+        </button>
+      </div>
+    )
+  }
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
       <p className="text-sm font-semibold text-slate-700">

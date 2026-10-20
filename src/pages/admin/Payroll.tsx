@@ -285,7 +285,7 @@ function NewRunModal({
             </Field>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Period start">
             <Input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
           </Field>

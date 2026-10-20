@@ -30,6 +30,14 @@ function periodLabel(run: PayslipRunInfo): string {
   return `${fmt(run.period_start)} – ${fmt(run.period_end)}`
 }
 
+/** One line no wider than maxW (current font), cut with an ellipsis. */
+function fitText(doc: jsPDF, text: string, maxW: number): string {
+  if (doc.getTextWidth(text) <= maxW) return text
+  let t = text
+  while (t.length > 1 && doc.getTextWidth(`${t}…`) > maxW) t = t.slice(0, -1)
+  return `${t.trimEnd()}…`
+}
+
 export function generatePayslipPdf(
   slip: Payslip,
   run: PayslipRunInfo,
@@ -45,32 +53,39 @@ export function generatePayslipPdf(
   doc.setFillColor(...NAVY)
   doc.rect(0, 0, pageW, 26, 'F')
   doc.setTextColor(255, 255, 255)
+
+  // right block first: the employer's name and address get what is left
+  const runLabel =
+    run.run_type === 'thirteenth_month'
+      ? `13th Month Pay ${run.period_end.slice(0, 4)}`
+      : periodLabel(run)
+  const payDate = `Pay date: ${new Date(`${run.pay_date}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}`
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(14)
+  doc.text('PAYSLIP', pageW - margin, 11, { align: 'right' })
+  let rightW = doc.getTextWidth('PAYSLIP')
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8.5)
+  doc.text(runLabel, pageW - margin, 16.5, { align: 'right' })
+  doc.text(payDate, pageW - margin, 21.5, { align: 'right' })
+  rightW = Math.max(rightW, doc.getTextWidth(runLabel), doc.getTextWidth(payDate))
+  const leftW = pageW - margin * 2 - rightW - 6
+
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(15)
-  doc.text(employer.name || 'Company', margin, 11)
+  const name = employer.name || 'Company'
+  if (doc.getTextWidth(name) > leftW) doc.setFontSize(12)
+  doc.text(fitText(doc, name, leftW), margin, 11)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   const sub = [employer.registered_address, employer.tin ? `TIN ${employer.tin}` : '']
     .filter(Boolean)
     .join('  •  ')
-  if (sub) doc.text(sub, margin, 17)
-
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
-  doc.text('PAYSLIP', pageW - margin, 11, { align: 'right' })
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.5)
-  const runLabel =
-    run.run_type === 'thirteenth_month'
-      ? `13th Month Pay ${run.period_end.slice(0, 4)}`
-      : periodLabel(run)
-  doc.text(runLabel, pageW - margin, 16.5, { align: 'right' })
-  doc.text(
-    `Pay date: ${new Date(`${run.pay_date}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}`,
-    pageW - margin,
-    21.5,
-    { align: 'right' },
-  )
+  if (sub) {
+    const lines = doc.splitTextToSize(sub, leftW) as string[]
+    doc.text(lines[0], margin, 16.5)
+    if (lines.length > 1) doc.text(fitText(doc, lines.slice(1).join(' '), leftW), margin, 20.5)
+  }
 
   // ---- employee block ----
   let y = 33
@@ -91,8 +106,9 @@ export function generatePayslipPdf(
     `PhilHealth: ${snap.philhealth_no || '—'}`,
     `Pag-IBIG: ${snap.pagibig_no || '—'}   TIN: ${snap.tin || '—'}`,
   ]
-  infoLeft.forEach((t, i) => doc.text(t, margin, y + 5.5 + i * 4.2))
-  infoRight.forEach((t, i) => doc.text(t, pageW / 2 + 4, y + 5.5 + i * 4.2))
+  const halfW = pageW / 2 - margin - 2
+  infoLeft.forEach((t, i) => doc.text(fitText(doc, t, halfW), margin, y + 5.5 + i * 4.2))
+  infoRight.forEach((t, i) => doc.text(fitText(doc, t, halfW), pageW / 2 + 4, y + 5.5 + i * 4.2))
   y += 21
 
   // ---- earnings & deductions tables side by side ----

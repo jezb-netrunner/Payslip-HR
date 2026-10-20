@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { KeyRound, Plus, Search } from 'lucide-react'
-import { Badge, Button, Field, Input, Modal, NoClient, PageHeader, Select, Spinner, TableShell, Td, Th, Toggle } from '../../components/ui'
+import { Badge, Button, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, TableShell, Td, Th, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { getEmployees, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
@@ -39,6 +39,7 @@ export default function Employees() {
 function EmployeeList({ entity }: { entity: Entity }) {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [query, setQuery] = useState('')
   const [showSeparated, setShowSeparated] = useState(false)
   const [frequency, setFrequency] = useState('')
@@ -47,8 +48,14 @@ function EmployeeList({ entity }: { entity: Entity }) {
   const today = todayManila()
 
   const load = useCallback(async () => {
-    setEmployees(await getEmployees(entity.id))
-    setLoading(false)
+    setLoadError('')
+    try {
+      setEmployees(await getEmployees(entity.id))
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Could not load employees'))
+    } finally {
+      setLoading(false)
+    }
   }, [entity.id])
 
   useEffect(() => {
@@ -108,7 +115,9 @@ function EmployeeList({ entity }: { entity: Entity }) {
         </label>
       </div>
 
-      {loading ? (
+      {loadError ? (
+        <LoadFailed message={loadError} onRetry={load} />
+      ) : loading ? (
         <Spinner />
       ) : (
         <TableShell>
@@ -137,7 +146,14 @@ function EmployeeList({ entity }: { entity: Entity }) {
                         {initials(fullName(e))}
                       </div>
                       <div>
-                        <p className="font-semibold text-slate-800">{fullName(e)}</p>
+                        {/* a real link: keyboard and screen-reader users can open the record too */}
+                        <Link
+                          to={`/admin/employees/${e.id}`}
+                          onClick={(ev) => ev.stopPropagation()}
+                          className="font-semibold text-slate-800 hover:text-brand-700 hover:underline"
+                        >
+                          {fullName(e)}
+                        </Link>
                         <p className="text-xs text-slate-400">{e.employee_no}</p>
                       </div>
                     </div>

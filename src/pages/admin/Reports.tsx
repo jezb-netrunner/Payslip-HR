@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Download, FileText, Pencil, Printer } from 'lucide-react'
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees, getStatutoryTables } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
@@ -347,8 +347,9 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
 // ---------- 1604-C summary ----------
 
 function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
-  const { rows, slips, error } = useAlphalist(entity, year)
+  const { rows, slips, error: alphaError } = useAlphalist(entity, year)
   const [remits, setRemits] = useState<TaxRemittance[]>([])
+  const [remitError, setRemitError] = useState('')
 
   useEffect(() => {
     supabase
@@ -357,8 +358,13 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
       .eq('entity_id', entity.id)
       .gte('period_month', `${year}-01-01`)
       .lte('period_month', `${year}-12-01`)
-      .then(({ data }) => setRemits((data ?? []) as TaxRemittance[]))
+      .then(({ data, error: err }) => {
+        // a failed read must not show every month as "not recorded"
+        if (err) setRemitError(errorMessage(err, 'Failed to load the 1601-C remittances'))
+        else setRemits((data ?? []) as TaxRemittance[])
+      })
   }, [entity.id, year])
+  const error = alphaError || remitError
 
   const withheldByMonth = useMemo(() => {
     const m: Record<string, number> = {}
@@ -515,22 +521,30 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
   const [remits, setRemits] = useState<TaxRemittance[]>([])
   const [byMonth, setByMonth] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [editing, setEditing] = useState<Partial<TaxRemittance> & { period_month: string } | null>(null)
 
   const load = useCallback(async () => {
-    const [{ data }, slips] = await Promise.all([
-      supabase.from('tax_remittances').select('*').eq('entity_id', entity.id).gte('period_month', `${year}-01-01`).lte('period_month', `${year}-12-01`),
-      fetchFinalizedPayslipsForTaxYear(entity.id, year),
-    ])
-    setRemits((data ?? []) as TaxRemittance[])
-    // 1601-C covers tax withheld in the month the pay was released
-    const m: Record<string, number> = {}
-    for (const s of slips) {
-      const k = (s.pay_date ?? '').slice(5, 7)
-      m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
+    setLoadError('')
+    try {
+      const [{ data, error }, slips] = await Promise.all([
+        supabase.from('tax_remittances').select('*').eq('entity_id', entity.id).gte('period_month', `${year}-01-01`).lte('period_month', `${year}-12-01`),
+        fetchFinalizedPayslipsForTaxYear(entity.id, year),
+      ])
+      if (error) throw error
+      setRemits((data ?? []) as TaxRemittance[])
+      // 1601-C covers tax withheld in the month the pay was released
+      const m: Record<string, number> = {}
+      for (const s of slips) {
+        const k = (s.pay_date ?? '').slice(5, 7)
+        m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
+      }
+      setByMonth(m)
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Failed to load'))
+    } finally {
+      setLoading(false)
     }
-    setByMonth(m)
-    setLoading(false)
   }, [entity.id, year])
 
   useEffect(() => {
@@ -551,7 +565,7 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
       remarks: editing.remarks ?? '',
     }
     const { error } = await supabase.from('tax_remittances').upsert(payload, { onConflict: 'entity_id,period_month' })
-    if (error) toast('error', error.message)
+    if (error) toast('error', errorMessage(error, 'Save failed'))
     else {
       toast('success', '1601-C remittance saved (audit-logged).')
       setEditing(null)
@@ -560,6 +574,7 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
   }
 
   if (loading) return <Spinner />
+  if (loadError) return <LoadFailed message={loadError} onRetry={load} />
   return (
     <Card title={`Monthly BIR Form 1601-C remittances — ${year}`}>
       <TableShell>
@@ -605,7 +620,7 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={`1601-C — ${editing ? fmtMonth(editing.period_month) : ''}`}>
         {editing && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Date of remittance">
                 <Input type="date" value={editing.date_paid ?? ''} onChange={(e) => setEditing({ ...editing, date_paid: e.target.value })} />
               </Field>
@@ -649,9 +664,13 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
     return t.slice(0, 4) === String(year) ? t.slice(5, 7) : '12'
   })
   const [slips, setSlips] = useState<ContribSlip[] | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
+    let cancelled = false
     setSlips(null)
+    setLoadError('')
     fetchAll<ContribSlip>((from, to) =>
       supabase
         .from('payslips')
@@ -661,8 +680,17 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
         .in('payroll_runs.status', ['finalized', 'paid'])
         .order('id')
         .range(from, to),
-    ).then(setSlips)
-  }, [entity.id, year, month])
+    )
+      .then((s) => {
+        if (!cancelled) setSlips(s)
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(errorMessage(err, 'Failed to load'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [entity.id, year, month, reload])
 
   const rows = useMemo(() => {
     const m = new Map<string, { name: string; no: string; sss: string; ph: string; hdmf: string; v: number[] }>()
@@ -685,7 +713,7 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
     <Card
       title={`Contributions for ${fmtMonth(`${year}-${month}-01`)} (payroll month)`}
       actions={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Select value={month} onChange={(e) => setMonth(e.target.value)} className="w-36">
             {MONTHS.map((mm) => (
               <option key={mm} value={mm}>{fmtMonth(`${year}-${mm}-01`)}</option>
@@ -707,7 +735,9 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
         </div>
       }
     >
-      {!slips ? (
+      {loadError ? (
+        <LoadFailed message={loadError} onRetry={() => setReload((n) => n + 1)} />
+      ) : !slips ? (
         <Spinner />
       ) : rows.length === 0 ? (
         <EmptyState title="No finalized payslips for this payroll month" />

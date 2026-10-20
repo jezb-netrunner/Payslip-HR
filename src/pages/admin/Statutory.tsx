@@ -91,7 +91,7 @@ export default function Statutory() {
                 const monthlyEe = s.ee + s.mpfEe + p.ee + g.ee
                 const tax = computeWithholdingTax(salary - monthlyEe, 'monthly', wht)
                 return (
-                  <div className="grid flex-1 grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+                  <div className="grid w-full flex-1 grid-cols-2 gap-3 text-sm sm:w-auto sm:min-w-[28rem] sm:grid-cols-5">
                     <div><p className="text-xs text-slate-400">SSS EE (MSC {s.msc.toLocaleString()})</p><p className="font-bold">{money(s.ee + s.mpfEe)}</p></div>
                     <div><p className="text-xs text-slate-400">PhilHealth EE</p><p className="font-bold">{money(p.ee)}</p></div>
                     <div><p className="text-xs text-slate-400">Pag-IBIG EE</p><p className="font-bold">{money(g.ee)}</p></div>
@@ -147,18 +147,18 @@ export default function Statutory() {
                           • Effective {fmtDate(v.effective_from)}
                           {v.effective_from > today && <Badge tone="blue">upcoming</Badge>} — {v.description.slice(0, 110)}
                           {v.source_url && (
-                            <a href={v.source_url} target="_blank" rel="noreferrer" className="ml-1 inline-flex items-center text-brand-600">
+                            <a href={v.source_url} target="_blank" rel="noreferrer" className="ml-1 inline-flex items-center text-brand-600" title="Source" aria-label="Open the source document">
                               <ExternalLink className="size-3" />
                             </a>
                           )}
                         </span>
                         {isCompanyAdmin && (
                           <span className="flex shrink-0 gap-2">
-                            <button onClick={() => setEditing({ kind, version: structuredClone(v) })} className="text-slate-400 hover:text-brand-700" title="Edit">
+                            <button type="button" onClick={() => setEditing({ kind, version: structuredClone(v) })} className="text-slate-400 hover:text-brand-700" title="Edit" aria-label={`Edit the version effective ${v.effective_from}`}>
                               <Pencil className="size-3.5" />
                             </button>
                             {rows.length > 1 && (
-                              <button onClick={() => remove(v)} className="text-slate-300 hover:text-rose-500" title="Delete">
+                              <button type="button" onClick={() => remove(v)} className="text-slate-300 hover:text-rose-500" title="Delete" aria-label={`Delete the version effective ${v.effective_from}`}>
                                 <Trash2 className="size-3.5" />
                               </button>
                             )}
@@ -504,8 +504,11 @@ function VersionEditor({
                     <Td>
                       {i > 0 && (
                         <button
+                          type="button"
                           onClick={() => setBrackets({ ...brackets, [set.key]: brackets[set.key].filter((_, j) => j !== i) })}
                           className="text-slate-300 hover:text-rose-500"
+                          title="Remove bracket"
+                          aria-label="Remove bracket"
                         >
                           <Trash2 className="size-4" />
                         </button>

@@ -186,7 +186,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card title="Personal information">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="First name"><Input value={f.first_name} onChange={(e) => set('first_name', e.target.value)} /></Field>
           <Field label="Middle name"><Input value={f.middle_name ?? ''} onChange={(e) => set('middle_name', e.target.value)} /></Field>
           <Field label="Last name"><Input value={f.last_name} onChange={(e) => set('last_name', e.target.value)} /></Field>
@@ -234,7 +234,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
 
       <div className="space-y-6">
         <Card title="Employment">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Employee no."><Input value={f.employee_no} onChange={(e) => set('employee_no', e.target.value)} /></Field>
             <Field label="Employment status" hint="BIR codes R / P / C / CP / S / AL">
               <Select value={f.employment_status} onChange={(e) => set('employment_status', e.target.value as EmploymentStatus)}>
@@ -248,7 +248,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
             <Field label="Date started"><Input type="date" value={f.hire_date} onChange={(e) => set('hire_date', e.target.value)} /></Field>
             <Field label="Regularization date"><Input type="date" value={f.regularization_date ?? ''} onChange={(e) => set('regularization_date', e.target.value)} /></Field>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-3">
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <Field label="Shift start"><Input type="time" value={f.work_schedule.start} onChange={(e) => set('work_schedule', { ...f.work_schedule, start: e.target.value })} /></Field>
             <Field label="Shift end"><Input type="time" value={f.work_schedule.end} onChange={(e) => set('work_schedule', { ...f.work_schedule, end: e.target.value })} /></Field>
             <Field label="Break (min)"><Input type="number" value={f.work_schedule.break_minutes} onChange={(e) => set('work_schedule', { ...f.work_schedule, break_minutes: Number(e.target.value) })} /></Field>
@@ -283,7 +283,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
         </Card>
 
         <Card title="Separation (resignation, termination, retirement…)">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Last day of employment">
               <Input type="date" value={f.separation_date ?? ''} onChange={(e) => set('separation_date', e.target.value)} />
             </Field>
@@ -346,8 +346,9 @@ function PayTab({
     bank_account_no: employee.bank_account_no ?? '',
   })
   const [busy, setBusy] = useState(false)
-  const [alwForm, setAlwForm] = useState({ label: '', amount: '', category: 'de_minimis' as AllowanceCategory, basis: 'monthly' as AllowanceBasis })
-  const [dedForm, setDedForm] = useState({ label: '', category: 'other', amount: '', total: '' })
+  const [listBusy, setListBusy] = useState(false)
+  const [editingAlw, setEditingAlw] = useState<AllowanceForm | null>(null)
+  const [editingDed, setEditingDed] = useState<DeductionForm | null>(null)
 
   async function savePay() {
     const dpy = f.days_per_year ? Number(f.days_per_year) : null
@@ -381,37 +382,74 @@ function PayTab({
     }
   }
 
-  async function addAllowance() {
-    if (!alwForm.label || !alwForm.amount) return
-    const { error } = await supabase.from('employee_allowances').insert({
-      employee_id: employee.id,
-      label: alwForm.label,
-      amount: Number(alwForm.amount),
-      category: alwForm.category,
-      basis: alwForm.basis,
-    })
-    if (error) toast('error', error.message)
-    else {
-      setAlwForm({ label: '', amount: '', category: 'de_minimis', basis: 'monthly' })
+  /** One write at a time: a double click must not add the same allowance or loan twice. */
+  async function listWrite(fn: () => PromiseLike<{ error: unknown }>, ok: string): Promise<boolean> {
+    if (listBusy) return false
+    setListBusy(true)
+    try {
+      const { error } = await fn()
+      if (error) throw error
+      toast('success', ok)
       await onChanged()
+      return true
+    } catch (err) {
+      toast('error', errorMessage(err, 'Save failed'))
+      return false
+    } finally {
+      setListBusy(false)
     }
   }
 
-  async function addDeduction() {
-    if (!dedForm.label || !dedForm.amount) return
-    const { error } = await supabase.from('recurring_deductions').insert({
-      employee_id: employee.id,
-      label: dedForm.label,
-      category: dedForm.category,
-      amount_per_period: Number(dedForm.amount),
-      total_amount: dedForm.total ? Number(dedForm.total) : null,
-      balance: dedForm.total ? Number(dedForm.total) : null,
-    })
-    if (error) toast('error', error.message)
-    else {
-      setDedForm({ label: '', category: 'other', amount: '', total: '' })
-      await onChanged()
+  async function saveAllowance(a: AllowanceForm) {
+    const amount = Number(a.amount)
+    if (!a.label.trim() || !(amount > 0)) {
+      toast('error', 'Enter a label and an amount above zero.')
+      return
     }
+    const row = { label: a.label.trim(), amount, category: a.category, basis: a.basis }
+    const done = await listWrite(
+      () =>
+        a.id
+          ? supabase.from('employee_allowances').update(row).eq('id', a.id)
+          : supabase.from('employee_allowances').insert({ ...row, employee_id: employee.id }),
+      a.id ? 'Allowance updated (audit-logged).' : 'Allowance added.',
+    )
+    if (done) setEditingAlw(null)
+  }
+
+  async function saveDeduction(d: DeductionForm) {
+    const amount = Number(d.amount)
+    const balance = d.balance.trim() === '' ? null : Number(d.balance)
+    if (!d.label.trim() || !(amount > 0)) {
+      toast('error', 'Enter a label and an amount per payroll above zero.')
+      return
+    }
+    if (balance !== null && !(balance >= 0)) {
+      toast('error', 'The balance must be zero or more (blank = no limit).')
+      return
+    }
+    if (d.start && d.end && d.end < d.start) {
+      toast('error', 'The end date is before the start date.')
+      return
+    }
+    const row = {
+      label: d.label.trim(),
+      category: d.category,
+      amount_per_period: amount,
+      balance,
+      start_date: d.start || null,
+      end_date: d.end || null,
+    }
+    const done = await listWrite(
+      () =>
+        d.id
+          ? supabase.from('recurring_deductions').update(row).eq('id', d.id)
+          : supabase
+              .from('recurring_deductions')
+              .insert({ ...row, employee_id: employee.id, total_amount: balance }),
+      d.id ? 'Deduction updated (audit-logged).' : 'Deduction added.',
+    )
+    if (done) setEditingDed(null)
   }
 
   const factor = f.days_per_year ? Number(f.days_per_year) : Number(entity.working_days_divisor)
@@ -486,46 +524,49 @@ function PayTab({
         </Button>
       </Card>
 
-      <Card title="Allowances and benefits">
+      <Card
+        title="Allowances and benefits"
+        actions={
+          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly' })}>
+            <Plus className="size-4" /> Add
+          </Button>
+        }
+      >
         <div className="space-y-2">
           {allowances.length === 0 && <p className="text-sm text-slate-400">None.</p>}
           {allowances.map((a) => (
-            <div key={a.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
-              <div>
-                <p className="text-sm font-semibold text-slate-700">{a.label}</p>
+            <div key={a.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
+              <div className="min-w-0">
+                <p className="break-words text-sm font-semibold text-slate-700">{a.label}</p>
                 <p className="text-xs text-slate-400">
                   {money(Number(a.amount))} {ALLOWANCE_BASIS_LABELS[a.basis]} · {ALLOWANCE_CATEGORY_LABELS[a.category]}
                   {!a.active && ' · inactive'}
                 </p>
               </div>
-              <button
-                onClick={async () => {
-                  await supabase.from('employee_allowances').update({ active: !a.active }).eq('id', a.id)
-                  await onChanged()
-                }}
-                className="text-xs font-semibold text-brand-600"
-              >
-                {a.active ? 'Deactivate' : 'Activate'}
-              </button>
+              <div className="flex shrink-0 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis })}
+                  className="text-xs font-semibold text-brand-600"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  disabled={listBusy}
+                  onClick={() =>
+                    listWrite(
+                      () => supabase.from('employee_allowances').update({ active: !a.active }).eq('id', a.id),
+                      a.active ? 'Allowance stopped.' : 'Allowance resumed.',
+                    )
+                  }
+                  className="text-xs font-semibold text-brand-600 disabled:text-slate-300"
+                >
+                  {a.active ? 'Deactivate' : 'Activate'}
+                </button>
+              </div>
             </div>
           ))}
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <Input placeholder="Label (e.g. Rice subsidy)" value={alwForm.label} onChange={(e) => setAlwForm({ ...alwForm, label: e.target.value })} />
-          <Input placeholder="Amount" type="number" value={alwForm.amount} onChange={(e) => setAlwForm({ ...alwForm, amount: e.target.value })} />
-          <Select value={alwForm.category} onChange={(e) => setAlwForm({ ...alwForm, category: e.target.value as AllowanceCategory })}>
-            {Object.entries(ALLOWANCE_CATEGORY_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </Select>
-          <div className="flex gap-2">
-            <Select value={alwForm.basis} onChange={(e) => setAlwForm({ ...alwForm, basis: e.target.value as AllowanceBasis })}>
-              {Object.entries(ALLOWANCE_BASIS_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </Select>
-            <Button variant="secondary" onClick={addAllowance}><Plus className="size-4" /></Button>
-          </div>
         </div>
         <p className="mt-2 text-[11px] text-slate-400">
           De minimis benefits within BIR ceilings (RR 29-2025 for 2026: rice ₱2,500/mo, uniform ₱8,000/yr,
@@ -534,54 +575,171 @@ function PayTab({
         </p>
       </Card>
 
-      <Card title="Recurring deductions (every payroll)" className="lg:col-span-2">
+      <Card
+        title="Recurring deductions (every payroll)"
+        className="lg:col-span-2"
+        actions={
+          <Button variant="secondary" onClick={() => setEditingDed({ label: '', category: 'other', amount: '', balance: '', start: '', end: '' })}>
+            <Plus className="size-4" /> Add
+          </Button>
+        }
+      >
         <div className="grid gap-2 sm:grid-cols-2">
+          {deductions.length === 0 && <p className="text-sm text-slate-400">None.</p>}
           {deductions.map((d) => (
-            <div key={d.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2">
-              <div>
-                <p className="text-sm font-semibold text-slate-700">{d.label}</p>
+            <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
+              <div className="min-w-0">
+                <p className="break-words text-sm font-semibold text-slate-700">{d.label}</p>
                 <p className="text-xs text-slate-400">
                   {money(Number(d.amount_per_period))}/payroll · {d.category.replaceAll('_', ' ')}
                   {d.balance !== null && ` · balance ${money(Number(d.balance))}`}
+                  {(d.start_date || d.end_date) && ` · ${d.start_date ? fmtDate(d.start_date) : '…'} → ${d.end_date ? fmtDate(d.end_date) : '…'}`}
                   {!d.active && ' · inactive'}
                 </p>
               </div>
-              <button
-                onClick={async () => {
-                  await supabase.from('recurring_deductions').update({ active: !d.active }).eq('id', d.id)
-                  await onChanged()
-                }}
-                className="text-xs font-semibold text-brand-600"
-              >
-                {d.active ? 'Deactivate' : 'Activate'}
-              </button>
+              <div className="flex shrink-0 gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditingDed({
+                      id: d.id,
+                      label: d.label,
+                      category: d.category,
+                      amount: String(d.amount_per_period),
+                      balance: d.balance === null ? '' : String(d.balance),
+                      start: d.start_date ?? '',
+                      end: d.end_date ?? '',
+                    })
+                  }
+                  className="text-xs font-semibold text-brand-600"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  disabled={listBusy}
+                  onClick={() =>
+                    listWrite(
+                      () => supabase.from('recurring_deductions').update({ active: !d.active }).eq('id', d.id),
+                      d.active ? 'Deduction paused.' : 'Deduction resumed.',
+                    )
+                  }
+                  className="text-xs font-semibold text-brand-600 disabled:text-slate-300"
+                >
+                  {d.active ? 'Deactivate' : 'Activate'}
+                </button>
+              </div>
             </div>
           ))}
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-5">
-          <Input placeholder="Label (e.g. SSS salary loan)" value={dedForm.label} onChange={(e) => setDedForm({ ...dedForm, label: e.target.value })} className="lg:col-span-2" />
-          <Select value={dedForm.category} onChange={(e) => setDedForm({ ...dedForm, category: e.target.value })}>
-            <option value="sss_loan">SSS loan</option>
-            <option value="pagibig_loan">Pag-IBIG loan</option>
-            <option value="company_loan">Company loan</option>
-            <option value="cash_advance">Cash advance</option>
-            <option value="hmo">HMO</option>
-            <option value="union_dues">Union dues (tax-exempt)</option>
-            <option value="other">Other</option>
-          </Select>
-          <Input placeholder="Amount / payroll" type="number" value={dedForm.amount} onChange={(e) => setDedForm({ ...dedForm, amount: e.target.value })} />
-          <div className="flex gap-2">
-            <Input placeholder="Total (optional)" type="number" value={dedForm.total} onChange={(e) => setDedForm({ ...dedForm, total: e.target.value })} />
-            <Button variant="secondary" onClick={addDeduction}><Plus className="size-4" /></Button>
-          </div>
-        </div>
         <p className="mt-2 text-[11px] text-slate-400">
-          Deductions with a total auto-deactivate when the balance reaches zero (decremented on every finalized
-          payroll). For one-off items use payroll adjustments on the run itself.
+          Deductions with a balance auto-deactivate when it reaches zero (decremented on every finalized payroll);
+          start and end dates limit the payrolls they apply to. For one-off items use payroll adjustments on the run
+          itself.
         </p>
       </Card>
+
+      <Modal open={editingAlw !== null} onClose={() => setEditingAlw(null)} title={editingAlw?.id ? 'Edit allowance' : 'Add allowance'}>
+        {editingAlw && (
+          <div className="space-y-4">
+            <Field label="Label">
+              <Input placeholder="e.g. Rice subsidy" value={editingAlw.label} onChange={(e) => setEditingAlw({ ...editingAlw, label: e.target.value })} />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Amount (PHP)">
+                <Input type="number" min={0} step="0.01" value={editingAlw.amount} onChange={(e) => setEditingAlw({ ...editingAlw, amount: e.target.value })} />
+              </Field>
+              <Field label="Basis">
+                <Select value={editingAlw.basis} onChange={(e) => setEditingAlw({ ...editingAlw, basis: e.target.value as AllowanceBasis })}>
+                  {Object.entries(ALLOWANCE_BASIS_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <Field label="BIR classification">
+              <Select value={editingAlw.category} onChange={(e) => setEditingAlw({ ...editingAlw, category: e.target.value as AllowanceCategory })}>
+                {Object.entries(ALLOWANCE_CATEGORY_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
+              </Select>
+            </Field>
+            <Button className="w-full" disabled={listBusy} onClick={() => saveAllowance(editingAlw)}>
+              {listBusy ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={editingDed !== null} onClose={() => setEditingDed(null)} title={editingDed?.id ? 'Edit deduction' : 'Add recurring deduction'}>
+        {editingDed && (
+          <div className="space-y-4">
+            <Field label="Label">
+              <Input placeholder="e.g. SSS salary loan" value={editingDed.label} onChange={(e) => setEditingDed({ ...editingDed, label: e.target.value })} />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Kind">
+                <Select value={editingDed.category} onChange={(e) => setEditingDed({ ...editingDed, category: e.target.value })}>
+                  {Object.entries(DEDUCTION_CATEGORY_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Amount per payroll (PHP)">
+                <Input type="number" min={0} step="0.01" value={editingDed.amount} onChange={(e) => setEditingDed({ ...editingDed, amount: e.target.value })} />
+              </Field>
+            </div>
+            <Field
+              label={editingDed.id ? 'Remaining balance (PHP)' : 'Total to deduct (PHP)'}
+              hint="Optional — blank = no limit. Each finalized payroll reduces it; at zero the deduction stops."
+            >
+              <Input type="number" min={0} step="0.01" value={editingDed.balance} onChange={(e) => setEditingDed({ ...editingDed, balance: e.target.value })} />
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="First payroll on or after (optional)">
+                <Input type="date" value={editingDed.start} onChange={(e) => setEditingDed({ ...editingDed, start: e.target.value })} />
+              </Field>
+              <Field label="Last payroll on or before (optional)">
+                <Input type="date" value={editingDed.end} onChange={(e) => setEditingDed({ ...editingDed, end: e.target.value })} />
+              </Field>
+            </div>
+            <Button className="w-full" disabled={listBusy} onClick={() => saveDeduction(editingDed)}>
+              {listBusy ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        )}
+      </Modal>
     </div>
   )
+}
+
+interface AllowanceForm {
+  id?: string
+  label: string
+  amount: string
+  category: AllowanceCategory
+  basis: AllowanceBasis
+}
+
+interface DeductionForm {
+  id?: string
+  label: string
+  category: string
+  amount: string
+  /** remaining balance (new: the total to deduct); '' = no limit */
+  balance: string
+  start: string
+  end: string
+}
+
+const DEDUCTION_CATEGORY_LABELS: Record<string, string> = {
+  sss_loan: 'SSS loan',
+  pagibig_loan: 'Pag-IBIG loan',
+  company_loan: 'Company loan',
+  cash_advance: 'Cash advance',
+  hmo: 'HMO',
+  union_dues: 'Union dues (tax-exempt)',
+  other: 'Other',
 }
 
 function CareerTab({
@@ -691,7 +849,7 @@ function CareerTab({
 
       <Modal open={adding} onClose={() => setAdding(false)} title="Record career event">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Event type">
               <Select value={f.event_type} onChange={(e) => setF({ ...f, event_type: e.target.value })}>
                 {Object.entries(eventLabels).map(([k, v]) => (
@@ -887,30 +1045,60 @@ const TAX_FIELDS: { key: keyof EmployeeTaxYear; label: string }[] = [
 function BirTab({ employee }: { employee: Employee }) {
   const toast = useToast()
   const [year, setYear] = useState(Number(todayManila().slice(0, 4)))
-  const [row, setRow] = useState<Partial<EmployeeTaxYear> | null>(null)
+  // the year a row was loaded for travels with it: saving never writes one
+  // year's figures under another
+  const [row, setRow] = useState<(Partial<EmployeeTaxYear> & { loadedFor: number }) | null>(null)
+  const [loadError, setLoadError] = useState('')
+  const [reload, setReload] = useState(0)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    let cancelled = false
     setRow(null)
+    setLoadError('')
     supabase
       .from('employee_tax_years')
       .select('*')
       .eq('employee_id', employee.id)
       .eq('year', year)
       .maybeSingle()
-      .then(({ data }) => setRow((data as EmployeeTaxYear) ?? { has_previous_employer: false, substituted_filing: 'auto', pera_tax_credit: 0 }))
-  }, [employee.id, year])
+      .then(({ data, error }) => {
+        if (cancelled) return
+        // a failed read is not "no data yet": saving blanks would wipe the stored figures
+        if (error) setLoadError(errorMessage(error, 'Failed to load'))
+        else
+          setRow({
+            ...((data as EmployeeTaxYear | null) ?? { has_previous_employer: false, substituted_filing: 'auto', pera_tax_credit: 0 }),
+            loadedFor: year,
+          })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [employee.id, year, reload])
 
-  if (!row) return <Spinner />
+  if (loadError) {
+    return (
+      <Card>
+        <p className="text-sm text-rose-600">
+          Couldn't load the BIR data: {loadError}{' '}
+          <button type="button" onClick={() => setReload((n) => n + 1)} className="font-semibold underline">
+            Try again
+          </button>
+        </p>
+      </Card>
+    )
+  }
+  if (!row || row.loadedFor !== year) return <Spinner />
   const set = (k: keyof EmployeeTaxYear, v: unknown) => setRow({ ...row, [k]: v })
 
   async function save() {
-    if (!row) return
+    if (!row || row.loadedFor !== year) return
     setBusy(true)
     try {
       const payload: Record<string, unknown> = {
         employee_id: employee.id,
-        year,
+        year: row.loadedFor,
         has_previous_employer: !!row.has_previous_employer,
         prev_employer_tin: row.prev_employer_tin ?? '',
         prev_employer_name: row.prev_employer_name ?? '',
@@ -952,7 +1140,7 @@ function BirTab({ employee }: { employee: Employee }) {
         />
         {row.has_previous_employer && (
           <div className="mt-4 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Previous employer TIN"><Input value={row.prev_employer_tin ?? ''} onChange={(e) => set('prev_employer_tin', e.target.value)} /></Field>
               <Field label="Name"><Input value={row.prev_employer_name ?? ''} onChange={(e) => set('prev_employer_name', e.target.value)} /></Field>
               <Field label="Address" className="col-span-2"><Input value={row.prev_employer_address ?? ''} onChange={(e) => set('prev_employer_address', e.target.value)} /></Field>

@@ -66,10 +66,11 @@ const employeeNav: NavItem[] = [
 ]
 
 function EntitySwitcher() {
-  const { entities, entity, setEntityId } = useEntity()
+  const { entities, entity, setEntityId, error } = useEntity()
   const { isCompanyAdmin } = useAuth()
   const active = entities.filter((e) => e.is_active)
   const archived = isCompanyAdmin ? entities.filter((e) => !e.is_active) : []
+  if (error) return <p className="px-3 text-[11px] text-rose-300">Clients could not be loaded.</p>
   if (active.length === 0 && !entity) {
     return (
       <p className="px-3 text-[11px] text-brand-300">
@@ -182,7 +183,9 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
           </div>
           {mode === 'admin' && (
             <button
+              type="button"
               title="Change password"
+              aria-label="Change password"
               onClick={() => setChangingPw(true)}
               className="rounded-lg p-1.5 text-brand-300 hover:bg-brand-800 hover:text-white"
             >
@@ -190,7 +193,9 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
             </button>
           )}
           <button
+            type="button"
             title="Sign out"
+            aria-label="Sign out"
             onClick={async () => {
               await signOut()
               navigate('/')
@@ -215,7 +220,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
       )}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 lg:hidden">
-          <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100">
+          <button type="button" aria-label="Open menu" onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100">
             <Menu className="size-5" />
           </button>
           <p className="text-sm font-bold text-brand-900">Payslip HR</p>
