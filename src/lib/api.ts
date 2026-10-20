@@ -103,11 +103,16 @@ export async function callAdminUsers(
     },
     body: JSON.stringify(body),
   })
+  let payload: { ok?: boolean; error?: string; message?: string; msg?: string; user_id?: string; code?: string } = {}
   try {
-    return await res.json()
+    payload = await res.json()
   } catch {
-    return { error: `Request failed (${res.status})` }
+    // non-JSON body (gateway / network error page)
   }
+  // Gateway failures (expired session, function not deployed, worker crash)
+  // carry no `error` key — never let a non-2xx response read as success.
+  if (!res.ok) return { error: payload.error ?? payload.message ?? payload.msg ?? `Request failed (${res.status})` }
+  return payload
 }
 
 export function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {

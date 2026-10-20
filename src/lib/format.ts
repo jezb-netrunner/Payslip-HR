@@ -101,6 +101,21 @@ export function fmtMonth(d: string | null | undefined): string {
 }
 
 /** Format a TIN as 000-000-000[-00000]. */
+/**
+ * Reads a client TIN as typed — "123-456-789", "123456789", or with the
+ * branch appended ("123-456-789-00000") — into the 9-digit TIN and the
+ * branch code the entities table stores separately. null = unreadable.
+ */
+export function splitClientTin(tin: string, branch: string): { tin: string; branch: string } | null {
+  const d = tin.replace(/\D/g, '')
+  const typedBranch = d.slice(9)
+  const br = (typedBranch || branch.replace(/\D/g, '')) || '00000'
+  if (!/^[0-9]{3,5}$/.test(br)) return null
+  if (!d) return { tin: '', branch: br }
+  if (d.length !== 9 && (d.length < 12 || d.length > 14)) return null
+  return { tin: `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6, 9)}`, branch: br }
+}
+
 export function fmtTin(tin: string | null | undefined, branch?: string | null): string {
   const digits = (tin ?? '').replace(/\D/g, '')
   if (!digits) return ''

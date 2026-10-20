@@ -6,12 +6,30 @@ import type { Entity } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { CONTRIBUTION_TIMING_LABELS, FREQUENCY_LABELS, PH_REGIONS, ROUNDING_LABELS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
+import { splitClientTin } from '../../lib/format'
 
 export default function Settings() {
   const { entity, reload } = useEntity()
   const { isCompanyAdmin } = useAuth()
   if (!entity) return <NoClient companyAdmin={isCompanyAdmin} />
   return <SettingsForm key={entity.id} initial={entity} onSaved={reload} />
+}
+
+/** Mirrors the entities CHECK constraints so the admin gets a plain message. */
+function settingsRangeProblem(s: Entity): string | null {
+  const n = (v: unknown) => Number(v)
+  const int = (v: unknown) => Number.isInteger(Number(v))
+  if (!(n(s.minimum_wage_daily) >= 0)) return 'Minimum wage cannot be negative.'
+  if (!(n(s.working_days_divisor) > 0 && n(s.working_days_divisor) <= 366)) return 'Days-per-year factor must be between 1 and 366.'
+  if (!(n(s.standard_hours_per_day) > 0 && n(s.standard_hours_per_day) <= 24)) return 'Standard hours per day must be above 0 and at most 24.'
+  if (!int(s.grace_period_minutes) || n(s.grace_period_minutes) < 0 || n(s.grace_period_minutes) > 240)
+    return 'Grace period must be a whole number of minutes, 0–240.'
+  if (!(n(s.night_diff_rate) >= 0.1 && n(s.night_diff_rate) <= 1))
+    return 'Night differential rate must be at least 0.10 (Labor Code Art. 86) and at most 1.'
+  if (!int(s.pay_date_lag_days) || n(s.pay_date_lag_days) < 0 || n(s.pay_date_lag_days) > 31)
+    return 'Days from period end to pay date must be a whole number, 0–31.'
+  return null
 }
 
 function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Promise<void> }) {
@@ -23,6 +41,16 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
   const set = <K extends keyof Entity>(k: K, v: Entity[K]) => setS({ ...s, [k]: v })
 
   async function save() {
+    const tin = splitClientTin(s.tin, s.tin_branch_code)
+    const problem = !s.name.trim()
+      ? 'Registered name is required.'
+      : !tin
+        ? 'TIN: 9 digits (000-000-000); branch code: 3–5 digits (e.g. 00000).'
+        : settingsRangeProblem(s)
+    if (problem || !tin) {
+      toast('error', problem ?? 'Check the TIN.')
+      return
+    }
     setBusy(true)
     try {
       const { error } = await supabase
@@ -30,8 +58,8 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
         .update({
           name: s.name.trim(),
           trade_name: s.trade_name,
-          tin: s.tin.trim(),
-          tin_branch_code: s.tin_branch_code.trim() || '00000',
+          tin: tin.tin,
+          tin_branch_code: tin.branch,
           rdo_code: s.rdo_code,
           registered_address: s.registered_address,
           zip_code: s.zip_code,
@@ -61,7 +89,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
       toast('success', 'Settings saved (audit-logged).')
       await onSaved()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Save failed')
+      toast('error', errorMessage(err, 'Save failed'))
     } finally {
       setBusy(false)
     }

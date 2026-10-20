@@ -5,10 +5,11 @@ import { Badge, Button, Field, Input, Modal, PageHeader, Select, Spinner, TableS
 import { useToast } from '../../components/toast'
 import type { Entity } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtTin, money } from '../../lib/format'
+import { fmtTin, money, splitClientTin } from '../../lib/format'
 import { FREQUENCY_LABELS, PH_REGIONS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
+import { errorMessage } from '../../lib/errors'
 
 export default function Clients() {
   const toast = useToast()
@@ -208,6 +209,11 @@ function AddClientModal({
       toast('error', 'Set the region and its current daily minimum wage.')
       return
     }
+    const tin = splitClientTin(f.tin, f.tin_branch_code)
+    if (!tin) {
+      toast('error', 'TIN: 9 digits (000-000-000); branch code: 3–5 digits (e.g. 00000).')
+      return
+    }
     setBusy(true)
     try {
       const { data, error } = await supabase
@@ -216,8 +222,8 @@ function AddClientModal({
           code,
           name: f.name.trim(),
           trade_name: f.trade_name.trim(),
-          tin: f.tin.trim(),
-          tin_branch_code: f.tin_branch_code.trim() || '00000',
+          tin: tin.tin,
+          tin_branch_code: tin.branch,
           rdo_code: f.rdo_code.trim(),
           minimum_wage_region: f.minimum_wage_region,
           minimum_wage_daily: Number(f.minimum_wage_daily),
@@ -230,7 +236,7 @@ function AddClientModal({
       toast('success', 'Client added with the statutory leave types. Review its payroll settings next.')
       onCreated(data.id)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to add client'
+      const msg = errorMessage(err, 'Failed to add client')
       toast('error', /entities_code_key/.test(msg) ? 'That client code is already taken.' : msg)
     } finally {
       setBusy(false)

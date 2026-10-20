@@ -170,6 +170,10 @@ begin
     v_entity := (v_row->>'id')::uuid;
   elsif v_row ? 'entity_id' then
     v_entity := nullif(v_row->>'entity_id','')::uuid;
+  elsif nullif(v_row->>'employee_id','') is not null then
+    -- employee-owned rows without a client column of their own
+    -- (allowances, recurring deductions, employee login profiles)
+    select entity_id into v_entity from employees where id = (v_row->>'employee_id')::uuid;
   end if;
   select email into v_email from profiles where id = auth.uid();
 

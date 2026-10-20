@@ -17,6 +17,7 @@ import {
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
+import { errorMessage } from '../../lib/errors'
 
 const statusTones: Record<string, string> = {
   regular: 'green',
@@ -296,7 +297,7 @@ function AddEmployeeModal({
       setF(blank())
       onCreated(data.id)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to add employee'
+      const msg = errorMessage(err, 'Failed to add employee')
       toast('error', /employee_no/.test(msg) ? 'That employee number is already used in this client.' : msg)
     } finally {
       setBusy(false)

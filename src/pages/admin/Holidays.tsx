@@ -8,6 +8,7 @@ import { useEntity } from '../../lib/entity'
 import { fmtDate } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 const kindLabels: Record<string, { label: string; tone: string; pay: string }> = {
   regular: { label: 'Regular holiday', tone: 'red', pay: '200% worked / 100% unworked' },
@@ -60,7 +61,7 @@ export default function Holidays() {
       setF({ date: '', name: '', kind: 'regular' })
       await load()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }

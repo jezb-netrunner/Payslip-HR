@@ -14,6 +14,7 @@ import { addDays, todayManila } from '../../lib/manila'
 import { slotFor, suggestPeriod } from '../../lib/payPeriods'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
+import { errorMessage } from '../../lib/errors'
 
 export default function Payroll() {
   const { entity } = useEntity()
@@ -196,6 +197,18 @@ function NewRunModal({
       toast('error', 'Pick the separated employee(s) for this final pay.')
       return
     }
+    if (runType !== 'thirteenth_month') {
+      // mirrors payroll_runs_frequency_check
+      const [lo, hi] = frequency === 'monthly' ? [1, 1] : frequency === 'semi_monthly' ? [2, 2] : [4, 5]
+      if (!Number.isInteger(slot.count) || slot.count < lo || slot.count > hi) {
+        toast('error', `${FREQUENCY_LABELS[frequency]} payroll has ${lo === hi ? lo : `${lo} or ${hi}`} payroll(s) in a month.`)
+        return
+      }
+      if (!Number.isInteger(slot.index) || slot.index < 1 || slot.index > slot.count) {
+        toast('error', `Payroll no. in month must be between 1 and ${slot.count}.`)
+        return
+      }
+    }
     setBusy(true)
     try {
       const { data, error } = await supabase
@@ -220,7 +233,7 @@ function NewRunModal({
       toast('success', 'Run created — enter any one-time adjustments, then compute the draft.')
       onCreated(data.id)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create run'
+      const msg = errorMessage(err, 'Failed to create run')
       toast(
         'error',
         /regular_slot/.test(msg)
@@ -279,10 +292,16 @@ function NewRunModal({
                   <Input type="month" value={slot.month.slice(0, 7)} onChange={(e) => setSlot({ ...slot, month: `${e.target.value}-01` })} />
                 </Field>
                 <Field label="Payroll no. in month">
-                  <Input type="number" min={1} value={slot.index} onChange={(e) => setSlot({ ...slot, index: Number(e.target.value) })} />
+                  <Input type="number" min={1} max={slot.count} value={slot.index} onChange={(e) => setSlot({ ...slot, index: Number(e.target.value) })} />
                 </Field>
                 <Field label="Payrolls in month">
-                  <Input type="number" min={1} value={slot.count} onChange={(e) => setSlot({ ...slot, count: Number(e.target.value) })} />
+                  <Input
+                    type="number"
+                    min={frequency === 'weekly' ? 4 : frequency === 'semi_monthly' ? 2 : 1}
+                    max={frequency === 'weekly' ? 5 : frequency === 'semi_monthly' ? 2 : 1}
+                    value={slot.count}
+                    onChange={(e) => setSlot({ ...slot, count: Number(e.target.value) })}
+                  />
                 </Field>
               </div>
             )}

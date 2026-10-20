@@ -87,6 +87,14 @@ values ('20000000-0000-0000-0000-0000000000e2', '10000000-0000-0000-0000-0000000
 select pg_temp.check((select count(*) from employees) = 1, 'BETA admin sees one employee');
 select pg_temp.expect_error($$update employees set entity_id = '10000000-0000-0000-0000-00000000000a' where employee_no = 'A-001'$$, '%');
 commit;
+-- allowances have no client column: their audit rows take the employee's client
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :ea, true);
+insert into employee_allowances (employee_id, label, amount) values ('20000000-0000-0000-0000-0000000000e1', 'Rice', 2000);
+select pg_temp.check((select count(*) from audit_logs where table_name = 'employee_allowances') = 1, 'ACME admin sees the allowance audit row');
+commit;
+select pg_temp.check((select entity_id from audit_logs where table_name = 'employee_allowances') = '10000000-0000-0000-0000-00000000000a', 'allowance audit row scoped to ACME');
 -- employee number unique per client only (both clients use A-001)
 select pg_temp.check((select count(*) from employees where employee_no = 'A-001') = 2, 'employee_no unique per client');
 -- an employee can never move clients (even by the owner/service)

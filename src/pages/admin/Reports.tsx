@@ -12,6 +12,7 @@ import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { alphalistCsv, buildAlphalist, type AlphalistRow } from '../../payroll/alphalist'
 import { fetchFinalizedPayslipsForYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
+import { errorMessage } from '../../lib/errors'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
 
@@ -87,7 +88,7 @@ function useAlphalist(entity: Entity, year: number) {
           }),
         )
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load')
+        if (!cancelled) setError(errorMessage(err, 'Failed to load'))
       }
     })()
     return () => {

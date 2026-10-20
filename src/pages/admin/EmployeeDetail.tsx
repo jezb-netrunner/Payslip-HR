@@ -30,6 +30,7 @@ import { generateCodePart } from '../../lib/loginCode'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import type { AllowanceBasis, AllowanceCategory, PayFrequency } from '../../payroll/types'
+import { errorMessage } from '../../lib/errors'
 
 const eventLabels: Record<string, string> = {
   hired: 'Hired',
@@ -175,7 +176,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
       toast('success', 'Saved (audit-logged).')
       await onSaved()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Save failed'
+      const msg = errorMessage(err, 'Save failed')
       toast('error', /tin_format/.test(msg) ? 'TIN must look like 000-000-000 or 000-000-000-00000.' : msg)
     } finally {
       setBusy(false)
@@ -347,6 +348,11 @@ function PayTab({
   const [dedForm, setDedForm] = useState({ label: '', category: 'other', amount: '', total: '' })
 
   async function savePay() {
+    const dpy = f.days_per_year ? Number(f.days_per_year) : null
+    if (dpy !== null && !(dpy > 0 && dpy <= 366)) {
+      toast('error', 'Days-per-year factor must be between 1 and 366 (or blank for the client default).')
+      return
+    }
     setBusy(true)
     try {
       const { error } = await supabase
@@ -367,7 +373,7 @@ function PayTab({
       toast('success', 'Pay details saved. Record a salary-adjustment career event for rate changes.')
       await onChanged()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }
@@ -436,7 +442,7 @@ function PayTab({
             </Select>
           </Field>
           <Field label="Days-per-year factor" hint={`Blank = client default (${entity.working_days_divisor})`}>
-            <Input type="number" value={f.days_per_year} placeholder={String(entity.working_days_divisor)} onChange={(e) => setF({ ...f, days_per_year: e.target.value })} />
+            <Input type="number" min={1} max={366} value={f.days_per_year} placeholder={String(entity.working_days_divisor)} onChange={(e) => setF({ ...f, days_per_year: e.target.value })} />
           </Field>
           <Field label="Paid by">
             <Select value={f.payment_method} onChange={(e) => setF({ ...f, payment_method: e.target.value as PaymentMethod })}>
@@ -641,7 +647,7 @@ function CareerTab({
       setAdding(false)
       await onChanged()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }
@@ -748,7 +754,7 @@ function LoginTab({
       toast('success', account ? 'New code set — the old code no longer works.' : 'Login code issued.')
       await onChanged()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }
@@ -762,7 +768,7 @@ function LoginTab({
       toast('success', active ? 'Login reactivated.' : 'Login deactivated.')
       await onChanged()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }
@@ -914,7 +920,7 @@ function BirTab({ employee }: { employee: Employee }) {
       if (error) throw error
       toast('success', `BIR data for ${year} saved.`)
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }

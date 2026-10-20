@@ -8,6 +8,7 @@ import type { EntityAdmin, Profile } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { ROLE_LABELS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 export default function Users() {
   const { profile: me } = useAuth()
@@ -162,7 +163,7 @@ function CreateAdminModal({ open, onClose, onSaved }: { open: boolean; onClose: 
       setF({ full_name: '', email: '', password: '', role: 'entity_admin', entity_ids: [] })
       await onSaved()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }
@@ -231,7 +232,7 @@ function EditAdminModal({
       toast('success', 'Saved.')
       await onSaved()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed')
+      toast('error', errorMessage(err, 'Failed'))
     } finally {
       setBusy(false)
     }

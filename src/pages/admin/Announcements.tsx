@@ -166,7 +166,7 @@ function EditModal({
       ? await supabase.from('announcements').update(payload).eq('id', initial.id)
       : await supabase.from('announcements').insert({ ...payload, created_by: userData.user?.id ?? null })
     setBusy(false)
-    if (error) toast('error', /expires_at/.test(error.message) ? 'The expiry must be after the publish time.' : error.message)
+    if (error) toast('error', /announcements_expiry_check/.test(error.message) ? 'The expiry must be after the publish time.' : error.message)
     else {
       toast('success', 'Announcement saved.')
       await onSaved()

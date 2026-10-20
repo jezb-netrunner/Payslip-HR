@@ -7,6 +7,7 @@ import type { LeaveRequest, LeaveType } from '../../lib/db'
 import { fmtDate } from '../../lib/format'
 import { eachDate, isoWeekday, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 export default function MyLeaves() {
   const { employee } = useAuth()
@@ -79,7 +80,7 @@ export default function MyLeaves() {
       setForm({ type: '', start: todayManila(), end: todayManila(), reason: '' })
       await load()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed to submit')
+      toast('error', errorMessage(err, 'Failed to submit'))
     } finally {
       setBusy(false)
     }

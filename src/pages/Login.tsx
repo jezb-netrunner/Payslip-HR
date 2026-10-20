@@ -3,6 +3,7 @@ import { Building2, KeyRound, Lock, Mail } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { employeeLoginEmail, isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
 import { Button, Input } from '../components/ui'
+import { errorMessage } from '../lib/errors'
 
 type Mode = 'employee' | 'admin' | 'reset' | 'bootstrap'
 
@@ -54,7 +55,7 @@ export default function Login() {
         )
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed')
+      setError(errorMessage(err, 'Sign-in failed'))
     } finally {
       setBusy(false)
     }

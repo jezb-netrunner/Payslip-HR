@@ -15,6 +15,7 @@ import { useEntity } from '../../lib/entity'
 import { fmtDate, fmtDateTime, fmtHours, fullName } from '../../lib/format'
 import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 export default function Timesheets() {
   const { entity } = useEntity()
@@ -170,7 +171,7 @@ async function saveRows(rows: Row[]): Promise<{ saved: number; errors: string[] 
       }
       saved += 1
     } catch (err) {
-      errors.push(`${label}: ${err instanceof Error ? err.message : 'failed'}`)
+      errors.push(`${label}: ${errorMessage(err, 'failed')}`)
     }
   }
   return { saved, errors }

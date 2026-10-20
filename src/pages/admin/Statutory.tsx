@@ -9,6 +9,7 @@ import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
 import type { BirAnnualData, BirWhtData, PagibigData, PhilHealthData, SssTableData, TaxBracket } from '../../payroll/types'
+import { errorMessage } from '../../lib/errors'
 
 type Kind = StatutoryVersion['kind']
 
@@ -427,7 +428,7 @@ function VersionEditor({
       if (error) throw error
       await onSaved()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed'
+      const msg = errorMessage(err, 'Failed')
       toast('error', /kind_effective_from_key|unique/.test(msg) ? 'A version with that effective date already exists — edit it instead.' : msg)
     } finally {
       setBusy(false)

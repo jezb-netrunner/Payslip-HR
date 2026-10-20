@@ -12,6 +12,7 @@ import { fmtDate, fmtMonth, fullName, money } from '../../lib/format'
 import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 const EARNING_CATEGORIES = [
   'basic', 'overtime', 'holiday', 'night_diff', 'hazard', 'other_benefits', 'de_minimis',
@@ -72,7 +73,7 @@ export default function PayrollRunDetail() {
       toast('success', `Computed payslips for ${res.computed} employee/s.`)
       await load()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Computation failed')
+      toast('error', errorMessage(err, 'Computation failed'))
     } finally {
       setComputing(false)
     }
@@ -88,7 +89,7 @@ export default function PayrollRunDetail() {
       toast('success', 'Run finalized. Employees can now see their payslips.')
       await load()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Finalize failed')
+      toast('error', errorMessage(err, 'Finalize failed'))
     } finally {
       setBusy(false)
     }
@@ -103,7 +104,7 @@ export default function PayrollRunDetail() {
       toast('success', 'Run reopened as draft.')
       await load()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Reopen failed')
+      toast('error', errorMessage(err, 'Reopen failed'))
     } finally {
       setBusy(false)
     }
@@ -478,7 +479,7 @@ function AdjustmentModal({
           </Field>
         </div>
         <Field label="Label (shown on the payslip)">
-          <Input value={f.label} placeholder="e.g. Unpaid OT on Oct 3" onChange={(e) => setF({ ...f, label: e.target.value })} />
+          <Input value={f.label} maxLength={120} placeholder="e.g. Unpaid OT on Oct 3" onChange={(e) => setF({ ...f, label: e.target.value })} />
         </Field>
         <Field label={f.kind === 'earning' ? 'BIR classification' : 'Deduction kind'}>
           <Select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>

@@ -7,6 +7,7 @@ import type { TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtHours, fmtTime } from '../../lib/format'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 export default function MyAttendance() {
   const { employee } = useAuth()
@@ -80,7 +81,7 @@ export default function MyAttendance() {
       setCorrecting(null)
       await load()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed to file request')
+      toast('error', errorMessage(err, 'Failed to file request'))
     } finally {
       setBusy(false)
     }

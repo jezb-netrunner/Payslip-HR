@@ -16,6 +16,17 @@
 -- account (no HR/payroll rows existed to migrate).
 -- ============================================================
 
+-- ---------- precondition: nothing to re-home ----------
+do $$
+begin
+  if exists (select 1 from public.employees)
+     or exists (select 1 from public.time_entries)
+     or exists (select 1 from public.payroll_runs)
+     or exists (select 1 from public.leave_requests) then
+    raise exception 'multi-client migration: HR/payroll rows exist; assign them to a client first';
+  end if;
+end $$;
+
 -- ---------- retire the single-entity security layer ----------
 do $$
 declare r record;
@@ -291,7 +302,7 @@ create table public.announcements (
   created_by uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  check (expires_at is null or expires_at > published_at)
+  constraint announcements_expiry_check check (expires_at is null or expires_at > published_at)
 );
 create trigger announcements_updated_at before update on public.announcements
   for each row execute function public.set_updated_at();
