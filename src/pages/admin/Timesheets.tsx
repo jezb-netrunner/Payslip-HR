@@ -23,6 +23,18 @@ export default function Timesheets() {
   const { entity } = useEntity()
   const { isCompanyAdmin } = useAuth()
   const [tab, setTab] = useState('daily')
+  // unsaved edits in the open sheet: switching tabs or closing the page asks first
+  const dirty = useRef(0)
+  const onDirty = useCallback((n: number) => {
+    dirty.current = n
+  }, [])
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (dirty.current > 0) e.preventDefault()
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [])
   if (!entity) return <NoClient companyAdmin={isCompanyAdmin} />
   return (
     <div>
@@ -37,10 +49,15 @@ export default function Timesheets() {
           { key: 'corrections', label: 'Correction requests' },
         ]}
         active={tab}
-        onChange={setTab}
+        onChange={(t) => {
+          if (t === tab) return
+          if (dirty.current > 0 && !window.confirm(`Discard ${plural(dirty.current, 'unsaved change')}?`)) return
+          dirty.current = 0
+          setTab(t)
+        }}
       />
-      {tab === 'daily' && <DailySheet key={entity.id} entity={entity} />}
-      {tab === 'employee' && <EmployeeSheet key={entity.id} entity={entity} />}
+      {tab === 'daily' && <DailySheet key={entity.id} entity={entity} onDirty={onDirty} />}
+      {tab === 'employee' && <EmployeeSheet key={entity.id} entity={entity} onDirty={onDirty} />}
       {tab === 'corrections' && <Corrections key={entity.id} entity={entity} />}
     </div>
   )
@@ -190,16 +207,42 @@ function filledWithSchedule(rows: Row[]): Row[] {
 }
 
 /**
- * Time in after midnight on an overnight shift (e.g. 00:30 on a 22:00–06:00
- * schedule) falls on the day after the work date. An unchanged time keeps
- * the day it was stored with (corrections may have put it there).
+ * Whether each row's time in falls on the day after its work date. A stored,
+ * unchanged time keeps the day it was saved with (corrections may have put
+ * it there). The day's first pair follows the schedule (a late start after
+ * midnight on a 22:00–06:00 shift); a later pair that starts earlier on the
+ * clock than the pair before it — or follows a pair already past midnight —
+ * has crossed midnight. Rows must be grouped by day in display order.
  */
-function timeInNextDay(r: Row): boolean {
-  if (r.entry && manilaHHMM(r.entry.clock_in) === r.timeIn) {
-    return manilaDateStr(new Date(r.entry.clock_in)) > r.date
+function nextDayFlags(rows: Row[]): Map<string, boolean> {
+  const out = new Map<string, boolean>()
+  let day = ''
+  let prevIn: number | null = null
+  let prevNext = false
+  for (const r of rows) {
+    if (r.dayKey !== day) {
+      day = r.dayKey
+      prevIn = null
+      prevNext = false
+    }
+    if (!r.timeIn) {
+      out.set(r.key, false)
+      continue
+    }
+    let next: boolean
+    if (r.entry && manilaHHMM(r.entry.clock_in) === r.timeIn) {
+      next = manilaDateStr(new Date(r.entry.clock_in)) > r.date
+    } else if (prevIn === null) {
+      const { start, end } = r.employee.work_schedule
+      next = hhmmToMinutes(end) <= hhmmToMinutes(start) && hhmmToMinutes(r.timeIn) < hhmmToMinutes(end)
+    } else {
+      next = prevNext || hhmmToMinutes(r.timeIn) < prevIn
+    }
+    out.set(r.key, next)
+    prevIn = hhmmToMinutes(r.timeIn)
+    prevNext = next
   }
-  const { start, end } = r.employee.work_schedule
-  return hhmmToMinutes(end) <= hhmmToMinutes(start) && hhmmToMinutes(r.timeIn) < hhmmToMinutes(end)
+  return out
 }
 
 function changed(r: Row): boolean {
@@ -214,11 +257,24 @@ function discardOk(rows: Row[]): boolean {
   return dirty === 0 || window.confirm(`Discard ${plural(dirty, 'unsaved change')}?`)
 }
 
-/** Persist edited rows; returns the number saved and per-row errors. */
+/**
+ * Persist edited rows; returns the number saved and per-row errors.
+ * Deletions go first and the rest in time order, so moving one pair over a
+ * pair cleared in the same save doesn't trip the overlap check halfway.
+ */
 async function saveRows(rows: Row[]): Promise<{ saved: number; errors: string[] }> {
   let saved = 0
   const errors: string[] = []
-  for (const r of rows.filter(changed)) {
+  const flags = nextDayFlags(rows)
+  const at = (r: Row) => (r.timeIn ? manilaWallToIso(r.date, r.timeIn, flags.get(r.key)) : '')
+  const work = rows
+    .filter(changed)
+    .sort((a, b) => {
+      const da = !a.timeIn && !a.timeOut ? 0 : 1
+      const db = !b.timeIn && !b.timeOut ? 0 : 1
+      return da - db || at(a).localeCompare(at(b))
+    })
+  for (const r of work) {
     const label = `${fullName(r.employee)} ${fmtDate(r.date)}`
     try {
       if (!r.timeIn && !r.timeOut) {
@@ -228,7 +284,7 @@ async function saveRows(rows: Row[]): Promise<{ saved: number; errors: string[] 
         }
       } else {
         if (!r.timeIn) throw new Error('time in is required')
-        const inNext = timeInNextDay(r)
+        const inNext = flags.get(r.key) ?? false
         const clockIn = manilaWallToIso(r.date, r.timeIn, inNext)
         const clockOut = r.timeOut
           ? manilaWallToIso(r.date, r.timeOut, inNext || hhmmToMinutes(r.timeOut) <= hhmmToMinutes(r.timeIn))
@@ -269,6 +325,8 @@ function RowCells({
   row,
   first,
   last,
+  inNext,
+  disabled,
   onChange,
   onAddPair,
 }: {
@@ -277,12 +335,15 @@ function RowCells({
   first: boolean
   /** last pair of its day */
   last: boolean
+  /** time in falls on the day after the work date */
+  inNext: boolean
+  /** a save is running */
+  disabled: boolean
   onChange: (patch: Partial<Row>) => void
   onAddPair: () => void
 }) {
   const mins = spanMinutes(row.timeIn, row.timeOut)
   const net = mins === null ? null : mins >= 360 ? Math.max(0, mins - row.employee.work_schedule.break_minutes) : mins
-  const inNext = !!row.timeIn && timeInNextDay(row)
   const overnight = !!row.timeIn && !!row.timeOut && (inNext || hhmmToMinutes(row.timeOut) <= hhmmToMinutes(row.timeIn))
   const label = `${fullName(row.employee)} ${fmtDate(row.date)}`
   return (
@@ -292,7 +353,7 @@ function RowCells({
           type="time"
           aria-label={`Time in, ${label}`}
           value={row.timeIn}
-          disabled={row.locked}
+          disabled={row.locked || disabled}
           onChange={(e) => onChange({ timeIn: e.target.value })}
           className={`w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
         />
@@ -303,7 +364,7 @@ function RowCells({
           type="time"
           aria-label={`Time out, ${label}`}
           value={row.timeOut}
-          disabled={row.locked}
+          disabled={row.locked || disabled}
           onChange={(e) => onChange({ timeOut: e.target.value })}
           className={`w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
         />
@@ -387,7 +448,7 @@ function LoadError({ message, onRetry }: { message: string; onRetry: () => void 
 
 // ---------- daily sheet: every employee, one date ----------
 
-function DailySheet({ entity }: { entity: Entity }) {
+function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) => void }) {
   const toast = useToast()
   const [date, setDate] = useState(todayManila())
   const [rows, setRows] = useState<Row[]>([])
@@ -426,12 +487,19 @@ function DailySheet({ entity }: { entity: Entity }) {
   useEffect(() => {
     load()
   }, [load])
+  // the reload after a save must be for the date shown now
+  const loadRef = useRef(load)
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)))
   const shown = rows.filter((r) => !onlyScheduled || isScheduled(r.employee, date))
   const dirty = rows.filter(changed).length
+  const flags = useMemo(() => nextDayFlags(rows), [rows])
+  useEffect(() => onDirty(dirty), [dirty, onDirty])
   const goTo = (d: string) => {
-    if (d && d !== date && discardOk(rows)) setDate(d)
+    if (!busy && d && d !== date && discardOk(rows)) setDate(d)
   }
 
   async function save() {
@@ -440,7 +508,7 @@ function DailySheet({ entity }: { entity: Entity }) {
     setBusy(false)
     if (errors.length) toast('error', errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ` (+${errors.length - 3} more)` : ''))
     if (saved) toast('success', `Saved ${plural(saved, 'row')} (audit-logged).`)
-    await load()
+    await loadRef.current()
   }
 
   const holiday = rows[0]?.holiday
@@ -449,11 +517,11 @@ function DailySheet({ entity }: { entity: Entity }) {
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-wrap items-end gap-3">
           <Field label="Work date">
-            <Input type="date" value={date} onChange={(e) => goTo(e.target.value)} className="w-44" />
+            <Input type="date" value={date} disabled={busy} onChange={(e) => goTo(e.target.value)} className="w-44" />
           </Field>
           <div className="flex gap-1 pb-0.5">
-            <Button variant="ghost" onClick={() => goTo(addDays(date, -1))}>‹ Prev</Button>
-            <Button variant="ghost" onClick={() => goTo(addDays(date, 1))}>Next ›</Button>
+            <Button variant="ghost" disabled={busy} onClick={() => goTo(addDays(date, -1))}>‹ Prev</Button>
+            <Button variant="ghost" disabled={busy} onClick={() => goTo(addDays(date, 1))}>Next ›</Button>
           </div>
           <label className="flex items-center gap-2 pb-2 text-sm text-slate-600">
             <input type="checkbox" checked={onlyScheduled} onChange={(e) => setOnlyScheduled(e.target.checked)} className="rounded border-slate-300" />
@@ -461,7 +529,7 @@ function DailySheet({ entity }: { entity: Entity }) {
           </label>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" disabled={loading} onClick={() => setRows(filledWithSchedule)}>
+          <Button variant="secondary" disabled={loading || busy} onClick={() => setRows(filledWithSchedule)}>
             <Wand2 className="size-4" /> Fill scheduled with shift times
           </Button>
           <Button disabled={busy || loading || dirty === 0} onClick={save}>
@@ -525,6 +593,8 @@ function DailySheet({ entity }: { entity: Entity }) {
                     row={r}
                     first={first}
                     last={last}
+                    inNext={flags.get(r.key) ?? false}
+                    disabled={busy}
                     onChange={(p) => patch(r.key, p)}
                     onAddPair={() => setRows((rs) => withExtraPair(rs, r))}
                   />
@@ -544,7 +614,7 @@ function DailySheet({ entity }: { entity: Entity }) {
 
 // ---------- per-employee sheet: one employee, a date range ----------
 
-function EmployeeSheet({ entity }: { entity: Entity }) {
+function EmployeeSheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) => void }) {
   const toast = useToast()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeeId, setEmployeeId] = useState('')
@@ -576,7 +646,10 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
   const load = useCallback(async () => {
     const my = ++seq.current
     setRows([])
-    if (!employee || to < from) return
+    if (!employee || to < from) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     setLoadError('')
     try {
@@ -601,10 +674,17 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
     load()
   }, [load])
 
+  const loadRef = useRef(load)
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
+
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)))
   const dirty = rows.filter(changed).length
+  const flags = useMemo(() => nextDayFlags(rows), [rows])
+  useEffect(() => onDirty(dirty), [dirty, onDirty])
   const guarded = (fn: () => void) => () => {
-    if (discardOk(rows)) fn()
+    if (!busy && discardOk(rows)) fn()
   }
 
   async function save() {
@@ -613,7 +693,7 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
     setBusy(false)
     if (errors.length) toast('error', errors.slice(0, 3).join(' · ') + (errors.length > 3 ? ` (+${errors.length - 3} more)` : ''))
     if (saved) toast('success', `Saved ${plural(saved, 'row')} (audit-logged).`)
-    await load()
+    await loadRef.current()
   }
 
   const totalMinutes = rows.reduce((s, r) => {
@@ -629,6 +709,7 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
           <Field label="Employee">
             <Select
               value={employeeId}
+              disabled={busy}
               onChange={(e) => {
                 const id = e.target.value
                 guarded(() => setEmployeeId(id))()
@@ -646,6 +727,7 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
             <Input
               type="date"
               value={from}
+              disabled={busy}
               onChange={(e) => {
                 const v = e.target.value
                 guarded(() => setFrom(v))()
@@ -657,6 +739,7 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
             <Input
               type="date"
               value={to}
+              disabled={busy}
               onChange={(e) => {
                 const v = e.target.value
                 guarded(() => setTo(v))()
@@ -666,7 +749,7 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
           </Field>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" disabled={loading || rows.length === 0} onClick={() => setRows(filledWithSchedule)}>
+          <Button variant="secondary" disabled={loading || busy || rows.length === 0} onClick={() => setRows(filledWithSchedule)}>
             <Wand2 className="size-4" /> Fill scheduled days
           </Button>
           <Button disabled={busy || loading || dirty === 0} onClick={save}>
@@ -678,6 +761,8 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
         <LoadError message={loadError} onRetry={employees.length ? load : loadEmployees} />
       ) : !employee ? (
         <EmptyState title="Pick an employee" />
+      ) : to < from ? (
+        <EmptyState title="The end date is before the start date" />
       ) : loading ? (
         <Spinner />
       ) : (
@@ -719,6 +804,8 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
                       row={r}
                       first={first}
                       last={last}
+                      inNext={flags.get(r.key) ?? false}
+                      disabled={busy}
                       onChange={(p) => patch(r.key, p)}
                       onAddPair={() => setRows((rs) => withExtraPair(rs, r))}
                     />

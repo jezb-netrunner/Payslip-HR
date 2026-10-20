@@ -45,7 +45,7 @@ async function employeeLoginEmail(code: string): Promise<string> {
 }
 
 /** KEEP IN SYNC with weakCodeReason in src/lib/loginCode.ts. */
-function weakCodeReason(part: string, employeeNo = ""): string | null {
+function weakCodeReason(part: string, employeeNo = "", names: string[] = []): string | null {
   if (!/^[A-Z0-9]{8,24}$/.test(part)) return "The code must be 8–24 letters or digits.";
   if (part === employeeNo.toUpperCase().replace(/[^A-Z0-9]/g, "")) {
     return "Don't use the employee number as the login code — it is easy to guess.";
@@ -53,6 +53,13 @@ function weakCodeReason(part: string, employeeNo = ""): string | null {
   if (/^[0-9]+$/.test(part)) {
     return "Mix in letters: an all-number code (a date, a phone number) is easy to guess.";
   }
+  if (/^[A-Z]+$/.test(part)) {
+    return "Mix in digits: an all-letter code (a word or a name) is easy to guess.";
+  }
+  const name = names
+    .map((n) => n.toUpperCase().replace(/[^A-Z]/g, ""))
+    .find((n) => n.length >= 3 && part.includes(n));
+  if (name) return "Don't put the employee's name in the login code.";
   if (new Set(part).size < 5) return "Use at least 5 different characters.";
   const steps = [...part].slice(1).map((c, i) => c.charCodeAt(0) - part.charCodeAt(i));
   if (steps.every((d) => d === 1) || steps.every((d) => d === -1)) {
@@ -148,7 +155,7 @@ Deno.serve(async (req: Request) => {
       }
       const emp = await loadEmployee(String(body.employee_id ?? ""));
       if (!emp || !emp.entities?.code) return json({ error: "Employee not found" }, 404);
-      const weak = weakCodeReason(part, emp.employee_no);
+      const weak = weakCodeReason(part, emp.employee_no, [emp.first_name, emp.last_name]);
       if (weak) return json({ error: weak }, 400);
 
       const code = `${emp.entities.code}-${part}`;

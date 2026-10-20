@@ -31,7 +31,7 @@ export default function MyLeaves() {
     if (!employee) return
     setLoadError('')
     try {
-      const [{ data: t }, { data: r }, { data: ents }, hols] = await Promise.all([
+      const [tRes, rRes, eRes, hols] = await Promise.all([
         supabase.from('leave_types').select('*').eq('active', true).order('code'),
         supabase
           .from('leave_requests')
@@ -46,11 +46,14 @@ export default function MyLeaves() {
         // this year and next: leave can be filed ahead and across New Year
         getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year + 1}-12-31`),
       ])
+      // a failed read must not show as zero balances
+      const failed = tRes.error ?? rRes.error ?? eRes.error
+      if (failed) throw failed
       setHolidays(hols)
-      setTypes((t ?? []) as LeaveType[])
-      setRequests((r ?? []) as LeaveRequest[])
+      setTypes((tRes.data ?? []) as LeaveType[])
+      setRequests((rRes.data ?? []) as LeaveRequest[])
       const map: Record<string, number> = {}
-      for (const e of ents ?? []) map[e.leave_type_id as string] = Number(e.days)
+      for (const e of eRes.data ?? []) map[e.leave_type_id as string] = Number(e.days)
       setEntitlements(map)
     } catch (err) {
       setLoadError(errorMessage(err, 'Failed to load your leaves'))

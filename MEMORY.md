@@ -153,6 +153,12 @@ merge to `main` yet.
 - Tests 109 → 147 unit/flow; SQL suite + `11_audit_fixes_tests.sql`.
   Both migrations applied live through MCP (non-destructive), `admin-users`
   v4 deployed, live fingerprint = replica, advisors unchanged.
+- Final diff review: adjustment guard took `FOR SHARE` on the run, which
+  deadlocked against finalize's row lock under concurrency →
+  `20261020040519_adjustment_lock_mode` (`FOR NO KEY UPDATE`, two-session
+  probe clean); timesheet next-day flags for post-midnight split pairs;
+  leave/entitlement double-submit guards; login codes also refuse all
+  letters and the employee's own names (`admin-users` v5).
 
 ---
 
@@ -165,12 +171,13 @@ which does NOT work against the new schema — merging
 the live app usable again. Nothing else is outstanding for the backend.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-20:
-- **All 13 migrations applied.** The two multi-client ones were run by the
+- **All 14 migrations applied.** The two multi-client ones were run by the
   owner in the SQL editor (MCP could not — see lesson) and then recorded in
   `supabase_migrations.schema_migrations` under the repo versions
   `20261019120000 multi_client_schema` / `20261019120100
   multi_client_security`. The audit ones (`20261020031639 audit_fixes`,
-  `20261020033538 alphalist_prev_employer_and_audit`) went through MCP
+  `20261020033538 alphalist_prev_employer_and_audit`, `20261020040519
+  adjustment_lock_mode`) went through MCP
   `apply_migration` (non-destructive) — repo files renamed to the versions
   MCP recorded. Verified with `supabase/tests/fingerprint.sql`: tables,
   columns, constraints, indexes, policies, functions, grants and triggers
@@ -180,16 +187,18 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
   national 2026 holidays; RLS on every table. No clients, employees or
   payroll data yet; each client carries its own policy incl. minimum-wage
   region/rate (no default).
-- Edge function **`admin-users` v4** live (verify_jwt on), deployed
+- Edge function **`admin-users` v5** live (verify_jwt on), deployed
   2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
-  login codes refused).
-- Security advisors after the migration: 9 intentional WARNs (RLS helpers
+  login codes refused, incl. all-letter codes and the employee's names).
+- Security advisors after the last DDL (2026-10-20): 9 intentional WARNs (RLS helpers
   `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
   `current_employee_id` / `current_employee_entity_id` / `run_is_finalized`
   and the RPCs `finalize_payroll_run` / `reopen_payroll_run` /
   `review_time_correction` are executable by `authenticated` by design) and
   "Leaked password protection disabled" (Auth dashboard setting, owner's
-  call).
+  call). Performance advisors: INFO only for unindexed FKs / unused indexes
+  (no data yet) and WARN "multiple permissive policies" (admin + own-row
+  policies, by design).
 - Private storage buckets `punch-selfies` and `employee-photos` exist; after
   the migration nothing uses `punch-selfies` (empty; safe to delete).
 - **The owner's account exists** (created 2026-08-24, confirmed; role

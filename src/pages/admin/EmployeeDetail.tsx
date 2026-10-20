@@ -905,7 +905,7 @@ function LoginTab({
   const [busy, setBusy] = useState(false)
 
   async function setCode() {
-    const weak = weakCodeReason(part, employee.employee_no)
+    const weak = weakCodeReason(part, employee.employee_no, [employee.first_name, employee.last_name])
     if (weak) {
       toast('error', weak)
       return
@@ -998,7 +998,7 @@ function LoginTab({
         )}
 
         <div className="flex flex-wrap items-end gap-3">
-          <Field label={account ? 'New code' : 'Code'} hint="8–24 letters and digits, hard to guess — or Generate one">
+          <Field label={account ? 'New code' : 'Code'} hint="8–24 characters mixing letters and digits, not the employee's name or number — or Generate one">
             <div className="flex items-center gap-1">
               <span className="rounded-lg bg-slate-100 px-2.5 py-2 font-mono text-sm font-bold text-slate-600">{entity.code}-</span>
               <Input
@@ -1009,7 +1009,15 @@ function LoginTab({
               />
             </div>
           </Field>
-          <Button variant="secondary" onClick={() => setPart(generateCodePart())}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              // never hand out a code that the save would refuse (e.g. one spelling the employee's name)
+              let p = generateCodePart()
+              while (weakCodeReason(p, employee.employee_no, [employee.first_name, employee.last_name])) p = generateCodePart()
+              setPart(p)
+            }}
+          >
             <RefreshCw className="size-4" /> Generate
           </Button>
           <Button disabled={busy || part.length < 8} onClick={setCode}>

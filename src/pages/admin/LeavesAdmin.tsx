@@ -322,7 +322,8 @@ function FileLeaveModal({
   const toast = useToast()
   const today = todayManila()
   const [employees, setEmployees] = useState<Employee[]>([])
-  const [holidays, setHolidays] = useState<Holiday[]>([])
+  // holidays of the range they were loaded for: the day count must never use another range's
+  const [holidays, setHolidays] = useState<{ range: string; list: Holiday[] } | null>(null)
   const [f, setF] = useState({ employeeId: '', typeId: '', start: today, end: today, reason: '', approve: true })
   const [busy, setBusy] = useState(false)
 
@@ -332,17 +333,30 @@ function FileLeaveModal({
       .catch((err) => toast('error', errorMessage(err, 'Failed to load employees')))
   }, [entity.id, today, toast])
 
+  const range = `${f.start}|${f.end}`
   useEffect(() => {
     if (!f.start || !f.end || f.end < f.start) return
+    let cancelled = false
+    const r = `${f.start}|${f.end}`
     getHolidaysBetween(entity.id, f.start, f.end)
-      .then(setHolidays)
-      .catch(() => setHolidays([]))
-  }, [entity.id, f.start, f.end])
+      .then((list) => {
+        if (!cancelled) setHolidays({ range: r, list })
+      })
+      .catch((err) => {
+        if (!cancelled) toast('error', errorMessage(err, 'Could not load holidays for the day count'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [entity.id, f.start, f.end, toast])
 
   const employee = employees.find((e) => e.id === f.employeeId)
-  const days = employee && f.end >= f.start ? leaveWorkdays(f.start, f.end, employee.work_schedule.days, holidays) : 0
+  const counted = holidays?.range === range
+  const days =
+    employee && counted && f.end >= f.start ? leaveWorkdays(f.start, f.end, employee.work_schedule.days, holidays.list) : 0
 
   async function save() {
+    if (!counted) return
     if (!employee || !f.typeId || days <= 0) {
       toast('error', 'Pick the employee, the leave type and dates that include a scheduled workday.')
       return
@@ -404,13 +418,19 @@ function FileLeaveModal({
           </Field>
         </div>
         <p className="text-xs text-slate-500">
-          {employee ? `${plural(days, 'scheduled workday')} (holidays and rest days not counted).` : 'Pick an employee to count the workdays.'}
+          {!employee
+            ? 'Pick an employee to count the workdays.'
+            : f.end < f.start
+              ? 'The end date is before the start date.'
+              : !counted
+                ? 'Counting workdays…'
+                : `${plural(days, 'scheduled workday')} (holidays and rest days not counted).`}
         </p>
         <Field label="Reason">
           <Textarea rows={2} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
         </Field>
         <Toggle checked={f.approve} onChange={(v) => setF({ ...f, approve: v })} label="Record as approved (otherwise it waits in Pending)" />
-        <Button className="w-full" disabled={busy} onClick={save}>
+        <Button className="w-full" disabled={busy || !counted} onClick={save}>
           {busy ? 'Saving…' : 'File leave'}
         </Button>
       </div>
@@ -482,6 +502,10 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
   useEffect(() => {
     load()
   }, [load])
+  const loadRef = useRef(load)
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
 
   const dirty = types.filter((t) => (values[t.id] ?? '') !== (saved[t.id] ?? ''))
 
@@ -519,7 +543,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
       toast('error', errorMessage(err, 'Save failed'))
     } finally {
       setBusy(false)
-      await load()
+      await loadRef.current()
     }
   }
 
@@ -536,6 +560,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
         <Field label="Employee">
           <Select
             value={employeeId}
+            disabled={busy}
             onChange={(e) => {
               if (dirty.length === 0 || confirm('Discard unsaved changes?')) setEmployeeId(e.target.value)
             }}
@@ -551,6 +576,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
         <Field label="Year">
           <Select
             value={year}
+            disabled={busy}
             onChange={(e) => {
               if (dirty.length === 0 || confirm('Discard unsaved changes?')) setYear(Number(e.target.value))
             }}
