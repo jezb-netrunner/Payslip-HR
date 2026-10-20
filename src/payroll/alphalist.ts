@@ -43,10 +43,23 @@ export interface AlphalistRow {
   substitutedFiling: boolean
   prevEmployerTin: string
   prevEmployerName: string
+  /** Previous employer's section: status code, employment period, reason-of-separation code. */
+  prevStatusCode: string
+  prevFrom: string
+  prevTo: string
+  prevSeparationCode: string
+  prior: PriorEmployerInput
   /** Data to fix before filing. */
   issues: string[]
   /** Withheld vs due difference, settled by an annualizing run; normal while the year is in progress. */
   withholdingGap: string
+}
+
+/** The pay rate on an employee's last minimum-wage payslip of the year. */
+export interface YearEndRate {
+  payType: 'daily' | 'monthly'
+  daily: number
+  monthly: number
 }
 
 export function buildAlphalist(params: {
@@ -56,8 +69,14 @@ export function buildAlphalist(params: {
   payslips: { employee_id: string; fact: AnnualPayslipFact }[]
   taxYears: EmployeeTaxYear[]
   annual: BirAnnualData
+  /**
+   * Schedule 2's statutory minimum wage: the rate actually paid at year end
+   * (a raise after December must not change last year's alphalist).
+   * Missing = the employee's current rate.
+   */
+  yearEndRates?: Map<string, YearEndRate>
 }): AlphalistRow[] {
-  const { year, entity, employees, payslips, taxYears, annual } = params
+  const { year, entity, employees, payslips, taxYears, annual, yearEndRates } = params
   const jan1 = `${year}-01-01`
   const dec31 = `${year}-12-31`
   const rows: AlphalistRow[] = []
@@ -78,8 +97,8 @@ export function buildAlphalist(params: {
     const from = e.hire_date > spanStart ? e.hire_date : spanStart
     const to = separated ? (e.separation_date as string) : dec31
     const factor = Number(e.days_per_year ?? entity.working_days_divisor)
-    const smwPerDay =
-      e.pay_type === 'daily' ? Number(e.daily_rate) : round2((Number(e.monthly_rate) * 12) / factor)
+    const rate = yearEndRates?.get(e.id) ?? { payType: e.pay_type, daily: Number(e.daily_rate), monthly: Number(e.monthly_rate) }
+    const smwPerDay = rate.payType === 'daily' ? rate.daily : round2((rate.monthly * 12) / factor)
 
     const autoSubstituted =
       !ty?.has_previous_employer && !separated && summary.variance === 0
@@ -92,6 +111,9 @@ export function buildAlphalist(params: {
     if (!e.address || !e.zip_code) issues.push('No address/ZIP')
     if (summary.allMwe && !entity.minimum_wage_region) issues.push('Client wage region not set')
     if (ty?.has_previous_employer && !ty.prev_employer_tin) issues.push('Previous employer TIN missing')
+    if (ty?.has_previous_employer && (!ty.prev_employment_from || !ty.prev_employment_to)) {
+      issues.push('Previous employment period missing')
+    }
     if (separatedBefore) {
       issues.push(`Separated ${e.separation_date}, paid in ${year}: check the employment dates the BIR module accepts`)
     }
@@ -112,6 +134,11 @@ export function buildAlphalist(params: {
       substitutedFiling,
       prevEmployerTin: ty?.has_previous_employer ? ty.prev_employer_tin : '',
       prevEmployerName: ty?.has_previous_employer ? ty.prev_employer_name : '',
+      prevStatusCode: ty?.has_previous_employer && ty.prev_employment_status ? EMPLOYMENT_STATUS_BIR[ty.prev_employment_status] : '',
+      prevFrom: ty?.has_previous_employer ? (ty.prev_employment_from ?? '') : '',
+      prevTo: ty?.has_previous_employer ? (ty.prev_employment_to ?? '') : '',
+      prevSeparationCode: ty?.has_previous_employer && ty.prev_separation_reason ? SEPARATION_REASON_BIR[ty.prev_separation_reason] : '',
+      prior,
       issues,
       withholdingGap:
         summary.variance > 0
@@ -139,7 +166,13 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
     'TX: Basic Salary', 'TX: Representation', 'TX: Transportation', 'TX: COLA', 'TX: Housing Allowance', 'TX: Other Regular',
     'TX: 13th Month & Other Benefits', 'TX: Hazard Pay', 'TX: Overtime Pay', 'TX: Other Supplementary',
     'Total Taxable (present)',
-    'Previous Employer TIN', 'Previous Employer', 'Gross (previous)', 'Non-Taxable (previous)', 'Taxable (previous)',
+    'Previous Employer TIN', 'Previous Employer', 'Prev Employment Status', 'Prev Employed From', 'Prev Employed To',
+    'Prev Reason of Separation',
+    'Gross (previous)',
+    'Prev NT: Basic SMW, Holiday, OT, ND, Hazard (MWE)', 'Prev NT: 13th Month & Other Benefits', 'Prev NT: De Minimis',
+    'Prev NT: SSS/PHIC/HDMF & Union Dues', 'Prev NT: Salaries & Other Compensation', 'Non-Taxable (previous)',
+    'Prev TX: Basic Salary', 'Prev TX: 13th Month & Other Benefits', 'Prev TX: Salaries & Other Compensation',
+    'Taxable (previous)',
     'Total Taxable (present + previous)', 'Tax Due',
     'Tax Withheld - Previous Employer', 'Tax Withheld Jan-Nov', 'Tax Withheld December', 'Over-withheld Refunded',
     'Tax Withheld as Adjusted (present)', 'PERA Tax Credit', 'Balance (due - withheld)',
@@ -160,7 +193,11 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
         s.taxableBasic, s.taxableRepresentation, s.taxableTransportation, s.taxableCola, s.taxableHousing, s.taxableOtherRegular,
         s.taxable13thOtherBenefits, s.taxableHazard, s.taxableOvertime, s.taxableOtherSupplementary,
         s.totalTaxablePresent,
-        r.prevEmployerTin, r.prevEmployerName, s.prevGross, s.prevNonTaxable, s.prevTaxable,
+        r.prevEmployerTin, r.prevEmployerName, r.prevStatusCode, r.prevFrom, r.prevTo, r.prevSeparationCode,
+        s.prevGross,
+        r.prior.mweExempt, r.prior.thirteenthOtherBenefitsExempt, r.prior.deMinimis, r.prior.contributions,
+        r.prior.otherNonTaxable, s.prevNonTaxable,
+        r.prior.taxableBasic, r.prior.taxable13thOtherBenefits, r.prior.taxableOther, s.prevTaxable,
         s.totalTaxable, s.taxDue,
         s.prevTaxWithheld, s.withheldJanNov, s.withheldDec, s.refunded,
         s.withheldAsAdjusted, s.peraCredit, s.variance,

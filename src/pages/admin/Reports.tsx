@@ -10,7 +10,7 @@ import { useEntity } from '../../lib/entity'
 import { fmtDate, fmtMonth, fmtTin, fullName, money, plural } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
-import { alphalistCsv, buildAlphalist, type AlphalistRow } from '../../payroll/alphalist'
+import { alphalistCsv, buildAlphalist, type AlphalistRow, type YearEndRate } from '../../payroll/alphalist'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
 
@@ -69,14 +69,39 @@ function useAlphalist(entity: Entity, year: number) {
     let cancelled = false
     ;(async () => {
       try {
-        const [employees, payslips, taxYears, tables] = await Promise.all([
+        const [employees, payslips, taxYears, tables, mweRates] = await Promise.all([
           getEmployees(entity.id),
           // tax year = compensation PAID in the year (pay date)
           fetchFinalizedPayslipsForTaxYear(entity.id, year),
           fetchTaxYears(entity.id, year),
           getStatutoryTables(`${year}-12-31`),
+          // the rate on each minimum wage earner's payslips, latest last
+          fetchAll<{ employee_id: string; pay_type: string; daily_rate: string; monthly_rate: string }>((from, to) =>
+            supabase
+              .from('payslips')
+              .select(
+                'employee_id, pay_type:employee_snapshot->>pay_type, daily_rate:employee_snapshot->>daily_rate, monthly_rate:employee_snapshot->>monthly_rate, payroll_runs!inner(status)',
+              )
+              .eq('entity_id', entity.id)
+              .eq('is_minimum_wage_earner', true)
+              .neq('run_type', 'thirteenth_month')
+              .in('payroll_runs.status', ['finalized', 'paid'])
+              .gte('pay_date', `${year}-01-01`)
+              .lte('pay_date', `${year}-12-31`)
+              .order('period_end')
+              .order('id')
+              .range(from, to),
+          ),
         ])
         if (cancelled) return
+        const yearEndRates = new Map<string, YearEndRate>()
+        for (const r of mweRates) {
+          yearEndRates.set(r.employee_id, {
+            payType: r.pay_type === 'monthly' ? 'monthly' : 'daily',
+            daily: Number(r.daily_rate) || 0,
+            monthly: Number(r.monthly_rate) || 0,
+          })
+        }
         setSlips(payslips)
         setRows(
           buildAlphalist({
@@ -86,6 +111,7 @@ function useAlphalist(entity: Entity, year: number) {
             payslips: payslips.map((p) => ({ employee_id: p.employee_id, fact: toAnnualFact(p) })),
             taxYears,
             annual: tables.bir_annual,
+            yearEndRates,
           }),
         )
       } catch (err) {

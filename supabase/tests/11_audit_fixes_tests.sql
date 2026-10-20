@@ -182,4 +182,20 @@ delete from time_entries where id = '6000000c-0000-0000-0000-000000000001';
 select pg_temp.check((select time_entry_id from time_correction_requests where employee_id = '20000000-0000-0000-0000-0000000000f2') is null, 'FK set null passes');
 rollback;
 
+\echo '--- 11.8 previous-employer status/reason; leave and tax-year changes are audited'
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :ga, true);
+insert into employee_tax_years (employee_id, year, has_previous_employer, prev_employment_status, prev_separation_reason)
+values ('20000000-0000-0000-0000-0000000000f2', 2026, true, 'contractual', 'end_of_contract');
+select pg_temp.expect_error($$update employee_tax_years set prev_employment_status = 'boss' where employee_id = '20000000-0000-0000-0000-0000000000f2'$$, '%prev_employment_status_check%');
+insert into leave_requests (id, employee_id, leave_type_id, start_date, end_date, days, status)
+select '5000000c-0000-0000-0000-000000000009', '20000000-0000-0000-0000-0000000000f2', id, '2026-12-14', '2026-12-14', 1, 'pending'
+from leave_types where entity_id = '10000000-0000-0000-0000-00000000000c' and code = 'SIL';
+update leave_requests set status = 'approved' where id = '5000000c-0000-0000-0000-000000000009';
+select pg_temp.check((select count(*) from audit_logs where table_name = 'leave_requests' and record_id = '5000000c-0000-0000-0000-000000000009') = 2, 'leave filing and approval audited');
+select pg_temp.check((select count(*) from audit_logs where table_name = 'employee_tax_years' and entity_id = '10000000-0000-0000-0000-00000000000c') = 1, 'tax-year data audited under its client');
+select pg_temp.check((select actor_id from audit_logs where table_name = 'leave_requests' order by id desc limit 1) = :ga, 'actor recorded');
+rollback;
+
 \echo 'ALL AUDIT-FIX TESTS PASSED'

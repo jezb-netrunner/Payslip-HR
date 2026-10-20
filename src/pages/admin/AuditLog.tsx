@@ -25,6 +25,13 @@ const TABLES: Record<string, string> = {
   statutory_versions: 'Statutory tables',
   entity_admins: 'Admin assignments',
   profiles: 'User accounts',
+  leave_requests: 'Leave requests',
+  time_correction_requests: 'Time corrections',
+  announcements: 'Announcements',
+  career_events: 'Career events',
+  employee_tax_years: 'BIR tax-year data',
+  employee_leave_entitlements: 'Leave credits',
+  leave_types: 'Leave types',
 }
 
 export default function AuditLog() {

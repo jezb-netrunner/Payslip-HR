@@ -383,6 +383,9 @@ export interface EmployeeTaxYear {
   prev_employer_zip: string
   prev_employment_from: string | null
   prev_employment_to: string | null
+  /** employment status and reason of separation at the previous employer (alphalist previous-employer section) */
+  prev_employment_status: EmploymentStatus | null
+  prev_separation_reason: SeparationReason | null
   prev_mwe_exempt: number
   prev_13th_other_benefits_exempt: number
   prev_de_minimis: number

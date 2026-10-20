@@ -1106,6 +1106,8 @@ function BirTab({ employee }: { employee: Employee }) {
         prev_employer_zip: row.prev_employer_zip ?? '',
         prev_employment_from: row.prev_employment_from || null,
         prev_employment_to: row.prev_employment_to || null,
+        prev_employment_status: row.prev_employment_status || null,
+        prev_separation_reason: row.prev_separation_reason || null,
         pera_tax_credit: Number(row.pera_tax_credit ?? 0),
         substituted_filing: row.substituted_filing ?? 'auto',
         notes: row.notes ?? '',
@@ -1143,11 +1145,27 @@ function BirTab({ employee }: { employee: Employee }) {
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Previous employer TIN"><Input value={row.prev_employer_tin ?? ''} onChange={(e) => set('prev_employer_tin', e.target.value)} /></Field>
               <Field label="Name"><Input value={row.prev_employer_name ?? ''} onChange={(e) => set('prev_employer_name', e.target.value)} /></Field>
-              <Field label="Address" className="col-span-2"><Input value={row.prev_employer_address ?? ''} onChange={(e) => set('prev_employer_address', e.target.value)} /></Field>
+              <Field label="Address" className="sm:col-span-2"><Input value={row.prev_employer_address ?? ''} onChange={(e) => set('prev_employer_address', e.target.value)} /></Field>
               <Field label="ZIP"><Input value={row.prev_employer_zip ?? ''} onChange={(e) => set('prev_employer_zip', e.target.value)} /></Field>
-              <div />
+              <div className="hidden sm:block" />
               <Field label="Employed from"><Input type="date" value={row.prev_employment_from ?? ''} onChange={(e) => set('prev_employment_from', e.target.value)} /></Field>
               <Field label="Employed to"><Input type="date" value={row.prev_employment_to ?? ''} onChange={(e) => set('prev_employment_to', e.target.value)} /></Field>
+              <Field label="Employment status there">
+                <Select value={row.prev_employment_status ?? ''} onChange={(e) => set('prev_employment_status', e.target.value || null)}>
+                  <option value="">—</option>
+                  {Object.entries(EMPLOYMENT_STATUS_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Reason of separation there">
+                <Select value={row.prev_separation_reason ?? ''} onChange={(e) => set('prev_separation_reason', e.target.value || null)}>
+                  <option value="">—</option>
+                  {Object.entries(SEPARATION_REASON_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </Select>
+              </Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
               {TAX_FIELDS.map((f) => (

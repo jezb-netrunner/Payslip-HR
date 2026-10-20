@@ -54,7 +54,11 @@ describe('1604-C alphalist rows', () => {
       ...[3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => ({ employee_id: 'reg', fact: fact(m, false, 40000, 2250) })),
       { employee_id: 'left', fact: fact(6, false, 10000) },
     ],
-    taxYears: [{ employee_id: 'reg', year: 2026, has_previous_employer: true, prev_employer_tin: '111-222-333', prev_employer_name: 'Old Co', prev_tax_withheld: 0, substituted_filing: 'auto' } as EmployeeTaxYear],
+    taxYears: [{
+      employee_id: 'reg', year: 2026, has_previous_employer: true, prev_employer_tin: '111-222-333', prev_employer_name: 'Old Co',
+      prev_employment_from: '2026-01-02', prev_employment_to: '2026-02-27', prev_employment_status: 'contractual',
+      prev_separation_reason: 'end_of_contract', prev_tax_withheld: 0, substituted_filing: 'auto',
+    } as EmployeeTaxYear],
     annual: BIR_ANNUAL_2023,
   })
 
@@ -100,6 +104,33 @@ describe('1604-C alphalist rows', () => {
     })
     expect([r.from, r.to, r.separationCode, r.substitutedFiling]).toEqual(['2026-01-01', '2026-12-31', 'T', false])
     expect(r.issues.join(' ')).toContain('Separated 2026-12-31')
+  })
+
+  it("carries the previous employer's section: status, period and reason codes", () => {
+    const reg = rows.find((r) => r.employee.id === 'reg')!
+    expect([reg.prevStatusCode, reg.prevFrom, reg.prevTo, reg.prevSeparationCode]).toEqual(['CP', '2026-01-02', '2026-02-27', 'T'])
+    const [header, ...body] = alphalistCsv(rows, 1)
+    const line = body.find((l) => l[3] === 'REG')!
+    const col = (name: string) => line[header.indexOf(name)]
+    expect([col('Previous Employer TIN'), col('Prev Employment Status'), col('Prev Employed From'), col('Prev Reason of Separation')]).toEqual([
+      '111-222-333',
+      'CP',
+      '2026-01-02',
+      'T',
+    ])
+  })
+
+  it("takes Schedule 2's minimum wage from the year-end payslips, not today's rate", () => {
+    const [r] = buildAlphalist({
+      year: 2026,
+      entity,
+      employees: [emp('mwe', { daily_rate: 800 })], // raised after year end
+      payslips: [{ employee_id: 'mwe', fact: fact(12, true, 19630) }],
+      taxYears: [],
+      annual: BIR_ANNUAL_2023,
+      yearEndRates: new Map([['mwe', { payType: 'daily', daily: 755, monthly: 0 }]]),
+    })
+    expect([r.smwPerDay, r.smwPerYear]).toEqual([755, 236315])
   })
 
   it('exports one CSV per schedule with matching column counts', () => {
