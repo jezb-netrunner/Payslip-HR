@@ -1,55 +1,80 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Wallet } from 'lucide-react'
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner } from '../../components/ui'
+import { runLabel } from '../../components/PayslipView'
+import { Badge, Button, Card, EmptyState, Field, Input, Modal, NoClient, PageHeader, Select, Spinner, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
-import { getSettings } from '../../lib/api'
-import type { CompanySettings, PayrollRun } from '../../lib/db'
-import { fmtDate, fmtPeriod, money } from '../../lib/format'
-import { todayManila } from '../../lib/manila'
+import { getEmployees, isActiveOn } from '../../lib/api'
+import { useAuth } from '../../lib/auth'
+import type { Employee, Entity, PayrollRun, RunType } from '../../lib/db'
+import { useEntity } from '../../lib/entity'
+import { fmtDate, fmtMonth, fullName, money } from '../../lib/format'
+import { FREQUENCY_LABELS, RUN_TYPE_LABELS } from '../../lib/labels'
+import { addDays, todayManila } from '../../lib/manila'
+import { slotFor, suggestPeriod } from '../../lib/payPeriods'
 import { supabase } from '../../lib/supabase'
+import type { PayFrequency } from '../../payroll/types'
 
 export default function Payroll() {
+  const { entity } = useEntity()
+  const { isCompanyAdmin } = useAuth()
+  if (!entity) return <NoClient companyAdmin={isCompanyAdmin} />
+  return <RunList key={entity.id} entity={entity} />
+}
+
+function RunList({ entity }: { entity: Entity }) {
   const [runs, setRuns] = useState<PayrollRun[]>([])
-  const [settings, setSettings] = useState<CompanySettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [frequency, setFrequency] = useState('')
   const navigate = useNavigate()
 
   const load = useCallback(async () => {
-    const [{ data }, s] = await Promise.all([
-      supabase.from('payroll_runs').select('*').order('period_start', { ascending: false }),
-      getSettings(),
-    ])
+    const { data } = await supabase
+      .from('payroll_runs')
+      .select('*')
+      .eq('entity_id', entity.id)
+      .order('period_start', { ascending: false })
+      .limit(200)
     setRuns((data ?? []) as PayrollRun[])
-    setSettings(s)
     setLoading(false)
-  }, [])
+  }, [entity.id])
 
   useEffect(() => {
     load()
   }, [load])
 
+  const shown = runs.filter((r) => !frequency || r.pay_frequency === frequency || (frequency === 'thirteenth' && r.run_type === 'thirteenth_month'))
+
   return (
     <div>
       <PageHeader
         title="Payroll"
-        subtitle="Draft → review → finalize. Finalized payslips are immutable and visible to employees."
+        subtitle={`${entity.name} · each run covers the employees of one pay frequency. Draft → review → finalize.`}
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <Plus className="size-4" /> New payroll run
-          </Button>
+          <>
+            <Select value={frequency} onChange={(e) => setFrequency(e.target.value)} className="w-44">
+              <option value="">All runs</option>
+              {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+              <option value="thirteenth">13th month</option>
+            </Select>
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="size-4" /> New payroll run
+            </Button>
+          </>
         }
       />
       {loading ? (
         <Spinner />
-      ) : runs.length === 0 ? (
+      ) : shown.length === 0 ? (
         <Card>
-          <EmptyState title="No payroll runs yet" sub="Create your first run to compute payslips." />
+          <EmptyState title="No payroll runs yet" sub="Create a run to compute payslips from time in/out, rates and the statutory tables." />
         </Card>
       ) : (
         <div className="grid gap-3">
-          {runs.map((r) => (
+          {shown.map((r) => (
             <button
               key={r.id}
               onClick={() => navigate(`/admin/payroll/${r.id}`)}
@@ -61,14 +86,14 @@ export default function Payroll() {
                 </div>
                 <div>
                   <p className="text-sm font-bold text-slate-800">
-                    {r.run_type === 'thirteenth_month'
-                      ? `13th Month Pay ${r.period_end.slice(0, 4)}`
-                      : fmtPeriod(r.period_start, r.period_end)}
-                    {r.run_type === 'special' && ' (special)'}
-                    {r.run_type === 'final_pay' && ' (final pay)'}
+                    {runLabel(r)}{' '}
+                    {r.pay_frequency && <Badge tone="blue">{FREQUENCY_LABELS[r.pay_frequency]}</Badge>}{' '}
+                    {r.annualize && <Badge tone="violet">annualized</Badge>}
                   </p>
                   <p className="text-xs text-slate-500">
-                    Pay date {fmtDate(r.pay_date)} · {r.totals?.employees ?? 0} employee/s
+                    Pay date {fmtDate(r.pay_date)} · {fmtMonth(r.period_month)}
+                    {r.periods_in_month > 1 ? ` payroll ${r.period_index} of ${r.periods_in_month}` : ''} ·{' '}
+                    {r.totals?.employees ?? 0} employee/s
                   </p>
                 </div>
               </div>
@@ -77,20 +102,17 @@ export default function Payroll() {
                   <p className="text-xs text-slate-400">Net total</p>
                   <p className="text-base font-extrabold text-brand-900">{money(r.totals?.net ?? 0)}</p>
                 </div>
-                <Badge tone={r.status === 'draft' ? 'amber' : r.status === 'finalized' ? 'green' : 'blue'}>
-                  {r.status}
-                </Badge>
+                <Badge tone={r.status === 'draft' ? 'amber' : r.status === 'finalized' ? 'green' : 'blue'}>{r.status}</Badge>
               </div>
             </button>
           ))}
         </div>
       )}
 
-      {settings && (
+      {creating && (
         <NewRunModal
-          open={creating}
-          settings={settings}
-          lastRun={runs[0] ?? null}
+          entity={entity}
+          runs={runs}
           onClose={() => setCreating(false)}
           onCreated={(id) => navigate(`/admin/payroll/${id}`)}
         />
@@ -99,140 +121,220 @@ export default function Payroll() {
   )
 }
 
-function suggestNextPeriod(
-  settings: CompanySettings,
-  lastRun: PayrollRun | null,
-): { start: string; end: string; pay: string } {
-  const today = todayManila()
-  const [y, m] = today.split('-').map(Number)
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
-
-  function fromParts(yy: number, mm: number, dd: number): string {
-    return `${yy}-${String(mm).padStart(2, '0')}-${String(Math.min(dd, new Date(Date.UTC(yy, mm, 0)).getUTCDate())).padStart(2, '0')}`
-  }
-
-  if (lastRun && lastRun.run_type === 'regular') {
-    // continue from the last period
-    const [ly, lm, ld] = lastRun.period_end.split('-').map(Number)
-    if (settings.pay_frequency === 'monthly') {
-      const ny = lm === 12 ? ly + 1 : ly
-      const nm = lm === 12 ? 1 : lm + 1
-      return { start: fromParts(ny, nm, 1), end: fromParts(ny, nm, 31), pay: fromParts(ny, nm, 31) }
-    }
-    if (ld <= 15) {
-      return { start: fromParts(ly, lm, 16), end: fromParts(ly, lm, 31), pay: fromParts(ly, lm, 31) }
-    }
-    const ny = lm === 12 ? ly + 1 : ly
-    const nm = lm === 12 ? 1 : lm + 1
-    return { start: fromParts(ny, nm, 1), end: fromParts(ny, nm, 15), pay: fromParts(ny, nm, 20) }
-  }
-
-  if (settings.pay_frequency === 'monthly') {
-    return { start: fromParts(y, m, 1), end: fromParts(y, m, lastDay), pay: fromParts(y, m, lastDay) }
-  }
-  const day = Number(today.slice(8, 10))
-  if (day <= 15) return { start: fromParts(y, m, 1), end: fromParts(y, m, 15), pay: fromParts(y, m, 20) }
-  return { start: fromParts(y, m, 16), end: fromParts(y, m, lastDay), pay: fromParts(y, m, lastDay) }
-}
-
 function NewRunModal({
-  open,
-  settings,
-  lastRun,
+  entity,
+  runs,
   onClose,
   onCreated,
 }: {
-  open: boolean
-  settings: CompanySettings
-  lastRun: PayrollRun | null
+  entity: Entity
+  runs: PayrollRun[]
   onClose: () => void
   onCreated: (id: string) => void
 }) {
   const toast = useToast()
-  const suggestion = suggestNextPeriod(settings, lastRun)
-  const [f, setF] = useState({
-    run_type: 'regular',
-    start: suggestion.start,
-    end: suggestion.end,
-    pay: suggestion.pay,
-  })
+  const today = todayManila()
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [runType, setRunType] = useState<RunType>('regular')
+  const [frequency, setFrequency] = useState<PayFrequency>(entity.default_pay_frequency)
+  const [start, setStart] = useState('')
+  const [end, setEnd] = useState('')
+  const [pay, setPay] = useState('')
+  const [slot, setSlot] = useState({ month: '', index: 1, count: 1 })
+  const [annualize, setAnnualize] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
+  const [advanced, setAdvanced] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (open) {
-      const s = suggestNextPeriod(settings, lastRun)
-      setF((prev) => ({ ...prev, start: s.start, end: s.end, pay: s.pay }))
+    getEmployees(entity.id).then(setEmployees)
+  }, [entity.id])
+
+  // suggest dates whenever the type or frequency changes
+  useEffect(() => {
+    if (runType === 'thirteenth_month') {
+      const y = today.slice(0, 4)
+      setStart(`${y}-01-01`)
+      setEnd(`${y}-12-31`)
+      setPay(`${y}-12-24`)
+      setAnnualize(false)
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+    const previous = runs.filter((r) => r.run_type === 'regular' && r.pay_frequency === frequency)
+    const p = suggestPeriod(frequency, previous, today)
+    setStart(p.start)
+    setEnd(p.end)
+    setPay(addDays(p.end, Number(entity.pay_date_lag_days)))
+    setAnnualize(runType === 'final_pay')
+  }, [runType, frequency, runs, today, entity.pay_date_lag_days])
 
   useEffect(() => {
-    if (f.run_type === 'thirteenth_month') {
-      const y = todayManila().slice(0, 4)
-      setF((prev) => ({ ...prev, start: `${y}-01-01`, end: `${y}-12-31`, pay: `${y}-12-24` }))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [f.run_type])
+    if (!pay) return
+    if (runType === 'thirteenth_month') setSlot({ month: `${pay.slice(0, 7)}-01`, index: 1, count: 1 })
+    else setSlot(slotFor(frequency, pay))
+  }, [pay, frequency, runType])
+
+  const eligible = useMemo(
+    () =>
+      employees.filter(
+        (e) =>
+          e.hire_date <= (end || today) &&
+          (!e.separation_date || e.separation_date >= (start || today)) &&
+          (runType === 'thirteenth_month' || e.pay_frequency === frequency),
+      ),
+    [employees, start, end, frequency, runType, today],
+  )
+  const needsSubset = runType === 'final_pay'
+  const lastOfYear = pay.slice(5, 7) === '12' && runType === 'regular'
 
   async function create() {
+    if (!start || !end || !pay || end < start) {
+      toast('error', 'Check the period and pay dates.')
+      return
+    }
+    if (needsSubset && selected.length === 0) {
+      toast('error', 'Pick the separated employee(s) for this final pay.')
+      return
+    }
     setBusy(true)
     try {
       const { data, error } = await supabase
         .from('payroll_runs')
         .insert({
-          run_type: f.run_type,
-          period_start: f.start,
-          period_end: f.end,
-          pay_date: f.pay,
+          entity_id: entity.id,
+          run_type: runType,
+          pay_frequency: runType === 'thirteenth_month' ? null : frequency,
+          period_start: start,
+          period_end: end,
+          pay_date: pay,
+          period_month: slot.month,
+          period_index: runType === 'thirteenth_month' ? 1 : slot.index,
+          periods_in_month: runType === 'thirteenth_month' ? 1 : slot.count,
+          annualize: runType === 'thirteenth_month' ? false : annualize,
+          employee_ids: selected.length > 0 ? selected : null,
           status: 'draft',
         })
         .select('id')
         .single()
       if (error) throw error
-      toast('success', 'Run created — now compute the draft payslips.')
+      toast('success', 'Run created — enter any one-time adjustments, then compute the draft.')
       onCreated(data.id)
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed to create run')
+      const msg = err instanceof Error ? err.message : 'Failed to create run'
+      toast(
+        'error',
+        /regular_slot/.test(msg)
+          ? `A regular ${FREQUENCY_LABELS[frequency].toLowerCase()} run already exists for payroll ${slot.index} of ${fmtMonth(slot.month)}. Use a special run, or adjust the slot.`
+          : msg,
+      )
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="New payroll run">
+    <Modal open onClose={onClose} title="New payroll run" wide>
       <div className="space-y-4">
-        <Field label="Run type">
-          <Select value={f.run_type} onChange={(e) => setF({ ...f, run_type: e.target.value })}>
-            <option value="regular">Regular ({settings.pay_frequency.replace('_', '-')})</option>
-            <option value="thirteenth_month">13th Month Pay</option>
-            <option value="special">Special run</option>
-            <option value="final_pay">Final pay</option>
-          </Select>
-        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Run type">
+            <Select value={runType} onChange={(e) => setRunType(e.target.value as RunType)}>
+              {Object.entries(RUN_TYPE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </Select>
+          </Field>
+          {runType !== 'thirteenth_month' && (
+            <Field label="Pay frequency (employees included)">
+              <Select value={frequency} onChange={(e) => setFrequency(e.target.value as PayFrequency)}>
+                {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v} ({employees.filter((x) => x.pay_frequency === k && isActiveOn(x, today)).length} active)
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+        </div>
         <div className="grid grid-cols-3 gap-3">
           <Field label="Period start">
-            <Input type="date" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
+            <Input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
           </Field>
-          <Field label="Period end">
-            <Input type="date" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
+          <Field label="Period end (cutoff)">
+            <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
           </Field>
           <Field label="Pay date">
-            <Input type="date" value={f.pay} onChange={(e) => setF({ ...f, pay: e.target.value })} />
+            <Input type="date" value={pay} onChange={(e) => setPay(e.target.value)} />
           </Field>
         </div>
-        {f.run_type === 'thirteenth_month' && (
+        {runType !== 'thirteenth_month' && (
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Counts as <b>payroll {slot.index} of {slot.count}</b> for <b>{fmtMonth(slot.month)}</b> — monthly rates,
+            allowances and contributions are allocated accordingly.{' '}
+            <button className="font-semibold text-brand-600" onClick={() => setAdvanced(!advanced)}>
+              {advanced ? 'Hide' : 'Change'}
+            </button>
+            {advanced && (
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                <Field label="Payroll month">
+                  <Input type="month" value={slot.month.slice(0, 7)} onChange={(e) => setSlot({ ...slot, month: `${e.target.value}-01` })} />
+                </Field>
+                <Field label="Payroll no. in month">
+                  <Input type="number" min={1} value={slot.index} onChange={(e) => setSlot({ ...slot, index: Number(e.target.value) })} />
+                </Field>
+                <Field label="Payrolls in month">
+                  <Input type="number" min={1} value={slot.count} onChange={(e) => setSlot({ ...slot, count: Number(e.target.value) })} />
+                </Field>
+              </div>
+            )}
+          </div>
+        )}
+        {runType !== 'thirteenth_month' && (
+          <div className="rounded-lg border border-slate-200 p-3">
+            <Toggle
+              checked={annualize}
+              onChange={setAnnualize}
+              label="Annualize withholding tax in this run (year-end / separation adjustment)"
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Withholding becomes the year's tax due less everything already withheld (refund if negative). Use it on
+              the last payroll of the year and on final pay.
+              {lastOfYear && !annualize && ' This looks like a December payroll — annualize it if it is the last one of the year.'}
+            </p>
+          </div>
+        )}
+        {(runType !== 'regular') && (
+          <Field
+            label={needsSubset ? 'Employees (required)' : 'Limit to employees (optional — default: everyone eligible)'}
+          >
+            <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-3">
+              {eligible.length === 0 && <p className="text-xs text-slate-400">No eligible employees for this period.</p>}
+              {eligible.map((e) => (
+                <label key={e.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(e.id)}
+                    onChange={(ev) => setSelected(ev.target.checked ? [...selected, e.id] : selected.filter((x) => x !== e.id))}
+                    className="rounded border-slate-300"
+                  />
+                  {fullName(e)} <span className="text-xs text-slate-400">{e.employee_no}</span>
+                  {e.separation_date && <Badge tone="red">left {fmtDate(e.separation_date)}</Badge>}
+                </label>
+              ))}
+            </div>
+          </Field>
+        )}
+        {runType === 'thirteenth_month' && (
           <p className="rounded-lg bg-accent-50 px-3 py-2 text-xs text-accent-800">
-            13th month = 1/12 of each employee's basic salary earned within the calendar year
-            (from finalized regular runs). Due not later than December 24 (PD 851).
+            13th month = 1/12 of basic salary earned in the calendar year (finalized runs, every pay frequency),
+            less any installment already paid. Due not later than December 24 (PD 851). For a separated employee,
+            run it for that employee with their final pay.
           </p>
         )}
-        {(f.run_type === 'special' || f.run_type === 'final_pay') && (
+        {(runType === 'special' || runType === 'final_pay') && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Special and final-pay runs compute the chosen period exactly like a regular run
-            (attendance, contributions, tax). Use them for off-cycle corrections or a separated
-            employee's last period — don't overlap a period that a finalized regular run already
-            paid, or basic pay and contributions will be charged twice. Final-pay extras (SIL
-            conversion, prorated 13th month) can be added as allowances beforehand.
+            Special and final-pay runs compute the chosen period exactly like a regular run (attendance,
+            contributions, tax). Don't overlap a period a finalized regular run already paid. Add final-pay extras
+            (SIL conversion, other benefits) as one-time adjustments on the run.
           </p>
         )}
         <Button className="w-full" disabled={busy} onClick={create}>

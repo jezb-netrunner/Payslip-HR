@@ -1,34 +1,45 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, XCircle } from 'lucide-react'
-import { Badge, Button, Card, EmptyState, Input, PageHeader, Spinner, TableShell, Tabs, Td, Th } from '../../components/ui'
+import { CheckCircle2, Plus, XCircle } from 'lucide-react'
+import { Badge, Button, Card, EmptyState, Field, Input, Modal, NoClient, PageHeader, Spinner, TableShell, Tabs, Td, Th, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
-import type { Employee, LeaveRequest, LeaveType } from '../../lib/db'
+import { useAuth } from '../../lib/auth'
+import type { Employee, Entity, LeaveRequest, LeaveType } from '../../lib/db'
+import { useEntity } from '../../lib/entity'
 import { fmtDate, fullName } from '../../lib/format'
 import { supabase } from '../../lib/supabase'
 
 type RequestFull = LeaveRequest & { employees: Employee; leave_types: LeaveType }
 
 export default function LeavesAdmin() {
+  const { entity } = useEntity()
+  const { isCompanyAdmin } = useAuth()
+  if (!entity) return <NoClient companyAdmin={isCompanyAdmin} />
+  return <Leaves key={entity.id} entity={entity} />
+}
+
+function Leaves({ entity }: { entity: Entity }) {
   const toast = useToast()
   const [tab, setTab] = useState('pending')
   const [requests, setRequests] = useState<RequestFull[]>([])
   const [types, setTypes] = useState<LeaveType[]>([])
   const [loading, setLoading] = useState(true)
   const [notes, setNotes] = useState<Record<string, string>>({})
+  const [editingType, setEditingType] = useState<Partial<LeaveType> | null>(null)
 
   const load = useCallback(async () => {
     const [{ data: r }, { data: t }] = await Promise.all([
       supabase
         .from('leave_requests')
         .select('*, employees(*), leave_types(*)')
+        .eq('entity_id', entity.id)
         .order('created_at', { ascending: false })
-        .limit(200),
-      supabase.from('leave_types').select('*').order('code'),
+        .limit(300),
+      supabase.from('leave_types').select('*').eq('entity_id', entity.id).order('code'),
     ])
     setRequests((r ?? []) as RequestFull[])
     setTypes((t ?? []) as LeaveType[])
     setLoading(false)
-  }, [])
+  }, [entity.id])
 
   useEffect(() => {
     load()
@@ -49,6 +60,29 @@ export default function LeavesAdmin() {
     if (error) toast('error', error.message)
     else {
       toast('success', approve ? 'Leave approved — payroll will treat these days accordingly.' : 'Leave rejected.')
+      await load()
+    }
+  }
+
+  async function saveType() {
+    if (!editingType?.code || !editingType.name) {
+      toast('error', 'Code and name are required.')
+      return
+    }
+    const payload = {
+      entity_id: entity.id,
+      code: editingType.code.trim().toUpperCase(),
+      name: editingType.name.trim(),
+      default_annual_days: Number(editingType.default_annual_days ?? 0),
+      paid: editingType.paid ?? true,
+      active: editingType.active ?? true,
+    }
+    const { error } = editingType.id
+      ? await supabase.from('leave_types').update(payload).eq('id', editingType.id)
+      : await supabase.from('leave_types').insert(payload)
+    if (error) toast('error', error.message)
+    else {
+      setEditingType(null)
       await load()
     }
   }
@@ -75,15 +109,23 @@ export default function LeavesAdmin() {
       {loading ? (
         <Spinner />
       ) : tab === 'types' ? (
-        <Card title="Leave types (statutory + company)">
+        <Card
+          title={`Leave types — ${entity.name}`}
+          actions={
+            <Button variant="secondary" onClick={() => setEditingType({ paid: true, active: true, default_annual_days: 0 })}>
+              <Plus className="size-4" /> Add type
+            </Button>
+          }
+        >
           <TableShell>
             <thead className="bg-slate-50">
               <tr>
                 <Th>Code</Th>
                 <Th>Name</Th>
-                <Th className="text-right">Default days / year</Th>
+                <Th className="text-right">Days / year</Th>
                 <Th>Paid</Th>
                 <Th>Active</Th>
+                <Th></Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -94,14 +136,17 @@ export default function LeavesAdmin() {
                   <Td className="text-right">{Number(t.default_annual_days)}</Td>
                   <Td>{t.paid ? <Badge tone="green">paid</Badge> : <Badge tone="slate">unpaid</Badge>}</Td>
                   <Td>{t.active ? 'Yes' : 'No'}</Td>
+                  <Td>
+                    <button onClick={() => setEditingType(t)} className="text-xs font-semibold text-brand-600">Edit</button>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </TableShell>
           <p className="mt-3 text-xs text-slate-400">
-            Statutory leaves seeded: SIL 5 days (Art. 95), Maternity 105 days (RA 11210), Paternity 7
-            (RA 8187), Solo Parent 7 (RA 11861), VAWC 10 (RA 9262), Special Leave for Women 60 (RA 9710).
-            Per-employee overrides can be set via employee leave entitlements.
+            Seeded with the statutory leaves: SIL 5 days (Art. 95), Maternity 105 (RA 11210), Paternity 7 (RA 8187),
+            Solo Parent 7 (RA 11861), VAWC 10 (RA 9262), Special Leave for Women 60 (RA 9710). Add company leaves
+            (e.g. VL/SL credits) as needed.
           </p>
         </Card>
       ) : shown.length === 0 ? (
@@ -119,11 +164,7 @@ export default function LeavesAdmin() {
                     <span className="ml-2 font-normal text-slate-500">
                       {r.leave_types?.name} · {Number(r.days)} day/s
                     </span>{' '}
-                    <Badge
-                      tone={
-                        r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : r.status === 'pending' ? 'amber' : 'slate'
-                      }
-                    >
+                    <Badge tone={r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : r.status === 'pending' ? 'amber' : 'slate'}>
                       {r.status}
                     </Badge>
                   </p>
@@ -153,6 +194,27 @@ export default function LeavesAdmin() {
           ))}
         </div>
       )}
+
+      <Modal open={editingType !== null} onClose={() => setEditingType(null)} title={editingType?.id ? 'Edit leave type' : 'Add leave type'}>
+        {editingType && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Code">
+                <Input value={editingType.code ?? ''} onChange={(e) => setEditingType({ ...editingType, code: e.target.value })} className="uppercase" />
+              </Field>
+              <Field label="Name" className="col-span-2">
+                <Input value={editingType.name ?? ''} onChange={(e) => setEditingType({ ...editingType, name: e.target.value })} />
+              </Field>
+              <Field label="Days per year">
+                <Input type="number" value={String(editingType.default_annual_days ?? 0)} onChange={(e) => setEditingType({ ...editingType, default_annual_days: Number(e.target.value) })} />
+              </Field>
+            </div>
+            <Toggle checked={editingType.paid ?? true} onChange={(v) => setEditingType({ ...editingType, paid: v })} label="Paid leave" />
+            <Toggle checked={editingType.active ?? true} onChange={(v) => setEditingType({ ...editingType, active: v })} label="Active (employees can request it)" />
+            <Button className="w-full" onClick={saveType}>Save</Button>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

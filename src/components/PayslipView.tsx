@@ -1,8 +1,32 @@
 import { Download } from 'lucide-react'
-import type { CompanySettings, Payslip, PayrollRun } from '../lib/db'
+import type { Entity, Payslip, PayrollRun } from '../lib/db'
 import { fmtDate, fmtPeriod, money } from '../lib/format'
+import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
 import { generatePayslipPdf } from '../pdf/payslipPdf'
 import { Badge, Button } from './ui'
+
+export type PayslipCompany = Pick<Entity, 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'payslip_footer_note'>
+
+export type PayslipRunInfo = Pick<PayrollRun, 'run_type' | 'period_start' | 'period_end' | 'pay_date' | 'status'>
+
+/** Run info for a payslip from its own denormalized columns (employee view). */
+export function runFromSlip(s: Payslip): PayslipRunInfo {
+  return {
+    run_type: s.run_type ?? 'regular',
+    period_start: s.period_start ?? '',
+    period_end: s.period_end ?? '',
+    pay_date: s.pay_date ?? '',
+    status: 'finalized',
+  }
+}
+
+export function runLabel(run: Pick<PayrollRun, 'run_type' | 'period_start' | 'period_end'>): string {
+  if (run.run_type === 'thirteenth_month') return `13th Month Pay ${run.period_end.slice(0, 4)}`
+  const base = fmtPeriod(run.period_start, run.period_end)
+  if (run.run_type === 'final_pay') return `${base} (final pay)`
+  if (run.run_type === 'special') return `${base} (special)`
+  return base
+}
 
 export default function PayslipView({
   slip,
@@ -11,8 +35,8 @@ export default function PayslipView({
   showTrace = false,
 }: {
   slip: Payslip
-  run: PayrollRun
-  company: CompanySettings
+  run: PayslipRunInfo
+  company: PayslipCompany
   showTrace?: boolean
 }) {
   const snap = slip.employee_snapshot as Record<string, string>
@@ -20,6 +44,8 @@ export default function PayslipView({
     Number(slip.sss_er) + Number(slip.sss_mpf_er) + Number(slip.sss_ec_er) +
     Number(slip.philhealth_er) + Number(slip.pagibig_er)
   const trace = slip.computation_trace
+  const rounding = Number(slip.rounding_adjustment)
+  const computedNet = Number(slip.gross_pay) - Number(slip.total_deductions)
 
   return (
     <div className="space-y-5">
@@ -30,10 +56,9 @@ export default function PayslipView({
             {snap.employee_no} • {snap.position || '—'} {snap.department ? `• ${snap.department}` : ''}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            {run.run_type === 'thirteenth_month'
-              ? `13th Month Pay ${run.period_end.slice(0, 4)}`
-              : fmtPeriod(run.period_start, run.period_end)}{' '}
-            • Pay date {fmtDate(run.pay_date)}
+            {runLabel(run)} • Pay date {fmtDate(run.pay_date)}
+            {slip.pay_frequency ? ` • ${FREQUENCY_LABELS[slip.pay_frequency]}` : ''}
+            {slip.payment_method ? ` • ${PAYMENT_METHOD_LABELS[slip.payment_method]}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -51,7 +76,7 @@ export default function PayslipView({
           </div>
           <div className="divide-y divide-slate-50 px-4">
             {slip.earnings.map((l, i) => (
-              <div key={i} className="flex items-center justify-between py-2 text-sm">
+              <div key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <span className="text-slate-600">
                   {l.label}
                   {l.hours ? <span className="text-slate-400"> · {l.hours}h</span> : null}
@@ -77,9 +102,11 @@ export default function PayslipView({
               <p className="py-2 text-sm text-slate-400">No deductions</p>
             )}
             {slip.deductions.map((l, i) => (
-              <div key={i} className="flex items-center justify-between py-2 text-sm">
+              <div key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
                 <span className="text-slate-600">{l.label}</span>
-                <span className="font-semibold text-slate-800">{money(l.amount)}</span>
+                <span className={`font-semibold ${l.amount < 0 ? 'text-emerald-600' : 'text-slate-800'}`}>
+                  {money(l.amount)}
+                </span>
               </div>
             ))}
             <div className="flex items-center justify-between py-2.5 text-sm font-bold text-brand-900">
@@ -89,6 +116,23 @@ export default function PayslipView({
           </div>
         </div>
       </div>
+
+      {rounding !== 0 && (
+        <div className="rounded-xl border border-dashed border-slate-300 px-4 py-2.5 text-xs text-slate-600">
+          <div className="flex justify-between">
+            <span>Computed net pay</span>
+            <span className="font-semibold">{money(computedNet)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>
+              Cash rounding
+              {Number(slip.rounding_carry_in) > 0 && ` (incl. ${money(Number(slip.rounding_carry_in))} carried in)`}
+              {Number(slip.rounding_carry_out) > 0 && ` — ${money(Number(slip.rounding_carry_out))} carried to next payroll`}
+            </span>
+            <span className="font-semibold">{rounding > 0 ? '+' : ''}{money(rounding)}</span>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between rounded-xl bg-gradient-to-r from-accent-500 to-accent-600 px-5 py-4 text-white shadow-sm">
         <span className="text-sm font-bold uppercase tracking-wide">Net Pay</span>
@@ -128,6 +172,12 @@ export default function PayslipView({
           </p>
         </div>
       ) : null}
+      {company.name && (
+        <p className="text-[11px] text-slate-400">
+          {company.name}
+          {company.tin ? ` · TIN ${company.tin}` : ''}
+        </p>
+      )}
     </div>
   )
 }

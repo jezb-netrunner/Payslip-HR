@@ -314,3 +314,19 @@ export function TableShell({ children }: { children: ReactNode }) {
     </div>
   )
 }
+
+/** Shown by client-scoped pages when no client is selected or assigned. */
+export function NoClient({ companyAdmin }: { companyAdmin: boolean }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+      <p className="text-sm font-semibold text-slate-700">
+        {companyAdmin ? 'No client yet' : 'No client assigned to your account'}
+      </p>
+      <p className="mt-1 text-xs text-slate-400">
+        {companyAdmin
+          ? 'Add your first client under Clients, then pick it in the sidebar.'
+          : 'Ask a company admin to assign you to a client.'}
+      </p>
+    </div>
+  )
+}

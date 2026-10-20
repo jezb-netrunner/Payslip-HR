@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Badge, Card, EmptyState, PageHeader, Select, Spinner, TableShell, Td, Th } from '../../components/ui'
-import type { AuditLog as AuditRow, Profile } from '../../lib/db'
+import { useAuth } from '../../lib/auth'
+import type { AuditLog as AuditRow } from '../../lib/db'
+import { useEntity } from '../../lib/entity'
 import { fmtDateTime } from '../../lib/format'
 import { supabase } from '../../lib/supabase'
 
@@ -10,26 +12,39 @@ const actionTones: Record<string, string> = {
   delete: 'red',
 }
 
+const TABLES: Record<string, string> = {
+  employees: 'Employees',
+  time_entries: 'Time entries',
+  payroll_runs: 'Payroll runs',
+  payroll_adjustments: 'Payroll adjustments',
+  employee_allowances: 'Allowances',
+  recurring_deductions: 'Recurring deductions',
+  entities: 'Client settings',
+  holidays: 'Holidays',
+  tax_remittances: 'BIR remittances',
+  statutory_versions: 'Statutory tables',
+  entity_admins: 'Admin assignments',
+  profiles: 'User accounts',
+}
+
 export default function AuditLog() {
+  const { isCompanyAdmin } = useAuth()
+  const { entity } = useEntity()
   const [rows, setRows] = useState<AuditRow[]>([])
-  const [profiles, setProfiles] = useState<Record<string, Profile>>({})
-  const [entity, setEntity] = useState('')
+  const [table, setTable] = useState('')
+  const [scope, setScope] = useState<'client' | 'global'>('client')
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
-    let q = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(200)
-    if (entity) q = q.eq('entity', entity)
-    const [{ data }, { data: profs }] = await Promise.all([
-      q,
-      supabase.from('profiles').select('*'),
-    ])
+    let q = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(300)
+    if (scope === 'global') q = q.is('entity_id', null)
+    else if (entity) q = q.eq('entity_id', entity.id)
+    if (table) q = q.eq('table_name', table)
+    const { data } = await q
     setRows((data ?? []) as AuditRow[])
-    const map: Record<string, Profile> = {}
-    for (const p of (profs ?? []) as Profile[]) map[p.id] = p
-    setProfiles(map)
     setLoading(false)
-  }, [entity])
+  }, [table, scope, entity])
 
   useEffect(() => {
     load()
@@ -49,16 +64,22 @@ export default function AuditLog() {
     <div>
       <PageHeader
         title="Audit Log"
-        subtitle="Database-level trail of sensitive changes — employees, time entries, payroll runs, settings, statutory tables"
+        subtitle="Database-level trail of sensitive changes, recorded by triggers — not editable by anyone."
         actions={
-          <Select value={entity} onChange={(e) => setEntity(e.target.value)} className="w-52">
-            <option value="">All entities</option>
-            <option value="employees">Employees</option>
-            <option value="time_entries">Time entries</option>
-            <option value="payroll_runs">Payroll runs</option>
-            <option value="company_settings">Company settings</option>
-            <option value="statutory_versions">Statutory tables</option>
-          </Select>
+          <>
+            {isCompanyAdmin && (
+              <Select value={scope} onChange={(e) => setScope(e.target.value as 'client' | 'global')} className="w-52">
+                <option value="client">{entity ? `Client: ${entity.code}` : 'Selected client'}</option>
+                <option value="global">Global (statutory, users)</option>
+              </Select>
+            )}
+            <Select value={table} onChange={(e) => setTable(e.target.value)} className="w-52">
+              <option value="">All record types</option>
+              {Object.entries(TABLES).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </Select>
+          </>
         }
       />
       {loading ? (
@@ -72,7 +93,7 @@ export default function AuditLog() {
               <Th>When</Th>
               <Th>Actor</Th>
               <Th>Action</Th>
-              <Th>Entity</Th>
+              <Th>Record</Th>
               <Th>Changed</Th>
             </tr>
           </thead>
@@ -80,15 +101,11 @@ export default function AuditLog() {
             {rows.map((r) => (
               <tr key={r.id} className="hover:bg-slate-50">
                 <Td className="whitespace-nowrap text-xs">{fmtDateTime(r.created_at)}</Td>
-                <Td className="text-xs">
-                  {r.actor_id
-                    ? profiles[r.actor_id]?.full_name || profiles[r.actor_id]?.email || r.actor_id.slice(0, 8)
-                    : 'system'}
-                </Td>
+                <Td className="text-xs">{r.actor_email ?? (r.actor_id ? r.actor_id.slice(0, 8) : 'system')}</Td>
                 <Td><Badge tone={actionTones[r.action] ?? 'slate'}>{r.action}</Badge></Td>
                 <Td className="text-xs">
-                  {r.entity}
-                  <span className="text-slate-400"> {r.entity_id?.slice(0, 8)}</span>
+                  {TABLES[r.table_name] ?? r.table_name}
+                  <span className="text-slate-400"> {r.record_id?.slice(0, 8)}</span>
                 </Td>
                 <Td className="max-w-md truncate text-xs text-slate-500">{changedFields(r)}</Td>
               </tr>

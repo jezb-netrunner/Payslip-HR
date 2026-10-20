@@ -5,7 +5,7 @@ import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
 import type { TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtHours, fmtTime } from '../../lib/format'
-import { todayManila } from '../../lib/manila'
+import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 
 export default function MyAttendance() {
@@ -23,7 +23,7 @@ export default function MyAttendance() {
     if (!employee) return
     setLoading(true)
     const start = `${monthStr}-01`
-    const end = `${monthStr}-31`
+    const end = endOfMonth(start)
     const [{ data: ent }, { data: reqs }] = await Promise.all([
       supabase
         .from('time_entries')

@@ -6,9 +6,17 @@ import type { Employee, Profile } from './db'
 interface AuthState {
   session: Session | null
   profile: Profile | null
+  /** The signed-in employee's own record (employee logins only). */
   employee: Employee | null
   loading: boolean
+  isCompanyAdmin: boolean
+  isEntityAdmin: boolean
+  /** Company or entity admin: may use the admin console. */
   isAdmin: boolean
+  isEmployee: boolean
+  /** Arrived through a password-reset link: must choose a new password. */
+  recovering: boolean
+  clearRecovery: () => void
   refreshProfile: () => Promise<void>
   signOut: () => Promise<void>
 }
@@ -18,7 +26,12 @@ const AuthContext = createContext<AuthState>({
   profile: null,
   employee: null,
   loading: true,
+  isCompanyAdmin: false,
+  isEntityAdmin: false,
   isAdmin: false,
+  isEmployee: false,
+  recovering: false,
+  clearRecovery: () => {},
   refreshProfile: async () => {},
   signOut: async () => {},
 })
@@ -28,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [loading, setLoading] = useState(true)
+  const [recovering, setRecovering] = useState(false)
 
   async function loadProfile(userId: string) {
     const { data: prof } = await supabase
@@ -36,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('id', userId)
       .maybeSingle()
     setProfile((prof as Profile) ?? null)
-    if (prof?.employee_id) {
+    if (prof?.role === 'employee' && prof.employee_id) {
       const { data: emp } = await supabase
         .from('employees')
         .select('*')
@@ -57,8 +71,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       }
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
       setSession(sess)
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
       if (sess) {
         // Defer Supabase calls out of the auth callback to avoid deadlocks.
         setTimeout(() => loadProfile(sess.user.id), 0)
@@ -70,6 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => sub.subscription.unsubscribe()
   }, [])
 
+  const active = !!profile?.is_active
+  const isCompanyAdmin = active && profile?.role === 'company_admin'
+  const isEntityAdmin = active && profile?.role === 'entity_admin'
+
   return (
     <AuthContext.Provider
       value={{
@@ -77,7 +96,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         employee,
         loading,
-        isAdmin: profile?.role === 'admin' && profile.is_active,
+        isCompanyAdmin,
+        isEntityAdmin,
+        isAdmin: isCompanyAdmin || isEntityAdmin,
+        isEmployee: active && profile?.role === 'employee' && !!employee,
+        recovering,
+        clearRecovery: () => setRecovering(false),
         refreshProfile: async () => {
           if (session) await loadProfile(session.user.id)
         },

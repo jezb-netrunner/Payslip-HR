@@ -3,7 +3,8 @@
 
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import type { CompanySettings, Payslip, PayrollRun } from '../lib/db'
+import type { Payslip } from '../lib/db'
+import type { PayslipCompany, PayslipRunInfo } from '../components/PayslipView'
 
 const NAVY: [number, number, number] = [18, 45, 85]
 const ORANGE: [number, number, number] = [246, 134, 46]
@@ -18,7 +19,7 @@ function php(v: number): string {
   )
 }
 
-function periodLabel(run: PayrollRun): string {
+function periodLabel(run: PayslipRunInfo): string {
   const fmt = (d: string) =>
     new Date(`${d}T00:00:00`).toLocaleDateString('en-PH', {
       month: 'short',
@@ -30,8 +31,8 @@ function periodLabel(run: PayrollRun): string {
 
 export function generatePayslipPdf(
   slip: Payslip,
-  run: PayrollRun,
-  company: CompanySettings,
+  run: PayslipRunInfo,
+  company: PayslipCompany,
 ): void {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
@@ -44,10 +45,10 @@ export function generatePayslipPdf(
   doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(15)
-  doc.text(company.company_name || 'Company', margin, 11)
+  doc.text(company.name || 'Company', margin, 11)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
-  const sub = [company.address, company.tin ? `TIN ${company.tin}` : '']
+  const sub = [company.registered_address, company.tin ? `TIN ${company.tin}` : '']
     .filter(Boolean)
     .join('  •  ')
   if (sub) doc.text(sub, margin, 17)
@@ -131,6 +132,20 @@ export function generatePayslipPdf(
   const rightEndY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
   y = Math.max(leftEndY, rightEndY) + 7
 
+  // ---- cash rounding (whole-peso cash payroll) ----
+  const rounding = Number(slip.rounding_adjustment)
+  if (rounding !== 0) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...SLATE)
+    const computed = Number(slip.gross_pay) - Number(slip.total_deductions)
+    doc.text(`Computed net pay ${php(computed)}   Cash rounding ${rounding > 0 ? '+' : ''}${php(rounding)}`, margin, y)
+    if (Number(slip.rounding_carry_out) > 0) {
+      doc.text(`${php(Number(slip.rounding_carry_out))} carried to the next payroll`, pageW - margin, y, { align: 'right' })
+    }
+    y += 5
+  }
+
   // ---- net pay banner ----
   doc.setFillColor(...ORANGE)
   doc.roundedRect(margin, y, pageW - margin * 2, 12, 2, 2, 'F')
@@ -195,7 +210,7 @@ export function generatePayslipPdf(
   doc.setTextColor(...SLATE)
   doc.text(company.payslip_footer_note ?? '', margin, y)
   doc.text(
-    `Generated ${new Date().toLocaleString('en-PH', { timeZone: company.timezone || 'Asia/Manila' })} • Confidential`,
+    `Generated ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} • Confidential`,
     margin,
     y + 4.5,
   )

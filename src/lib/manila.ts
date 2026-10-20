@@ -75,3 +75,29 @@ export function hhmmToMinutes(hhmm: string): number {
 export function todayManila(): string {
   return manilaDateStr(new Date())
 }
+
+/** "HH:MM" Manila wall time of an instant. */
+export function manilaHHMM(iso: string): string {
+  const p = toManilaParts(new Date(iso))
+  return `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`
+}
+
+/**
+ * ISO instant for a Manila work date + "HH:MM" wall time, optionally on the
+ * following calendar day (the end of an overnight shift).
+ */
+export function manilaWallToIso(dateStr: string, hhmm: string, nextDay = false): string {
+  return manilaInstant(dateStr, hhmmToMinutes(hhmm) + (nextDay ? 1440 : 0)).toISOString()
+}
+
+/** YYYY-MM-DD plus n days (calendar arithmetic, timezone-free). */
+export function addDays(dateStr: string, n: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+
+/** Last calendar day of the month of a YYYY-MM-DD date. */
+export function endOfMonth(dateStr: string): string {
+  const [y, m] = dateStr.split('-').map(Number)
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+}

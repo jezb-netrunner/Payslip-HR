@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeAttendance } from './attendance'
 import { DEFAULT_TABLES } from './defaults'
-import { computePayslip, periodShare } from './engine'
+import { allocateMonthly, computePayslip } from './engine'
 import type {
   DayComputation,
   HolidayLite,
@@ -41,7 +41,7 @@ const WORKDAYS = [
   '2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28',
   '2026-08-31',
 ]
-const period: PeriodInput = { start: '2026-08-16', end: '2026-08-31', half: 'second' }
+const period: PeriodInput = { start: '2026-08-16', end: '2026-08-31', index: 2, count: 2 }
 
 /** Manila 09:00 = 01:00Z; Manila 18:00 = 10:00Z. */
 function entry(date: string, inUtc = '01:00', outUtc = '10:00', outDate = date): TimeEntryLite {
@@ -387,11 +387,10 @@ describe('review fixes: ND on OT, split-half centavos', () => {
     expect(ot?.amount).toBe(1293.1)
   })
 
-  it('periodShare: the two halves sum exactly to the monthly amount', () => {
-    expect(periodShare(309.37, 0.5, 'first')).toBe(154.68)
-    expect(periodShare(309.37, 0.5, 'second')).toBe(154.69)
-    expect(periodShare(309.37, 1, 'full')).toBe(309.37)
-    expect(periodShare(309.37, 0, 'first')).toBe(0)
+  it('allocateMonthly: the two halves sum exactly to the monthly amount', () => {
+    expect(allocateMonthly(309.37, 1, 2)).toBe(154.68)
+    expect(allocateMonthly(309.37, 2, 2)).toBe(154.69)
+    expect(allocateMonthly(309.37, 1, 1)).toBe(309.37)
   })
 
   it('deducts the odd-centavo monthly PhilHealth share without over-collecting across halves', () => {

@@ -93,3 +93,18 @@ export function fmtPeriod(start: string, end: string): string {
   if (sameMonth) return `${sm} ${s.getDate()}–${e.getDate()}, ${e.getFullYear()}`
   return `${sm} ${s.getDate()} – ${em} ${e.getDate()}, ${e.getFullYear()}`
 }
+
+/** "2026-10-01" (payroll month) -> "October 2026" */
+export function fmtMonth(d: string | null | undefined): string {
+  if (!d) return '—'
+  return new Date(`${d.slice(0, 7)}-01T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })
+}
+
+/** Format a TIN as 000-000-000[-00000]. */
+export function fmtTin(tin: string | null | undefined, branch?: string | null): string {
+  const digits = (tin ?? '').replace(/\D/g, '')
+  if (!digits) return ''
+  const base = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9)].filter(Boolean).join('-')
+  const br = branch ?? (digits.length > 9 ? digits.slice(9) : '')
+  return br ? `${base}-${br}` : base
+}

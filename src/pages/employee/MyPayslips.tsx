@@ -1,49 +1,30 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FileText } from 'lucide-react'
-import PayslipView from '../../components/PayslipView'
-import { Badge, Card, EmptyState, Modal, PageHeader, Spinner } from '../../components/ui'
-import { getSettings } from '../../lib/api'
+import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView'
+import { Badge, Card, EmptyState, Modal, PageHeader, Select, Spinner } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
-import type { CompanySettings, Payslip, PayrollRun } from '../../lib/db'
-import { fmtDate, fmtPeriod, money } from '../../lib/format'
+import type { Entity, Payslip } from '../../lib/db'
+import { fmtDate, money } from '../../lib/format'
 import { supabase } from '../../lib/supabase'
 
-// Employees can only SELECT payslips of finalized runs (RLS), and run info is
-// denormalized onto the payslip — no payroll_runs access needed.
-function runFromSlip(s: Payslip): PayrollRun {
-  return {
-    id: s.payroll_run_id,
-    run_type: s.run_type ?? 'regular',
-    period_start: s.period_start ?? '',
-    period_end: s.period_end ?? '',
-    pay_date: s.pay_date ?? '',
-    status: 'finalized',
-    notes: '',
-    totals: {},
-    finalized_at: null,
-    created_at: '',
-  }
-}
-
+// Employees can only SELECT their own payslips of finalized runs (RLS), and
+// run info is copied onto the payslip — no payroll_runs access needed.
 export default function MyPayslips() {
   const { employee } = useAuth()
   const [slips, setSlips] = useState<Payslip[]>([])
-  const [settings, setSettings] = useState<CompanySettings | null>(null)
+  const [entity, setEntity] = useState<Entity | null>(null)
   const [loading, setLoading] = useState(true)
   const [viewing, setViewing] = useState<Payslip | null>(null)
+  const [year, setYear] = useState('')
 
   const load = useCallback(async () => {
     if (!employee) return
-    const [{ data }, s] = await Promise.all([
-      supabase
-        .from('payslips')
-        .select('*')
-        .eq('employee_id', employee.id)
-        .order('period_end', { ascending: false }),
-      getSettings(),
+    const [{ data }, { data: ent }] = await Promise.all([
+      supabase.from('payslips').select('*').eq('employee_id', employee.id).order('pay_date', { ascending: false }),
+      supabase.from('entities').select('*').eq('id', employee.entity_id).maybeSingle(),
     ])
     setSlips((data ?? []) as Payslip[])
-    setSettings(s)
+    setEntity((ent as Entity) ?? null)
     setLoading(false)
   }, [employee])
 
@@ -53,27 +34,33 @@ export default function MyPayslips() {
 
   if (loading) return <Spinner />
 
-  const thisYear = String(new Date().getFullYear())
-  const ytdNet = slips
-    .filter((s) => (s.period_end ?? '').slice(0, 4) === thisYear)
-    .reduce((sum, s) => sum + Number(s.net_pay), 0)
+  const years = [...new Set(slips.map((s) => (s.period_month ?? s.pay_date ?? '').slice(0, 4)).filter(Boolean))]
+  const shown = slips.filter((s) => !year || (s.period_month ?? s.pay_date ?? '').startsWith(year))
+  const totalNet = shown.reduce((sum, s) => sum + Number(s.net_pay), 0)
 
   return (
     <div>
       <PageHeader
         title="My Payslips"
-        subtitle={`Finalized payslips only · YTD net pay ${money(ytdNet)}`}
+        subtitle={`Finalized payslips · ${year || 'all years'} take-home ${money(totalNet)}`}
+        actions={
+          years.length > 1 && (
+            <Select value={year} onChange={(e) => setYear(e.target.value)} className="w-32">
+              <option value="">All years</option>
+              {years.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </Select>
+          )
+        }
       />
-      {slips.length === 0 ? (
+      {shown.length === 0 ? (
         <Card>
-          <EmptyState
-            title="No payslips yet"
-            sub="Payslips appear here once a payroll run that includes you is finalized."
-          />
+          <EmptyState title="No payslips yet" sub="Payslips appear here once a payroll run that includes you is finalized." />
         </Card>
       ) : (
         <div className="grid gap-3">
-          {slips.map((s) => (
+          {shown.map((s) => (
             <button
               key={s.id}
               onClick={() => setViewing(s)}
@@ -84,13 +71,7 @@ export default function MyPayslips() {
                   <FileText className="size-5 text-brand-600" />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-slate-800">
-                    {s.run_type === 'thirteenth_month'
-                      ? `13th Month Pay ${(s.period_end ?? '').slice(0, 4)}`
-                      : s.period_start && s.period_end
-                        ? fmtPeriod(s.period_start, s.period_end)
-                        : 'Payslip'}
-                  </p>
+                  <p className="text-sm font-bold text-slate-800">{runLabel(runFromSlip(s))}</p>
                   <p className="text-xs text-slate-500">Paid {fmtDate(s.pay_date)}</p>
                 </div>
               </div>
@@ -107,9 +88,7 @@ export default function MyPayslips() {
       )}
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>
-        {viewing && settings && (
-          <PayslipView slip={viewing} run={runFromSlip(viewing)} company={settings} />
-        )}
+        {viewing && entity && <PayslipView slip={viewing} run={runFromSlip(viewing)} company={entity} />}
       </Modal>
     </div>
   )

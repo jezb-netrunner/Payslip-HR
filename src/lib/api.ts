@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import type { CompanySettings, Employee, Holiday, StatutoryVersion } from './db'
+import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
 import type {
   BirAnnualData,
   BirWhtData,
@@ -9,10 +9,10 @@ import type {
   StatutoryTables,
 } from '../payroll/types'
 
-export async function getSettings(): Promise<CompanySettings> {
-  const { data, error } = await supabase.from('company_settings').select('*').eq('id', 1).single()
+export async function getEntity(id: string): Promise<Entity> {
+  const { data, error } = await supabase.from('entities').select('*').eq('id', id).single()
   if (error) throw error
-  return data as CompanySettings
+  return data as Entity
 }
 
 /**
@@ -35,87 +35,53 @@ export async function getStatutoryTables(asOf: string): Promise<StatutoryTables>
   const bir_annual = pick('bir_annual') as BirAnnualData | undefined
   if (!sss || !philhealth || !pagibig || !bir_wht || !bir_annual) {
     throw new Error(
-      'Statutory tables are incomplete for ' + asOf + '. Seed statutory_versions first.',
+      'Statutory tables are incomplete for ' + asOf + '. Ask a company admin to add the missing table versions.',
     )
   }
   return { sss, philhealth, pagibig, bir_wht, bir_annual }
 }
 
-export async function getHolidaysBetween(start: string, end: string): Promise<Holiday[]> {
+const HOLIDAY_STRENGTH: Record<Holiday['kind'], number> = {
+  regular: 3,
+  special_non_working: 2,
+  special_working: 1,
+}
+
+/**
+ * National holidays plus the client's local holidays in a date range. When
+ * two fall on the same date the stronger one governs pay (regular >
+ * special non-working > special working).
+ */
+export async function getHolidaysBetween(entityId: string, start: string, end: string): Promise<Holiday[]> {
   const { data, error } = await supabase
     .from('holidays')
     .select('*')
+    .or(`entity_id.is.null,entity_id.eq.${entityId}`)
     .gte('holiday_date', start)
     .lte('holiday_date', end)
     .order('holiday_date')
   if (error) throw error
-  return (data ?? []) as Holiday[]
+  const byDate = new Map<string, Holiday>()
+  for (const h of (data ?? []) as Holiday[]) {
+    const cur = byDate.get(h.holiday_date)
+    if (!cur || HOLIDAY_STRENGTH[h.kind] > HOLIDAY_STRENGTH[cur.kind]) byDate.set(h.holiday_date, h)
+  }
+  return [...byDate.values()].sort((a, b) => a.holiday_date.localeCompare(b.holiday_date))
 }
 
-export async function getEmployees(activeOnly = false): Promise<Employee[]> {
-  let q = supabase.from('employees').select('*').order('last_name')
-  if (activeOnly) {
-    q = q.not('employment_status', 'in', '("resigned","terminated","retired")')
-  }
-  const { data, error } = await q
+/** Employed (not yet separated) as of the given date. */
+export function isActiveOn(e: Pick<Employee, 'separation_date'>, date: string): boolean {
+  return !e.separation_date || e.separation_date >= date
+}
+
+export async function getEmployees(entityId: string): Promise<Employee[]> {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('last_name')
   if (error) throw error
   return (data ?? []) as Employee[]
-}
-
-// ---------- punch device helpers ----------
-
-export function getDeviceInfo(): Record<string, string> {
-  let fingerprint = ''
-  try {
-    fingerprint = localStorage.getItem('phr_device_id') ?? ''
-    if (!fingerprint) {
-      fingerprint = crypto.randomUUID()
-      localStorage.setItem('phr_device_id', fingerprint)
-    }
-  } catch {
-    fingerprint = 'no-storage'
-  }
-  return {
-    fingerprint,
-    user_agent: navigator.userAgent,
-    platform: navigator.platform ?? '',
-    screen: `${window.screen.width}x${window.screen.height}`,
-  }
-}
-
-export function getLocation(): Promise<{ lat: number; lng: number; accuracy: number } | null> {
-  return new Promise((resolve) => {
-    if (!('geolocation' in navigator)) return resolve(null)
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: Math.round(pos.coords.accuracy),
-        }),
-      () => resolve(null),
-      { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 },
-    )
-  })
-}
-
-export async function uploadPunchSelfie(
-  employeeId: string,
-  blob: Blob,
-  direction: 'in' | 'out',
-): Promise<string> {
-  const path = `${employeeId}/${Date.now()}-${direction}.jpg`
-  const { error } = await supabase.storage
-    .from('punch-selfies')
-    .upload(path, blob, { contentType: 'image/jpeg', upsert: false })
-  if (error) throw error
-  return path
-}
-
-export async function signedSelfieUrl(path: string): Promise<string | null> {
-  const { data, error } = await supabase.storage.from('punch-selfies').createSignedUrl(path, 3600)
-  if (error) return null
-  return data.signedUrl
 }
 
 export function edgeFunctionUrl(name: string): string {
@@ -124,7 +90,9 @@ export function edgeFunctionUrl(name: string): string {
   return `${base}/functions/v1/${name}`
 }
 
-export async function callAdminUsers(body: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; user_id?: string }> {
+export async function callAdminUsers(
+  body: Record<string, unknown>,
+): Promise<{ ok?: boolean; error?: string; user_id?: string; code?: string }> {
   const { data: sess } = await supabase.auth.getSession()
   const token = sess.session?.access_token
   const res = await fetch(edgeFunctionUrl('admin-users'), {
@@ -135,11 +103,15 @@ export async function callAdminUsers(body: Record<string, unknown>): Promise<{ o
     },
     body: JSON.stringify(body),
   })
-  return res.json()
+  try {
+    return await res.json()
+  } catch {
+    return { error: `Request failed (${res.status})` }
+  }
 }
 
-export function downloadCsv(filename: string, rows: (string | number)[][]) {
-  const esc = (v: string | number) => {
+export function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {
+  const esc = (v: string | number | null | undefined) => {
     const s = String(v ?? '')
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }

@@ -4,6 +4,12 @@ import { Badge, Card, PageHeader, Spinner } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import type { CareerEvent } from '../../lib/db'
 import { fmtDate, fullName, money } from '../../lib/format'
+import {
+  EMPLOYMENT_STATUS_LABELS,
+  FREQUENCY_LABELS,
+  PAYMENT_METHOD_LABELS,
+  SEPARATION_REASON_LABELS,
+} from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 
 const eventLabels: Record<string, string> = {
@@ -40,29 +46,38 @@ export default function MyProfile() {
 
   if (!employee || loading) return <Spinner />
 
-  const tenureYears =
-    (Date.now() - new Date(employee.hire_date).getTime()) / (365.25 * 24 * 3600 * 1000)
+  const endDate = employee.separation_date ? new Date(employee.separation_date) : new Date()
+  const tenureYears = (endDate.getTime() - new Date(employee.hire_date).getTime()) / (365.25 * 24 * 3600 * 1000)
 
   const rows: [string, React.ReactNode][] = [
     ['Employee No.', employee.employee_no],
-    ['Email', employee.email],
-    ['Phone', employee.phone ?? '—'],
     ['Position', employee.position || '—'],
     ['Department', employee.department || '—'],
-    ['Employment status', <Badge key="s" tone="blue">{employee.employment_status}</Badge>],
-    ['Date hired', `${fmtDate(employee.hire_date)} (${tenureYears.toFixed(1)} yrs)`],
+    ['Employment status', <Badge key="s" tone="blue">{EMPLOYMENT_STATUS_LABELS[employee.employment_status]}</Badge>],
+    ['Date started', `${fmtDate(employee.hire_date)} (${tenureYears.toFixed(1)} yrs)`],
     ['Regularized', employee.regularization_date ? fmtDate(employee.regularization_date) : '—'],
+    ...(employee.separation_date
+      ? ([
+          [
+            'Separated',
+            `${fmtDate(employee.separation_date)}${employee.separation_reason ? ` — ${SEPARATION_REASON_LABELS[employee.separation_reason]}` : ''}`,
+          ],
+        ] as [string, React.ReactNode][])
+      : []),
     [
       'Pay',
       employee.pay_type === 'monthly'
         ? `${money(Number(employee.monthly_rate))} / month`
         : `${money(Number(employee.daily_rate))} / day`,
     ],
+    ['Paid', `${FREQUENCY_LABELS[employee.pay_frequency]} · ${PAYMENT_METHOD_LABELS[employee.payment_method]}`],
     ['Work schedule', `${employee.work_schedule.start}–${employee.work_schedule.end}, break ${employee.work_schedule.break_minutes}m`],
+    ['TIN', employee.tin ?? '—'],
     ['SSS No.', employee.sss_no ?? '—'],
     ['PhilHealth No.', employee.philhealth_no ?? '—'],
     ['Pag-IBIG No.', employee.pagibig_no ?? '—'],
-    ['TIN', employee.tin ?? '—'],
+    ['Phone', employee.phone ?? '—'],
+    ['Address', employee.address ?? '—'],
   ]
 
   return (
@@ -74,12 +89,12 @@ export default function MyProfile() {
             {rows.map(([k, v]) => (
               <div key={k} className="flex items-center justify-between gap-4 py-2">
                 <dt className="text-xs font-semibold text-slate-500">{k}</dt>
-                <dd className="text-sm text-slate-700">{v}</dd>
+                <dd className="text-right text-sm text-slate-700">{v}</dd>
               </div>
             ))}
           </dl>
           <p className="mt-3 text-xs text-slate-400">
-            Something wrong? Contact your administrator — HR records are maintained by the company.
+            Something wrong? Tell your HR or payroll officer — records are maintained by the company.
           </p>
         </Card>
 
