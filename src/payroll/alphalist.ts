@@ -66,15 +66,20 @@ export function buildAlphalist(params: {
     const prior = priorFromTaxYear(ty)
     const summary = summarizeYear(facts, annual, prior, Number(ty?.pera_tax_credit ?? 0) || 0)
 
-    const from = e.hire_date > jan1 ? e.hire_date : jan1
     const separatedInYear = !!e.separation_date && e.separation_date <= dec31 && e.separation_date >= jan1
-    const to = separatedInYear ? (e.separation_date as string) : dec31
+    // paid this year for work before leaving last year (e.g. the Dec 16-31
+    // payroll released in January): report the actual last employment span
+    const separatedBefore = !!e.separation_date && e.separation_date < jan1
+    const separated = separatedInYear || separatedBefore
+    const spanStart = separatedBefore ? `${(e.separation_date as string).slice(0, 4)}-01-01` : jan1
+    const from = e.hire_date > spanStart ? e.hire_date : spanStart
+    const to = separated ? (e.separation_date as string) : dec31
     const factor = Number(e.days_per_year ?? entity.working_days_divisor)
     const smwPerDay =
       e.pay_type === 'daily' ? Number(e.daily_rate) : round2((Number(e.monthly_rate) * 12) / factor)
 
     const autoSubstituted =
-      !ty?.has_previous_employer && !separatedInYear && summary.variance === 0
+      !ty?.has_previous_employer && !separated && summary.variance === 0
     const substitutedFiling =
       ty?.substituted_filing === 'yes' ? true : ty?.substituted_filing === 'no' ? false : autoSubstituted
 
@@ -86,6 +91,9 @@ export function buildAlphalist(params: {
     if (summary.variance < 0) issues.push(`Over-withheld by ₱${(-summary.variance).toLocaleString()} — refund via annualization`)
     if (summary.allMwe && !entity.minimum_wage_region) issues.push('Client wage region not set')
     if (ty?.has_previous_employer && !ty.prev_employer_tin) issues.push('Previous employer TIN missing')
+    if (separatedBefore) {
+      issues.push(`Separated ${e.separation_date}, paid in ${year}: check the employment dates the BIR module accepts`)
+    }
 
     rows.push({
       schedule: summary.allMwe ? 2 : 1,
@@ -94,7 +102,7 @@ export function buildAlphalist(params: {
       from,
       to,
       statusCode: EMPLOYMENT_STATUS_BIR[e.employment_status],
-      separationCode: separatedInYear && e.separation_reason ? SEPARATION_REASON_BIR[e.separation_reason] : '',
+      separationCode: separated && e.separation_reason ? SEPARATION_REASON_BIR[e.separation_reason] : '',
       region: entity.minimum_wage_region,
       factor,
       smwPerDay,

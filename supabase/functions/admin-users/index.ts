@@ -10,7 +10,8 @@
 // Employee login codes are "<CLIENT CODE>-<PART>". Supabase Auth needs an
 // email, so each code maps to a synthetic address derived from a SHA-256 of
 // the code, and the code itself is the password (stored only as Supabase's
-// bcrypt hash). KEEP THE DERIVATION IN SYNC with src/lib/loginCode.ts.
+// bcrypt hash; the derived address is kept only in auth.users, never in
+// admin-readable tables). KEEP THE DERIVATION IN SYNC with src/lib/loginCode.ts.
 // Another company admin's account can never be managed from here.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -154,12 +155,13 @@ Deno.serve(async (req: Request) => {
           return json({ error: createErr?.message ?? "Failed to create login" }, 400);
         }
         // The on_auth_user_created trigger creates the profile; upsert to be
-        // safe and to guarantee the employee link.
+        // safe and to guarantee the employee link. No email on the profile:
+        // it is derived from the code, and admins can read profiles.
         await admin.from("profiles").upsert({
           id: created.user.id,
           role: "employee",
           employee_id: emp.id,
-          email,
+          email: null,
           full_name: fullName,
           is_active: true,
         });
@@ -172,7 +174,7 @@ Deno.serve(async (req: Request) => {
           if (isAlreadyRegistered(updErr.message)) return json(inUse, 409);
           return json({ error: updErr.message }, 400);
         }
-        await admin.from("profiles").update({ email, full_name: fullName }).eq(
+        await admin.from("profiles").update({ email: null, full_name: fullName }).eq(
           "id",
           existing.id,
         );

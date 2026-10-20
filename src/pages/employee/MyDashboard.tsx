@@ -55,7 +55,7 @@ export default function MyDashboard() {
   if (!employee || loading) return <Spinner />
 
   const latest = slips[0]
-  const ytd = slips.filter((s) => (s.period_month ?? s.pay_date ?? '').slice(0, 4) === year)
+  const ytd = slips.filter((s) => (s.pay_date ?? s.period_month ?? '').slice(0, 4) === year)
   const sum = (f: (s: Payslip) => number) => ytd.reduce((a, s) => a + f(s), 0)
   const ytdContrib = sum((s) => Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.philhealth_ee) + Number(s.pagibig_ee))
   const ytdThirteenth = sum((s) => (s.run_type === 'thirteenth_month' ? Number(s.gross_pay) : 0))

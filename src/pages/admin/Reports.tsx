@@ -11,7 +11,7 @@ import { fmtDate, fmtMonth, fmtTin, fullName, money } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { alphalistCsv, buildAlphalist, type AlphalistRow } from '../../payroll/alphalist'
-import { fetchFinalizedPayslipsForYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
+import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
@@ -71,7 +71,8 @@ function useAlphalist(entity: Entity, year: number) {
       try {
         const [employees, payslips, taxYears, tables] = await Promise.all([
           getEmployees(entity.id),
-          fetchFinalizedPayslipsForYear(entity.id, year),
+          // tax year = compensation PAID in the year (pay date)
+          fetchFinalizedPayslipsForTaxYear(entity.id, year),
           fetchTaxYears(entity.id, year),
           getStatutoryTables(`${year}-12-31`),
         ])
@@ -109,7 +110,7 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
   if (rows.length === 0)
     return (
       <Card>
-        <EmptyState title={`No finalized payslips for ${year}`} sub="The alphalist is built from finalized payroll runs whose payroll month falls in the year." />
+        <EmptyState title={`No finalized payslips for ${year}`} sub="The alphalist is built from finalized payslips paid (pay date) within the year." />
       </Card>
     )
 
@@ -347,7 +348,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
   const withheldByMonth = useMemo(() => {
     const m: Record<string, number> = {}
     for (const s of slips) {
-      const k = (s.period_month ?? '').slice(5, 7)
+      const k = (s.pay_date ?? '').slice(5, 7)
       m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
     }
     return m
@@ -504,11 +505,15 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
   const load = useCallback(async () => {
     const [{ data }, slips] = await Promise.all([
       supabase.from('tax_remittances').select('*').eq('entity_id', entity.id).gte('period_month', `${year}-01-01`).lte('period_month', `${year}-12-01`),
-      fetchFinalizedPayslipsForYear(entity.id, year),
+      fetchFinalizedPayslipsForTaxYear(entity.id, year),
     ])
     setRemits((data ?? []) as TaxRemittance[])
+    // 1601-C covers tax withheld in the month the pay was released
     const m: Record<string, number> = {}
-    for (const s of slips) m[(s.period_month ?? '').slice(5, 7)] = (m[(s.period_month ?? '').slice(5, 7)] ?? 0) + Number(s.withholding_tax)
+    for (const s of slips) {
+      const k = (s.pay_date ?? '').slice(5, 7)
+      m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
+    }
     setByMonth(m)
     setLoading(false)
   }, [entity.id, year])

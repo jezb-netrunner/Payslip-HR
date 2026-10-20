@@ -30,7 +30,7 @@ function emp(id: string, extra: Partial<Employee> = {}): Employee {
 }
 
 const fact = (m: number, isMwe: boolean, basic: number, wht = 0): AnnualPayslipFact => ({
-  periodMonth: `2026-${String(m).padStart(2, '0')}-01`,
+  payMonth: `2026-${String(m).padStart(2, '0')}-01`,
   isMwe,
   earnings: [{ amount: basic, bir: 'basic' }],
   contributionsEe: 0,
@@ -87,6 +87,19 @@ describe('1604-C alphalist rows', () => {
     expect(reg.summary.variance).toBe(0)
     expect(reg.substitutedFiling).toBe(false)
     expect(reg.prevEmployerTin).toBe('111-222-333')
+  })
+
+  it('reports an employee who left last year but was paid this year as separated', () => {
+    const [r] = buildAlphalist({
+      year: 2027,
+      entity,
+      employees: [emp('dec', { separation_date: '2026-12-31', separation_reason: 'resignation' })],
+      payslips: [{ employee_id: 'dec', fact: { ...fact(1, true, 9000), payMonth: '2027-01-01' } }],
+      taxYears: [],
+      annual: BIR_ANNUAL_2023,
+    })
+    expect([r.from, r.to, r.separationCode, r.substitutedFiling]).toEqual(['2026-01-01', '2026-12-31', 'T', false])
+    expect(r.issues.join(' ')).toContain('Separated 2026-12-31')
   })
 
   it('exports one CSV per schedule with matching column counts', () => {

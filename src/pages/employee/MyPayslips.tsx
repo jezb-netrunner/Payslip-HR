@@ -34,8 +34,8 @@ export default function MyPayslips() {
 
   if (loading) return <Spinner />
 
-  const years = [...new Set(slips.map((s) => (s.period_month ?? s.pay_date ?? '').slice(0, 4)).filter(Boolean))]
-  const shown = slips.filter((s) => !year || (s.period_month ?? s.pay_date ?? '').startsWith(year))
+  const years = [...new Set(slips.map((s) => (s.pay_date ?? s.period_month ?? '').slice(0, 4)).filter(Boolean))]
+  const shown = slips.filter((s) => !year || (s.pay_date ?? s.period_month ?? '').startsWith(year))
   const totalNet = shown.reduce((sum, s) => sum + Number(s.net_pay), 0)
 
   return (

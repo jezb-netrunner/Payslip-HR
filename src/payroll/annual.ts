@@ -17,8 +17,10 @@ import { taxFromBrackets } from './statutory'
 import { round2, type BirAnnualData, type BirBucket } from './types'
 
 export interface AnnualPayslipFact {
-  /** Payroll month (YYYY-MM-01) — the BIR reporting month of the payslip. */
-  periodMonth: string
+  /** Month the pay was released (YYYY-MM-01): withholding tax is reported
+   *  when compensation is paid, so this — not the payroll month — decides
+   *  the tax year and the December / January–November split. */
+  payMonth: string
   isMwe: boolean
   earnings: { amount: number; bir?: BirBucket; taxable?: boolean }[]
   /** SSS (incl. MPF) + PhilHealth + Pag-IBIG employee shares. */
@@ -178,6 +180,11 @@ export function summarizeYear(
         case 'other_benefits': b.thirteenthOb += l.amount; break
         case 'de_minimis': b.deMinimis += l.amount; break
         case 'other_non_taxable': b.otherNonTaxable += l.amount; break
+        // an unrecognized bucket still has to land in some 2316 column, or
+        // gross no longer equals non-taxable + taxable
+        default:
+          if (l.taxable === false) b.otherNonTaxable += l.amount
+          else b.otherTaxable += l.amount
       }
     }
     const c = f.contributionsEe + f.unionDues
@@ -186,7 +193,7 @@ export function summarizeYear(
 
     const wht = f.withholdingTax
     if (wht < 0) refunded += -wht
-    else if (f.periodMonth.slice(5, 7) === '12') withheldDec += wht
+    else if (f.payMonth.slice(5, 7) === '12') withheldDec += wht
     else withheldJanNov += wht
   }
 

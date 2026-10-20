@@ -1,3 +1,4 @@
+import { fetchAll } from './fetchAll'
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
 import type {
@@ -75,13 +76,10 @@ export function isActiveOn(e: Pick<Employee, 'separation_date'>, date: string): 
 }
 
 export async function getEmployees(entityId: string): Promise<Employee[]> {
-  const { data, error } = await supabase
-    .from('employees')
-    .select('*')
-    .eq('entity_id', entityId)
-    .order('last_name')
-  if (error) throw error
-  return (data ?? []) as Employee[]
+  // separated employees stay on file, so large clients pass 1000 rows
+  return fetchAll<Employee>((from, to) =>
+    supabase.from('employees').select('*').eq('entity_id', entityId).order('last_name').order('id').range(from, to),
+  )
 }
 
 export function edgeFunctionUrl(name: string): string {

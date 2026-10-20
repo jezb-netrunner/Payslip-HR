@@ -128,6 +128,8 @@ export interface Employee {
   login_code_hint: string | null
   login_code_set_at: string | null
   rounding_balance: number
+  /** Bumped by every finalize/reopen touching the employee (system-maintained). */
+  payroll_seq: number
   created_at: string
 }
 
@@ -317,6 +319,8 @@ export interface Payslip {
   rounding_adjustment: number
   rounding_carry_in: number
   rounding_carry_out: number
+  /** employees.payroll_seq the draft was computed from */
+  employee_payroll_seq: number | null
   computation_trace: {
     dailyRate?: number
     hourlyRate?: number

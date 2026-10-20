@@ -113,6 +113,9 @@ create index entity_admins_entity_idx on public.entity_admins (entity_id);
 -- ---------- profiles: three access tiers ----------
 alter table public.profiles drop constraint if exists profiles_role_check;
 update public.profiles set role = 'company_admin' where role = 'admin';
+-- access tokens issued before this instant stop working for employee data
+-- (set when an employee's login code is replaced)
+alter table public.profiles add column sessions_revoked_at timestamptz;
 alter table public.profiles
   add constraint profiles_role_check check (role in ('company_admin','entity_admin','employee')),
   -- only employee logins link to an employee record
@@ -140,7 +143,10 @@ alter table public.employees
   add column login_code_set_at timestamptz,
   -- centavos owed to the employee under carry-forward net-pay rounding
   add column rounding_balance numeric(6,2) not null default 0
-    check (rounding_balance >= 0 and rounding_balance < 1);
+    check (rounding_balance >= 0 and rounding_balance < 1),
+  -- bumped by every finalize/reopen touching the employee: a draft computed
+  -- before that (stale year-to-date or carry figures) must be recomputed
+  add column payroll_seq int not null default 0;
 alter table public.employees alter column email drop not null;
 alter table public.employees
   add constraint employees_employment_status_check check (employment_status in
@@ -258,8 +264,11 @@ alter table public.payslips
   -- net_pay = gross_pay - total_deductions + rounding_adjustment
   add column rounding_adjustment numeric(8,2) not null default 0,
   add column rounding_carry_in numeric(6,2) not null default 0,
-  add column rounding_carry_out numeric(6,2) not null default 0;
+  add column rounding_carry_out numeric(6,2) not null default 0,
+  -- employees.payroll_seq the draft was computed from
+  add column employee_payroll_seq int;
 create index payslips_entity_month_idx on public.payslips (entity_id, period_month);
+create index payslips_employee_period_idx on public.payslips (employee_id, period_start, period_end);
 
 -- one-time earnings/deductions for a specific run (corrections, bonuses,
 -- final-pay extras); locked with the run
@@ -276,7 +285,12 @@ create table public.payroll_adjustments (
     ('basic','holiday','overtime','night_diff','hazard','other_benefits','de_minimis','representation',
      'transportation','cola','housing','other_taxable','other_non_taxable','union_dues','other')),
   created_by uuid,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint payroll_adjustments_category_check2 check (
+    case kind
+      when 'earning' then category not in ('union_dues','other')
+      else category in ('union_dues','other')
+    end)
 );
 create index payroll_adjustments_run_idx on public.payroll_adjustments (payroll_run_id, employee_id);
 

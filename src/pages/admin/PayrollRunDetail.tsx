@@ -74,6 +74,7 @@ export default function PayrollRunDetail() {
       await load()
     } catch (err) {
       toast('error', errorMessage(err, 'Computation failed'))
+      await load() // show what is actually stored now, not the pre-compute payslips
     } finally {
       setComputing(false)
     }
@@ -167,6 +168,9 @@ export default function PayrollRunDetail() {
     })),
   )
   const isDraft = run.status === 'draft'
+  // the database clears totals whenever attendance, adjustments, leave or
+  // pay settings change after computing; finalize refuses such a draft
+  const upToDate = typeof t.employees === 'number' && t.employees === slips.length && slips.length > 0
   const empName = (eid: string) => {
     const e = employees.find((x) => x.id === eid)
     return e ? fullName(e) : '—'
@@ -195,7 +199,7 @@ export default function PayrollRunDetail() {
                   <Calculator className="size-4" />
                   {computing ? 'Computing…' : slips.length ? 'Recompute draft' : 'Compute draft'}
                 </Button>
-                <Button variant="accent" onClick={doFinalize} disabled={busy || slips.length === 0}>
+                <Button variant="accent" onClick={doFinalize} disabled={busy || computing || !upToDate}>
                   <Lock className="size-4" /> Finalize
                 </Button>
                 <Button variant="ghost" onClick={deleteDraft} title="Delete draft run">
@@ -213,6 +217,12 @@ export default function PayrollRunDetail() {
           </>
         }
       />
+      {isDraft && slips.length > 0 && !upToDate && !computing && (
+        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Attendance, adjustments, leave or pay settings changed since this draft was computed (or the last computation
+          did not finish). Recompute the draft before finalizing.
+        </p>
+      )}
 
       {(warnings.length > 0 || (result?.warnings.some((w) => w.employee === 'This run') ?? false)) && (
         <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">

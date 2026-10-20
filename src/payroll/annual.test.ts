@@ -9,7 +9,7 @@ const month = (m: number) => `2026-${String(m).padStart(2, '0')}-01`
 
 function regular(m: number, basic: number, contributions: number, wht: number, isMwe = false): AnnualPayslipFact {
   return {
-    periodMonth: month(m),
+    payMonth: month(m),
     isMwe,
     earnings: [{ amount: basic, bir: 'basic', taxable: !isMwe }],
     contributionsEe: contributions,
@@ -23,8 +23,8 @@ describe('annual summary (BIR 2316 / alphalist columns)', () => {
   // a ₱70,000 June bonus and a ₱30,000 13th month pay in December.
   const facts: AnnualPayslipFact[] = [
     ...Array.from({ length: 12 }, (_, i) => regular(i + 1, 30000, 2000, 1500)),
-    { periodMonth: month(6), isMwe: false, earnings: [{ amount: 70000, bir: 'other_benefits' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
-    { periodMonth: month(12), isMwe: false, earnings: [{ amount: 30000, bir: 'thirteenth' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
+    { payMonth: month(6), isMwe: false, earnings: [{ amount: 70000, bir: 'other_benefits' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
+    { payMonth: month(12), isMwe: false, earnings: [{ amount: 30000, bir: 'thirteenth' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
   ]
   const s = summarizeYear(facts, BIR_ANNUAL_2023)
 
@@ -52,8 +52,8 @@ describe('annual summary (BIR 2316 / alphalist columns)', () => {
   it('treats a full-year minimum wage earner as fully exempt', () => {
     const mweFacts: AnnualPayslipFact[] = [
       ...Array.from({ length: 12 }, (_, i) => regular(i + 1, 20000, 1000, 0, true)),
-      { periodMonth: month(4), isMwe: true, earnings: [{ amount: 1000, bir: 'holiday' }, { amount: 500, bir: 'overtime' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
-      { periodMonth: month(12), isMwe: true, earnings: [{ amount: 20000, bir: 'thirteenth' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
+      { payMonth: month(4), isMwe: true, earnings: [{ amount: 1000, bir: 'holiday' }, { amount: 500, bir: 'overtime' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
+      { payMonth: month(12), isMwe: true, earnings: [{ amount: 20000, bir: 'thirteenth' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
     ]
     const m = summarizeYear(mweFacts, BIR_ANNUAL_2023)
     expect(m.allMwe).toBe(true)
@@ -67,7 +67,7 @@ describe('annual summary (BIR 2316 / alphalist columns)', () => {
 
   it("shares the cap with a previous employer's exempt benefits", () => {
     const withPrior = summarizeYear(
-      [{ periodMonth: month(12), isMwe: false, earnings: [{ amount: 60000, bir: 'thirteenth' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 }],
+      [{ payMonth: month(12), isMwe: false, earnings: [{ amount: 60000, bir: 'thirteenth' }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 }],
       BIR_ANNUAL_2023,
       { ...NO_PRIOR_EMPLOYER, thirteenthOtherBenefitsExempt: 50000, taxableBasic: 100000, taxWithheld: 5000 },
     )
@@ -92,8 +92,8 @@ describe('annualized withholding in the last payroll of the year', () => {
   it('withholds tax due minus tax already withheld (refund when negative)', () => {
     const ytd = [
       ...Array.from({ length: 11 }, (_, i) => regular(i + 1, 30000, 2000, 1500)),
-      { periodMonth: month(6), isMwe: false, earnings: [{ amount: 70000, bir: 'other_benefits' as const }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
-      { periodMonth: month(12), isMwe: false, earnings: [{ amount: 30000, bir: 'thirteenth' as const }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
+      { payMonth: month(6), isMwe: false, earnings: [{ amount: 70000, bir: 'other_benefits' as const }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
+      { payMonth: month(12), isMwe: false, earnings: [{ amount: 30000, bir: 'thirteenth' as const }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
     ]
     const { withholding } = annualizedWithholding(ytd, regular(12, 30000, 2000, 0), BIR_ANNUAL_2023)
     expect(withholding).toBe(-2100) // due 14,400 − withheld 16,500
@@ -147,7 +147,7 @@ describe('annualized withholding in the last payroll of the year', () => {
       tables: DEFAULT_TABLES,
       days,
       runType: 'regular',
-      annualization: { periodMonth: month(12), ytd },
+      annualization: { payMonth: month(12), ytd },
     })
     // year: 24 × 15,000 basic − 24 × 1,225 = 330,600 taxable -> due 12,090;
     // withheld so far 23 × 503.70 = 11,585.10 -> this payroll withholds 504.90

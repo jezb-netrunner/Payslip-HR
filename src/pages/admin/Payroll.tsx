@@ -169,22 +169,27 @@ function NewRunModal({
     setAnnualize(runType === 'final_pay')
   }, [runType, frequency, runs, today, entity.pay_date_lag_days])
 
+  // the payroll month and slot follow the period's cutoff, not the pay date
   useEffect(() => {
-    if (!pay) return
-    if (runType === 'thirteenth_month') setSlot({ month: `${pay.slice(0, 7)}-01`, index: 1, count: 1 })
-    else setSlot(slotFor(frequency, pay))
-  }, [pay, frequency, runType])
+    if (!end) return
+    if (runType === 'thirteenth_month') setSlot({ month: `${end.slice(0, 7)}-01`, index: 1, count: 1 })
+    else setSlot(slotFor(frequency, end))
+  }, [end, frequency, runType])
 
   const eligible = useMemo(
     () =>
-      employees.filter(
-        (e) =>
-          e.hire_date <= (end || today) &&
-          (!e.separation_date || e.separation_date >= (start || today)) &&
-          (runType === 'thirteenth_month' || e.pay_frequency === frequency),
-      ),
+      employees.filter((e) => {
+        if (e.hire_date > (end || today)) return false
+        if (runType !== 'thirteenth_month' && e.pay_frequency !== frequency) return false
+        // final pay: separated employees, also when released after the
+        // period that held their last day (one-time items + tax only)
+        if (runType === 'final_pay') return !!e.separation_date && e.separation_date <= (end || today)
+        return !e.separation_date || e.separation_date >= (start || today)
+      }),
     [employees, start, end, frequency, runType, today],
   )
+  // the picker only applies to the run type showing it, and only to people eligible now
+  const picked = runType === 'regular' ? [] : selected.filter((id) => eligible.some((e) => e.id === id))
   const needsSubset = runType === 'final_pay'
   const lastOfYear = pay.slice(5, 7) === '12' && runType === 'regular'
 
@@ -193,7 +198,7 @@ function NewRunModal({
       toast('error', 'Check the period and pay dates.')
       return
     }
-    if (needsSubset && selected.length === 0) {
+    if (needsSubset && picked.length === 0) {
       toast('error', 'Pick the separated employee(s) for this final pay.')
       return
     }
@@ -224,7 +229,7 @@ function NewRunModal({
           period_index: runType === 'thirteenth_month' ? 1 : slot.index,
           periods_in_month: runType === 'thirteenth_month' ? 1 : slot.count,
           annualize: runType === 'thirteenth_month' ? false : annualize,
-          employee_ids: selected.length > 0 ? selected : null,
+          employee_ids: picked.length > 0 ? picked : null,
           status: 'draft',
         })
         .select('id')
@@ -250,7 +255,13 @@ function NewRunModal({
       <div className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Run type">
-            <Select value={runType} onChange={(e) => setRunType(e.target.value as RunType)}>
+            <Select
+              value={runType}
+              onChange={(e) => {
+                setRunType(e.target.value as RunType)
+                setSelected([])
+              }}
+            >
               {Object.entries(RUN_TYPE_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
@@ -258,7 +269,13 @@ function NewRunModal({
           </Field>
           {runType !== 'thirteenth_month' && (
             <Field label="Pay frequency (employees included)">
-              <Select value={frequency} onChange={(e) => setFrequency(e.target.value as PayFrequency)}>
+              <Select
+                value={frequency}
+                onChange={(e) => {
+                  setFrequency(e.target.value as PayFrequency)
+                  setSelected([])
+                }}
+              >
                 {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v} ({employees.filter((x) => x.pay_frequency === k && isActiveOn(x, today)).length} active)
@@ -351,9 +368,12 @@ function NewRunModal({
         )}
         {(runType === 'special' || runType === 'final_pay') && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Special and final-pay runs compute the chosen period exactly like a regular run (attendance,
-            contributions, tax). Don't overlap a period a finalized regular run already paid. Add final-pay extras
-            (SIL conversion, other benefits) as one-time adjustments on the run.
+            Special and final-pay runs compute the chosen period like a regular run (attendance, contributions,
+            tax). Anyone a finalized run already paid for part of the period is left out, so days are never paid
+            twice. Final pay: choose the period holding the last day if it is still unpaid — the regular run then
+            leaves the employee out; if it was already paid, choose a later period and the final pay carries only
+            the one-time items (SIL conversion, other benefits) and the year's tax adjustment. A regular run that
+            includes a separation date also settles that employee's tax and cash-rounding balance.
           </p>
         )}
         <Button className="w-full" disabled={busy} onClick={create}>

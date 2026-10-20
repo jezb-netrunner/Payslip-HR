@@ -79,12 +79,39 @@ function otMultiplier(dayType: DayType): number {
 }
 
 export interface AnnualizationInput {
-  /** Payroll month of this run (YYYY-MM-01). */
-  periodMonth: string
-  /** This employer's finalized payslips earlier in the same calendar year. */
+  /** Month this payroll is paid (YYYY-MM-01). */
+  payMonth: string
+  /** This employer's finalized payslips paid earlier in the same calendar year. */
   ytd: AnnualPayslipFact[]
   prior?: PriorEmployerInput
   peraCredit?: number
+}
+
+/** Statutory contributions, employee and employer shares. */
+export interface ContributionSet {
+  sssEe: number
+  sssMpfEe: number
+  philhealthEe: number
+  pagibigEe: number
+  sssEr: number
+  sssMpfEr: number
+  sssEcEr: number
+  philhealthEr: number
+  pagibigEr: number
+}
+
+/**
+ * Where this payroll sits in the employee's own month. Slot-based shares
+ * assume the employee is on every payroll of the month; a hire or
+ * separation mid-month breaks that, so the month is completed explicitly.
+ */
+export interface MonthContributionsInput {
+  /** Already deducted this payroll month in the employee's finalized payslips. */
+  already: ContributionSet
+  /** The employee's last payroll of the month (last slot or separation): deduct what the month still owes. */
+  closes: boolean
+  /** First payroll of the month for the employee: under 'first_period' timing the month is deducted here. */
+  opens: boolean
 }
 
 export interface ComputePayslipParams {
@@ -98,6 +125,14 @@ export interface ComputePayslipParams {
   rounding?: RoundingInput
   /** Annualize withholding in this payroll (last payroll of the year / separation). */
   annualization?: AnnualizationInput
+  /**
+   * Final pay released after the employee's last paid period: only the
+   * one-time items, the tax adjustment and the rounding settlement — no
+   * attendance pay, allowances or contributions (there is no work left to pay).
+   */
+  extrasOnly?: boolean
+  /** Completes the month's contributions around hires and separations (omitted = plain slot shares). */
+  monthContributions?: MonthContributionsInput
   /** 13th month: basic pay earned so far this calendar year. */
   ytdBasicPay?: number
   /** 13th month: other benefits (bonuses) already paid this year. */
@@ -220,8 +255,10 @@ const FREQUENCY_LABEL: Record<PayrollSettingsInput['payFrequency'], string> = {
 }
 
 export function computePayslip(params: ComputePayslipParams): PayslipComputation {
-  const { employee, settings, period, tables, days, runType } = params
+  const { employee, settings, period, tables, runType } = params
   if (runType === 'thirteenth_month') return computeThirteenthMonth(params)
+  const extrasOnly = params.extrasOnly === true
+  const days = extrasOnly ? [] : params.days
 
   const notes: string[] = []
   const warnings: string[] = []
@@ -347,7 +384,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     earnings.push({ code, label, amount, bir, taxable: isTaxableBucket(bir, isMwe), ...extra })
   let basicPay: number
 
-  if (employee.payType === 'monthly') {
+  if (extrasOnly) {
+    basicPay = 0
+    notes.push('Final pay after the last paid period: one-time items, tax adjustment and rounding settlement only.')
+  } else if (employee.payType === 'monthly') {
     basicPay = allocateMonthly(employee.monthlyRate, period.index, period.count)
     earn('basic', 'Basic Pay', basicPay, 'basic')
     const absenceDeduction = round2((absentDays + unpaidLeaveDays) * daily)
@@ -381,7 +421,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   if (holidayPremium > 0) earn('holiday', 'Holiday Pay', round2(holidayPremium), 'holiday')
 
   const paidDays = daysWorked + paidLeaveDays + paidUnworkedHolidays
-  for (const a of employee.allowances) {
+  for (const a of extrasOnly ? [] : employee.allowances) {
     let amt: number
     let suffix = ''
     if (a.basis === 'per_day') {
@@ -407,25 +447,39 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   // ---- statutory deductions ----
   const stat = computeStatutory(statutoryMonthlyBase, settings, period, tables)
-  const share = (monthlyAmount: number) => contributionShare(monthlyAmount, settings.contributionTiming, period)
-  const sssEe = share(stat.sss.ee)
-  const sssMpfEe = share(stat.sss.mpfEe)
-  const philhealthEe = share(stat.philhealthEe)
-  const pagibigEe = share(stat.pagibigEe)
-  const sssEr = share(stat.sss.er)
-  const sssMpfEr = share(stat.sss.mpfEr)
-  const sssEcEr = share(stat.sss.ecEr)
-  const philhealthEr = share(stat.philhealthEr)
-  const pagibigEr = share(stat.pagibigEr)
+  const mc = params.monthContributions
+  const share = (monthlyAmount: number, already: number | undefined) => {
+    if (extrasOnly) return 0
+    if (mc?.closes) return round2(Math.max(0, monthlyAmount - (already ?? 0)))
+    if (mc?.opens && settings.contributionTiming === 'first_period') return round2(monthlyAmount)
+    return contributionShare(monthlyAmount, settings.contributionTiming, period)
+  }
+  const sssEe = share(stat.sss.ee, mc?.already.sssEe)
+  const sssMpfEe = share(stat.sss.mpfEe, mc?.already.sssMpfEe)
+  const philhealthEe = share(stat.philhealthEe, mc?.already.philhealthEe)
+  const pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
+  const sssEr = share(stat.sss.er, mc?.already.sssEr)
+  const sssMpfEr = share(stat.sss.mpfEr, mc?.already.sssMpfEr)
+  const sssEcEr = share(stat.sss.ecEr, mc?.already.sssEcEr)
+  const philhealthEr = share(stat.philhealthEr, mc?.already.philhealthEr)
+  const pagibigEr = share(stat.pagibigEr, mc?.already.pagibigEr)
 
-  if (stat.periodFactor === 0) {
+  if (extrasOnly) {
+    notes.push('No statutory contributions: no compensation for work in this payroll.')
+  } else if (mc?.closes && (period.index < period.count || Object.values(mc.already).some((v) => v > 0))) {
+    notes.push("Statutory contributions complete this month's amounts (less what earlier payrolls this month deducted).")
+  } else if (mc?.opens && settings.contributionTiming === 'first_period' && period.index > 1) {
+    notes.push("First payroll of the month for this employee: the month's statutory contributions are deducted here.")
+  } else if (stat.periodFactor === 0) {
     notes.push('Statutory contributions are deducted on another payroll of this month (per client settings).')
   } else if (stat.periodFactor < 1) {
     notes.push(`Statutory contributions are split evenly across the ${period.count} payrolls of the month.`)
   }
-  notes.push(
-    `SSS MSC ₱${stat.sss.msc.toLocaleString()} on statutory monthly base ₱${statutoryMonthlyBase.toLocaleString()}.`,
-  )
+  if (!extrasOnly) {
+    notes.push(
+      `SSS MSC ₱${stat.sss.msc.toLocaleString()} on statutory monthly base ₱${statutoryMonthlyBase.toLocaleString()}.`,
+    )
+  }
 
   const deductions: PayLine[] = []
   if (sssEe > 0) deductions.push({ code: 'sss', label: 'SSS Contribution', amount: sssEe })
@@ -473,7 +527,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   let whtLabel = 'Withholding Tax'
   if (params.annualization) {
     const current: AnnualPayslipFact = {
-      periodMonth: params.annualization.periodMonth,
+      payMonth: params.annualization.payMonth,
       isMwe,
       earnings,
       contributionsEe: sssEe + sssMpfEe + philhealthEe + pagibigEe,
