@@ -253,7 +253,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
             <Field label="Shift end"><Input type="time" value={f.work_schedule.end} onChange={(e) => set('work_schedule', { ...f.work_schedule, end: e.target.value })} /></Field>
             <Field label="Break (min)"><Input type="number" value={f.work_schedule.break_minutes} onChange={(e) => set('work_schedule', { ...f.work_schedule, break_minutes: Number(e.target.value) })} /></Field>
           </div>
-          <Field label="Work days" className="mt-3">
+          <Field label="Work days" className="mt-3" group>
             <div className="flex gap-1.5">
               {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => {
                 const day = i + 1
@@ -262,6 +262,8 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
                   <button
                     key={i}
                     type="button"
+                    aria-pressed={on}
+                    aria-label={['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][i]}
                     onClick={() =>
                       set('work_schedule', {
                         ...f.work_schedule,

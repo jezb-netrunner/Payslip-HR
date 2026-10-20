@@ -43,7 +43,10 @@ export interface AlphalistRow {
   substitutedFiling: boolean
   prevEmployerTin: string
   prevEmployerName: string
+  /** Data to fix before filing. */
   issues: string[]
+  /** Withheld vs due difference, settled by an annualizing run; normal while the year is in progress. */
+  withholdingGap: string
 }
 
 export function buildAlphalist(params: {
@@ -87,8 +90,6 @@ export function buildAlphalist(params: {
     if (!e.tin) issues.push('No TIN')
     if (!e.birth_date) issues.push('No birth date')
     if (!e.address || !e.zip_code) issues.push('No address/ZIP')
-    if (summary.variance > 0) issues.push(`Under-withheld by ₱${summary.variance.toLocaleString()} — annualize`)
-    if (summary.variance < 0) issues.push(`Over-withheld by ₱${(-summary.variance).toLocaleString()} — refund via annualization`)
     if (summary.allMwe && !entity.minimum_wage_region) issues.push('Client wage region not set')
     if (ty?.has_previous_employer && !ty.prev_employer_tin) issues.push('Previous employer TIN missing')
     if (separatedBefore) {
@@ -112,6 +113,12 @@ export function buildAlphalist(params: {
       prevEmployerTin: ty?.has_previous_employer ? ty.prev_employer_tin : '',
       prevEmployerName: ty?.has_previous_employer ? ty.prev_employer_name : '',
       issues,
+      withholdingGap:
+        summary.variance > 0
+          ? `Under-withheld by ₱${summary.variance.toLocaleString()} — annualize`
+          : summary.variance < 0
+            ? `Over-withheld by ₱${(-summary.variance).toLocaleString()} — refund via annualization`
+            : '',
     })
   }
   return rows.sort((a, b) =>

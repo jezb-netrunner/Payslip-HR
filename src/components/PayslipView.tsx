@@ -4,7 +4,7 @@ import { fmtDate, fmtPeriod, money } from '../lib/format'
 import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
 import { generatePayslipPdf } from '../pdf/payslipPdf'
 import { Badge, Button } from './ui'
-import { employerFor } from '../lib/payslip'
+import { employerFor, roundingLines } from '../lib/payslip'
 
 export type PayslipCompany = Pick<Entity, 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'payslip_footer_note'>
 
@@ -46,7 +46,7 @@ export default function PayslipView({
     Number(slip.sss_er) + Number(slip.sss_mpf_er) + Number(slip.sss_ec_er) +
     Number(slip.philhealth_er) + Number(slip.pagibig_er)
   const trace = slip.computation_trace
-  const rounding = Number(slip.rounding_adjustment)
+  const rounding = roundingLines(slip)
   const computedNet = Number(slip.gross_pay) - Number(slip.total_deductions)
 
   return (
@@ -119,20 +119,18 @@ export default function PayslipView({
         </div>
       </div>
 
-      {rounding !== 0 && (
+      {rounding.length > 0 && (
         <div className="rounded-xl border border-dashed border-slate-300 px-4 py-2.5 text-xs text-slate-600">
           <div className="flex justify-between">
             <span>Computed net pay</span>
             <span className="font-semibold">{money(computedNet)}</span>
           </div>
-          <div className="flex justify-between">
-            <span>
-              Cash rounding
-              {Number(slip.rounding_carry_in) > 0 && ` (incl. ${money(Number(slip.rounding_carry_in))} carried in)`}
-              {Number(slip.rounding_carry_out) > 0 && ` — ${money(Number(slip.rounding_carry_out))} carried to next payroll`}
-            </span>
-            <span className="font-semibold">{rounding > 0 ? '+' : ''}{money(rounding)}</span>
-          </div>
+          {rounding.map((l) => (
+            <div key={l.label} className="flex justify-between">
+              <span>{l.label}</span>
+              <span className="font-semibold">{l.amount > 0 ? '+' : ''}{money(l.amount)}</span>
+            </div>
+          ))}
         </div>
       )}
 

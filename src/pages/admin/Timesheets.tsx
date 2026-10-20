@@ -12,7 +12,7 @@ import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, Holiday, TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtDateTime, fmtHours, fullName } from '../../lib/format'
+import { fmtDate, fmtDateTime, fmtHours, fullName, plural } from '../../lib/format'
 import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
@@ -430,7 +430,7 @@ function EmployeeSheet({ entity }: { entity: Entity }) {
     const { saved, errors } = await saveRows(rows)
     setBusy(false)
     if (errors.length) toast('error', errors.slice(0, 3).join(' · '))
-    if (saved) toast('success', `Saved ${saved} day/s (audit-logged).`)
+    if (saved) toast('success', `Saved ${plural(saved, 'day')} (audit-logged).`)
     await load()
   }
 

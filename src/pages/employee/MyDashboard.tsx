@@ -7,9 +7,10 @@ import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtDateTime, fmtHours, money } from '../../lib/format'
-import { leaveDaysInYear } from '../../lib/leave'
+import { leaveDaysInYear, showsBalance } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { roundingLines } from '../../lib/payslip'
 
 export default function MyDashboard() {
   const { employee } = useAuth()
@@ -76,8 +77,8 @@ export default function MyDashboard() {
     if (d > 0) used[r.leave_type_id] = (used[r.leave_type_id] ?? 0) + d
   }
   const balances = types
+    .filter((t) => t.paid && showsBalance(t, ents[t.id]))
     .map((t) => ({ t, total: ents[t.id] ?? Number(t.default_annual_days) }))
-    .filter((x) => x.total > 0 && x.t.paid)
     .slice(0, 4)
 
   return (
@@ -181,8 +182,13 @@ function Row({ label, value, strong = false }: { label: string; value: string; s
 /** Where the gross went: take-home vs each deduction, as a single bar + legend. */
 function PayBreakdown({ slip }: { slip: Payslip }) {
   const gross = Number(slip.gross_pay)
+  const rounding = roundingLines(slip)
   const parts = [
-    { label: 'Take-home', amount: Number(slip.net_pay) - Number(slip.rounding_adjustment), color: '#2c5292' },
+    {
+      label: rounding.length ? 'Net pay (before cash rounding)' : 'Take-home',
+      amount: Number(slip.net_pay) - Number(slip.rounding_adjustment),
+      color: '#2c5292',
+    },
     { label: 'SSS', amount: Number(slip.sss_ee) + Number(slip.sss_mpf_ee), color: '#0d9488' },
     { label: 'PhilHealth', amount: Number(slip.philhealth_ee), color: '#e06614' },
     { label: 'Pag-IBIG', amount: Number(slip.pagibig_ee), color: '#7c3aed' },
@@ -218,12 +224,12 @@ function PayBreakdown({ slip }: { slip: Payslip }) {
             <span className="font-semibold text-emerald-700">+{money(-Number(slip.withholding_tax))}</span>
           </div>
         )}
-        {Number(slip.rounding_adjustment) !== 0 && (
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-500">Cash rounding</span>
-            <span className="font-semibold text-slate-700">{money(Number(slip.rounding_adjustment))}</span>
+        {rounding.map((l) => (
+          <div key={l.label} className="flex items-center justify-between text-xs">
+            <span className="text-slate-500">{l.label}</span>
+            <span className="font-semibold text-slate-700">{l.amount > 0 ? '+' : ''}{money(l.amount)}</span>
           </div>
-        )}
+        ))}
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
         <span>Days worked: <b>{Number(slip.days_worked)}</b></span>

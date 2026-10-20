@@ -59,7 +59,8 @@ never stored — only their last characters are kept as a hint.
   Pag-IBIG, tax, other deductions, cash rounding), year-to-date totals, days
   and hours on record this month, leave balances, announcements
 - Payslips (finalized only) with PDF download, attendance records +
-  correction requests, leave requests, profile, change password
+  correction requests, leave requests, profile (the login code is their only
+  credential — a lost code is replaced by the entity admin)
 
 ## Pay frequency and periods
 

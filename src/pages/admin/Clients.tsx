@@ -6,7 +6,7 @@ import { useToast } from '../../components/toast'
 import type { Entity } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { fmtTin, money, splitClientTin } from '../../lib/format'
-import { FREQUENCY_LABELS, PH_REGIONS } from '../../lib/labels'
+import { FREQUENCY_LABELS, PH_REGIONS, ROUNDING_LABELS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
@@ -197,6 +197,8 @@ function AddClientModal({
     minimum_wage_daily: '',
     minimum_wage_reference: '',
     default_pay_frequency: 'semi_monthly' as PayFrequency,
+    // cash wages in whole pesos: the employer adds the centavos unless changed
+    net_pay_rounding: 'round_up' as Entity['net_pay_rounding'],
   })
 
   async function save() {
@@ -233,6 +235,8 @@ function AddClientModal({
           minimum_wage_daily: Number(f.minimum_wage_daily),
           minimum_wage_reference: f.minimum_wage_reference.trim(),
           default_pay_frequency: f.default_pay_frequency,
+          net_pay_rounding: f.net_pay_rounding,
+          rounding_scope: 'cash_only',
         })
         .select('id')
         .single()
@@ -269,10 +273,10 @@ function AddClientModal({
           <Field label="TIN" hint="000-000-000">
             <Input value={f.tin} onChange={(e) => setF({ ...f, tin: e.target.value })} />
           </Field>
-          <Field label="Branch code / RDO">
+          <Field label="Branch code / RDO" group>
             <div className="flex gap-2">
-              <Input value={f.tin_branch_code} onChange={(e) => setF({ ...f, tin_branch_code: e.target.value })} />
-              <Input placeholder="RDO" value={f.rdo_code} onChange={(e) => setF({ ...f, rdo_code: e.target.value })} />
+              <Input aria-label="Branch code" value={f.tin_branch_code} onChange={(e) => setF({ ...f, tin_branch_code: e.target.value })} />
+              <Input aria-label="RDO" placeholder="RDO" value={f.rdo_code} onChange={(e) => setF({ ...f, rdo_code: e.target.value })} />
             </div>
           </Field>
         </div>
@@ -306,6 +310,20 @@ function AddClientModal({
               onChange={(e) => setF({ ...f, default_pay_frequency: e.target.value as PayFrequency })}
             >
               {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label="Cash pay in whole pesos"
+            hint="For employees paid in cash; change it or extend it to everyone in Client Settings."
+            className="sm:col-span-2"
+          >
+            <Select
+              value={f.net_pay_rounding}
+              onChange={(e) => setF({ ...f, net_pay_rounding: e.target.value as Entity['net_pay_rounding'] })}
+            >
+              {Object.entries(ROUNDING_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
               ))}
             </Select>

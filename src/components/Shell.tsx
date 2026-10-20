@@ -69,30 +69,46 @@ function EntitySwitcher() {
   const { entities, entity, setEntityId } = useEntity()
   const { isCompanyAdmin } = useAuth()
   const active = entities.filter((e) => e.is_active)
-  if (active.length === 0) {
+  const archived = isCompanyAdmin ? entities.filter((e) => !e.is_active) : []
+  if (active.length === 0 && !entity) {
     return (
       <p className="px-3 text-[11px] text-brand-300">
         {isCompanyAdmin ? 'No clients yet — add one under Clients.' : 'No client assigned to you yet.'}
       </p>
     )
   }
+  // code first: a long registered name gets cut off by the select, the code must not
+  const label = (e: (typeof entities)[number]) => `${e.code} · ${e.name}`
   return (
-    <div className="px-3">
-      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-300">
+    <label className="block px-3">
+      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-300">
         Working on client
-      </label>
+      </span>
       <select
         value={entity?.id ?? ''}
+        title={entity ? `${entity.name} (${entity.code})` : undefined}
         onChange={(e) => setEntityId(e.target.value)}
-        className="w-full rounded-lg border border-brand-700 bg-brand-800 px-2.5 py-1.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-accent-500"
+        className="w-full truncate rounded-lg border border-brand-700 bg-brand-800 px-2.5 py-1.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-accent-500"
       >
         {active.map((e) => (
           <option key={e.id} value={e.id}>
-            {e.name} ({e.code})
+            {label(e)}
           </option>
         ))}
+        {archived.length > 0 && (
+          <optgroup label="Archived">
+            {archived.map((e) => (
+              <option key={e.id} value={e.id}>
+                {label(e)}
+              </option>
+            ))}
+          </optgroup>
+        )}
       </select>
-    </div>
+      {entity && !entity.is_active && (
+        <span className="mt-1 block text-[11px] font-semibold text-amber-300">Archived client — its entity admins are locked out</span>
+      )}
+    </label>
   )
 }
 

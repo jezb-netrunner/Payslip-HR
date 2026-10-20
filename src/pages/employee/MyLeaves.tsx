@@ -5,8 +5,8 @@ import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Holiday, LeaveRequest, LeaveType } from '../../lib/db'
-import { fmtDate } from '../../lib/format'
-import { leaveDaysInYear, leaveWorkdays } from '../../lib/leave'
+import { fmtDate, plural } from '../../lib/format'
+import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
@@ -112,9 +112,7 @@ export default function MyLeaves() {
     if (d > 0) usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + d
   }
 
-  const balanceTypes = types.filter(
-    (t) => (entitlements[t.id] ?? t.default_annual_days) > 0,
-  )
+  const balanceTypes = types.filter((t) => showsBalance(t, entitlements[t.id]))
 
   return (
     <div>
@@ -140,7 +138,7 @@ export default function MyLeaves() {
                 {left}
                 <span className="text-sm font-medium text-slate-400"> / {total} days</span>
               </p>
-              {left < 0 && <p className="text-[11px] text-rose-600">{-left} day/s beyond your entitlement</p>}
+              {left < 0 && <p className="text-[11px] text-rose-600">{plural(-left, 'day')} beyond your entitlement</p>}
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-brand-600"
@@ -163,7 +161,7 @@ export default function MyLeaves() {
                 <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
                   <div>
                     <p className="text-sm font-semibold text-slate-700">
-                      {type?.name ?? 'Leave'} · {Number(r.days)} day/s
+                      {type?.name ?? 'Leave'} · {plural(Number(r.days), 'day')}
                     </p>
                     <p className="text-xs text-slate-500">
                       {fmtDate(r.start_date)} → {fmtDate(r.end_date)}

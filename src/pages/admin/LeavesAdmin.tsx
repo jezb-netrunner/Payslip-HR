@@ -5,7 +5,7 @@ import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, LeaveRequest, LeaveType } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fullName } from '../../lib/format'
+import { fmtDate, fullName, plural } from '../../lib/format'
 import { supabase } from '../../lib/supabase'
 
 type RequestFull = LeaveRequest & { employees: Employee; leave_types: LeaveType }
@@ -166,7 +166,7 @@ function Leaves({ entity }: { entity: Entity }) {
                   <p className="text-sm font-bold text-slate-800">
                     {r.employees ? fullName(r.employees) : '—'}
                     <span className="ml-2 font-normal text-slate-500">
-                      {r.leave_types?.name} · {Number(r.days)} day/s
+                      {r.leave_types?.name} · {plural(Number(r.days), 'day')}
                     </span>{' '}
                     <Badge tone={r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : r.status === 'pending' ? 'amber' : 'slate'}>
                       {r.status}

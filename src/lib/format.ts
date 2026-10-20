@@ -94,13 +94,17 @@ export function fmtPeriod(start: string, end: string): string {
   return `${sm} ${s.getDate()} – ${em} ${e.getDate()}, ${e.getFullYear()}`
 }
 
+/** "3 employees", "1 employee" */
+export function plural(n: number, word: string, many = `${word}s`): string {
+  return `${n} ${n === 1 ? word : many}`
+}
+
 /** "2026-10-01" (payroll month) -> "October 2026" */
 export function fmtMonth(d: string | null | undefined): string {
   if (!d) return '—'
   return new Date(`${d.slice(0, 7)}-01T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })
 }
 
-/** Format a TIN as 000-000-000[-00000]. */
 /**
  * Reads a client TIN as typed — "123-456-789", "123456789", or with the
  * branch appended ("123-456-789-00000") — into the 9-digit TIN and the
@@ -116,6 +120,7 @@ export function splitClientTin(tin: string, branch: string): { tin: string; bran
   return { tin: `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6, 9)}`, branch: br }
 }
 
+/** Format a TIN as 000-000-000[-00000]. */
 export function fmtTin(tin: string | null | undefined, branch?: string | null): string {
   const digits = (tin ?? '').replace(/\D/g, '')
   if (!digits) return ''

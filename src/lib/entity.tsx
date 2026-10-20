@@ -1,9 +1,10 @@
 // The client (entity) an admin is currently working in. Company admins can
-// switch between every client; entity admins between their assigned ones
-// (RLS returns only those). The choice is remembered per browser.
+// switch between every client (archived ones included); entity admins between
+// their assigned, active ones. The choice is remembered per browser.
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { supabase } from './supabase'
+import { useAuth } from './auth'
 import type { Entity } from './db'
 
 interface EntityState {
@@ -57,9 +58,13 @@ export function EntityProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const visible = entities.filter((e) => e.is_active)
+  // archived clients lock their entity admins out; company admins can still
+  // open them (e.g. for the year's BIR reports) by picking them explicitly
+  const { isCompanyAdmin } = useAuth()
   const entity =
-    entities.find((e) => e.id === selectedId && e.is_active) ?? visible[0] ?? null
+    entities.find((e) => e.id === selectedId && (e.is_active || isCompanyAdmin)) ??
+    entities.find((e) => e.is_active) ??
+    null
 
   return (
     <EntityContext.Provider value={{ entities, entity, loading, setEntityId, reload }}>

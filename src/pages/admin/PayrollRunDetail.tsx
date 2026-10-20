@@ -8,7 +8,7 @@ import { downloadCsv, getEmployees } from '../../lib/api'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
 import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtMonth, fullName, money } from '../../lib/format'
+import { fmtDate, fmtMonth, fullName, money, plural } from '../../lib/format'
 import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { supabase } from '../../lib/supabase'
@@ -70,7 +70,7 @@ export default function PayrollRunDetail() {
     try {
       const res = await computeRun(run, entity)
       setResult(res)
-      toast('success', `Computed payslips for ${res.computed} employee/s.`)
+      toast('success', `Computed payslips for ${plural(res.computed, 'employee')}.`)
       await load()
     } catch (err) {
       toast('error', errorMessage(err, 'Computation failed'))

@@ -68,8 +68,8 @@ export default function Users() {
               return (
                 <tr key={a.id} className="hover:bg-slate-50">
                   <Td>
-                    <p className="font-semibold text-slate-800">{a.full_name || '—'}{a.id === me?.id && ' (you)'}</p>
-                    <p className="text-xs text-slate-400">{a.email}</p>
+                    <p className="font-semibold text-slate-800">{a.full_name || a.email || '—'}{a.id === me?.id && ' (you)'}</p>
+                    {a.full_name && <p className="text-xs text-slate-400">{a.email}</p>}
                   </Td>
                   <Td>
                     <Badge tone={a.role === 'company_admin' ? 'violet' : 'blue'}>{ROLE_LABELS[a.role]}</Badge>

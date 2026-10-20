@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Building2, KeyRound, Lock, Mail } from 'lucide-react'
+import { Building2, KeyRound, Lock, Mail, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { employeeLoginEmail, isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
 import { Button, Input } from '../components/ui'
@@ -23,6 +23,7 @@ function signInProblem(err: { status?: number; name?: string }, badCredentials: 
 export default function Login() {
   const [mode, setMode] = useState<Mode>('employee')
   const [code, setCode] = useState('')
+  const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -61,7 +62,11 @@ export default function Login() {
         if (err) throw err
         setNotice('If that address belongs to an admin account, a password reset link is on its way.')
       } else {
-        const { error: err } = await supabase.auth.signUp({ email, password })
+        const { error: err } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name: fullName.trim() } },
+        })
         if (err) throw err
         setNotice(
           'Account created. Confirm the email if confirmation is enabled, then sign in. Only the very first account of a new deployment becomes the company admin.',
@@ -119,11 +124,26 @@ export default function Login() {
               'The first account ever created becomes the company admin. Every other account is created from inside the app.'}
           </p>
           <form onSubmit={submit} className="mt-5 space-y-4">
+            {mode === 'bootstrap' && (
+              <div className="relative">
+                <User className="absolute left-3 top-2.5 size-4 text-slate-400" />
+                <Input
+                  required
+                  aria-label="Full name"
+                  autoComplete="name"
+                  placeholder="Full name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            )}
             {mode === 'employee' ? (
               <div className="relative">
                 <KeyRound className="absolute left-3 top-2.5 size-4 text-slate-400" />
                 <Input
                   required
+                  aria-label="Login code"
                   autoComplete="off"
                   autoCapitalize="characters"
                   spellCheck={false}
@@ -139,6 +159,8 @@ export default function Login() {
                 <Input
                   type="email"
                   required
+                  aria-label="Email"
+                  autoComplete="email"
                   placeholder="you@company.ph"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -153,6 +175,8 @@ export default function Login() {
                   type="password"
                   required
                   minLength={8}
+                  aria-label="Password"
+                  autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'}
                   placeholder="Password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -177,16 +201,16 @@ export default function Login() {
           <div className="mt-4 flex justify-between text-xs font-semibold text-brand-600">
             {mode === 'admin' && (
               <>
-                <button onClick={() => switchTo('reset')} className="hover:text-brand-800">
+                <button type="button" onClick={() => switchTo('reset')} className="hover:text-brand-800">
                   Forgot password?
                 </button>
-                <button onClick={() => switchTo('bootstrap')} className="text-slate-400 hover:text-brand-800">
+                <button type="button" onClick={() => switchTo('bootstrap')} className="text-slate-400 hover:text-brand-800">
                   New deployment?
                 </button>
               </>
             )}
             {(mode === 'reset' || mode === 'bootstrap') && (
-              <button onClick={() => switchTo('admin')} className="hover:text-brand-800">
+              <button type="button" onClick={() => switchTo('admin')} className="hover:text-brand-800">
                 ← Back to sign in
               </button>
             )}

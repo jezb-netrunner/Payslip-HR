@@ -1,9 +1,23 @@
 // Leave day counting shared by the employee portal views.
 
-import type { Holiday, LeaveRequest } from './db'
+import type { Holiday, LeaveRequest, LeaveType } from './db'
 import { eachDate, isoWeekday } from './manila'
 
 type HolidayLite = Pick<Holiday, 'holiday_date' | 'kind'>
+
+/**
+ * Statutory leaves granted per qualifying event or status (childbirth,
+ * surgery, solo-parent ID, VAWC certification), not a yearly balance everyone
+ * holds. Maternity leave also runs in calendar days, so a workday balance
+ * would mislead.
+ */
+const EVENT_LEAVE_CODES = ['ML', 'PL', 'MCW', 'SPL', 'VAWC']
+
+/** Whether a leave type shows as a balance: event leaves only once HR sets the employee's entitlement. */
+export function showsBalance(t: Pick<LeaveType, 'code' | 'default_annual_days'>, entitlement: number | undefined): boolean {
+  if (entitlement !== undefined) return entitlement > 0
+  return !EVENT_LEAVE_CODES.includes(t.code) && Number(t.default_annual_days) > 0
+}
 
 /** Scheduled workdays in [start, end], not counting non-working holidays (already paid days off). */
 export function leaveWorkdays(start: string, end: string, scheduleDays: number[], holidays: HolidayLite[] = []): number {

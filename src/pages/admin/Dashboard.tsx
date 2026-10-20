@@ -19,7 +19,7 @@ import { fetchAll } from '../../lib/fetchAll'
 import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, Holiday, PayrollRun, Payslip, TimeEntry } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, money, moneyWhole } from '../../lib/format'
+import { fmtDate, money, moneyWhole, plural } from '../../lib/format'
 import { FREQUENCY_LABELS } from '../../lib/labels'
 import { addDays, eachDate, isoWeekday, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -81,11 +81,11 @@ function ClientsOverview({ onPick, currentId }: { onPick: (id: string) => void; 
             >
               <p className="truncate text-sm font-bold text-slate-800">{e.name}</p>
               <p className="text-xs text-slate-500">
-                <span className="font-mono">{e.code}</span> · {st?.headcount ?? 0} employee/s
+                <span className="font-mono">{e.code}</span> · {plural(st?.headcount ?? 0, 'employee')}
               </p>
               <p className="mt-1 text-[11px] text-slate-400">
                 {st?.lastPay ? `Last payroll ${fmtDate(st.lastPay)}` : 'No finalized payroll yet'}
-                {st?.drafts ? ` · ${st.drafts} draft run/s` : ''}
+                {st?.drafts ? ` · ${plural(st.drafts, 'draft run')}` : ''}
               </p>
             </button>
           )
@@ -394,7 +394,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   const actions: ActionItem[] = []
   if (lastWorkday.scheduled > lastWorkday.entered)
     actions.push({
-      title: `${lastWorkday.scheduled - lastWorkday.entered} scheduled employee/s without time in/out`,
+      title: `${plural(lastWorkday.scheduled - lastWorkday.entered, 'scheduled employee')} without time in/out`,
       sub: `${fmtDate(lastWorkday.date)} — enter their times or leave blank for absences`,
       to: '/admin/timesheets',
       tone: 'info',
@@ -402,7 +402,7 @@ function derive(data: DashData, entity: Entity, today: string) {
     })
   if (data.pendingCorrections > 0)
     actions.push({
-      title: `${data.pendingCorrections} time correction/s pending`,
+      title: `${plural(data.pendingCorrections, 'time correction')} pending`,
       sub: 'Employee-filed corrections to review',
       to: '/admin/timesheets',
       tone: 'warn',
@@ -410,7 +410,7 @@ function derive(data: DashData, entity: Entity, today: string) {
     })
   if (data.pendingLeaves > 0)
     actions.push({
-      title: `${data.pendingLeaves} leave request/s pending`,
+      title: `${plural(data.pendingLeaves, 'leave request')} pending`,
       sub: 'Approvals affect payroll for the period',
       to: '/admin/leaves',
       tone: 'warn',
@@ -419,7 +419,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   const drafts = data.runs.filter((r) => r.status === 'draft')
   if (drafts.length > 0)
     actions.push({
-      title: `${drafts.length} draft payroll run/s`,
+      title: `${plural(drafts.length, 'draft payroll run')}`,
       sub: 'Compute, review and finalize so employees see their payslips',
       to: '/admin/payroll',
       tone: 'info',
@@ -448,7 +448,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   })
   if (belowMin.length > 0)
     actions.push({
-      title: `${belowMin.length} employee/s paid below minimum wage`,
+      title: `${plural(belowMin.length, 'employee')} paid below minimum wage`,
       sub: `Configured floor is ${money(minWage)}/day (${entity.minimum_wage_region || 'region not set'})`,
       to: '/admin/employees',
       tone: 'warn',
@@ -458,7 +458,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   const missingIds = active.filter((e) => !e.tin || !e.sss_no || !e.philhealth_no || !e.pagibig_no)
   if (missingIds.length > 0)
     actions.push({
-      title: `${missingIds.length} employee/s missing TIN / SSS / PhilHealth / Pag-IBIG numbers`,
+      title: `${plural(missingIds.length, 'employee')} missing TIN / SSS / PhilHealth / Pag-IBIG numbers`,
       sub: 'Needed for remittances and the BIR alphalist',
       to: '/admin/employees',
       tone: 'warn',
@@ -468,7 +468,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   const noCode = active.filter((e) => !e.login_code_hint)
   if (noCode.length > 0)
     actions.push({
-      title: `${noCode.length} employee/s without a login code`,
+      title: `${plural(noCode.length, 'employee')} without a login code`,
       sub: 'Issue codes so they can see payslips and announcements',
       to: '/admin/employees',
       tone: 'info',
@@ -498,7 +498,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   const zeroRate = active.filter((e) => Number(e.monthly_rate) === 0 && Number(e.daily_rate) === 0)
   if (zeroRate.length > 0)
     actions.push({
-      title: `${zeroRate.length} employee/s with no pay rate set`,
+      title: `${plural(zeroRate.length, 'employee')} with no pay rate set`,
       sub: 'They will compute ₱0 on the next payroll run',
       to: '/admin/employees',
       tone: 'warn',
@@ -521,7 +521,7 @@ function derive(data: DashData, entity: Entity, today: string) {
     .sort((a, b) => a[0].localeCompare(b[0]))
     .slice(-6)
     .map(([k, v]) => ({
-      month: new Date(`${k}-01T00:00:00`).toLocaleDateString('en-PH', { month: 'short', year: '2-digit' }),
+      month: new Date(`${k}-01T00:00:00`).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' }),
       'Net pay': Math.round(v.net),
       'Employee deductions': Math.round(v.ee),
       'Employer contributions': Math.round(v.er),

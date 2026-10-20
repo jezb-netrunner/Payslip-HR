@@ -4,8 +4,8 @@ import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Spinn
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
 import type { TimeCorrectionRequest, TimeEntry } from '../../lib/db'
-import { fmtDate, fmtHours, fmtTime } from '../../lib/format'
-import { endOfMonth, todayManila } from '../../lib/manila'
+import { fmtDate, fmtHours, fmtTime, plural } from '../../lib/format'
+import { endOfMonth, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 
@@ -87,6 +87,18 @@ export default function MyAttendance() {
     }
   }
 
+  async function cancelRequest(id: string) {
+    const { error } = await supabase
+      .from('time_correction_requests')
+      .update({ status: 'cancelled' })
+      .eq('id', id)
+    if (error) toast('error', errorMessage(error, 'Could not cancel the request'))
+    else {
+      toast('success', 'Request cancelled.')
+      await load()
+    }
+  }
+
   if (!employee) return <Spinner />
 
   const totalMinutes = entries
@@ -117,7 +129,7 @@ export default function MyAttendance() {
         <Spinner />
       ) : (
         <div className="space-y-6">
-          <Card title={`Entries — ${entries.length} punch/es · ${fmtHours(totalMinutes)} total`}>
+          <Card title={`Entries — ${plural(entries.length, 'entry', 'entries')} · ${fmtHours(totalMinutes)} total`}>
             {entries.length === 0 ? (
               <EmptyState title="No entries this month" />
             ) : (
@@ -135,10 +147,10 @@ export default function MyAttendance() {
                 <tbody className="divide-y divide-slate-100">
                   {entries.map((e) => (
                     <tr key={e.id} className="hover:bg-slate-50">
-                      <Td className="font-semibold">{fmtDate(e.work_date)}</Td>
-                      <Td>{fmtTime(e.clock_in)}</Td>
-                      <Td>{e.clock_out ? fmtTime(e.clock_out) : <Badge tone="green">open</Badge>}</Td>
-                      <Td>
+                      <Td className="whitespace-nowrap font-semibold">{fmtDate(e.work_date)}</Td>
+                      <Td className="whitespace-nowrap">{fmtTime(e.clock_in)}</Td>
+                      <Td className="whitespace-nowrap">{e.clock_out ? fmtTime(e.clock_out) : <Badge tone="green">open</Badge>}</Td>
+                      <Td className="whitespace-nowrap">
                         {e.clock_out
                           ? fmtHours((new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 60000)
                           : '—'}
@@ -153,7 +165,8 @@ export default function MyAttendance() {
                       </Td>
                       <Td>
                         <button
-                          className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-800"
+                          type="button"
+                          className="flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-brand-600 hover:text-brand-800"
                           onClick={() => openCorrection(e)}
                         >
                           <FilePen className="size-3.5" /> Request fix
@@ -186,13 +199,24 @@ export default function MyAttendance() {
                         <p className="text-xs italic text-slate-400">Admin: {r.review_notes}</p>
                       )}
                     </div>
-                    <Badge
-                      tone={
-                        r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : r.status === 'pending' ? 'amber' : 'slate'
-                      }
-                    >
-                      {r.status}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        tone={
+                          r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : r.status === 'pending' ? 'amber' : 'slate'
+                        }
+                      >
+                        {r.status}
+                      </Badge>
+                      {r.status === 'pending' && (
+                        <button
+                          type="button"
+                          onClick={() => cancelRequest(r.id)}
+                          className="text-xs font-semibold text-rose-600 hover:text-rose-800"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -249,11 +273,10 @@ export default function MyAttendance() {
 
 /** ISO timestamptz -> value for datetime-local input, in Manila time. */
 function toLocalInput(iso: string): string {
-  const d = new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000)
-  return d.toISOString().slice(0, 16)
+  return `${manilaDateStr(new Date(iso))}T${manilaHHMM(iso)}`
 }
 
 /** datetime-local value (interpreted as Manila wall time) -> ISO instant. */
 function manilaLocalToIso(v: string): string {
-  return new Date(new Date(`${v}:00Z`).getTime() - 8 * 60 * 60 * 1000).toISOString()
+  return manilaWallToIso(v.slice(0, 10), v.slice(11, 16))
 }

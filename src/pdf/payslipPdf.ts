@@ -5,7 +5,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { Payslip } from '../lib/db'
 import type { PayslipCompany, PayslipRunInfo } from '../components/PayslipView'
-import { employerFor } from '../lib/payslip'
+import { employerFor, roundingLines } from '../lib/payslip'
 
 const NAVY: [number, number, number] = [18, 45, 85]
 const ORANGE: [number, number, number] = [246, 134, 46]
@@ -135,15 +135,16 @@ export function generatePayslipPdf(
   y = Math.max(leftEndY, rightEndY) + 7
 
   // ---- cash rounding (whole-peso cash payroll) ----
-  const rounding = Number(slip.rounding_adjustment)
-  if (rounding !== 0) {
+  const rounding = roundingLines(slip)
+  if (rounding.length > 0) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.setTextColor(...SLATE)
     const computed = Number(slip.gross_pay) - Number(slip.total_deductions)
-    doc.text(`Computed net pay ${php(computed)}   Cash rounding ${rounding > 0 ? '+' : ''}${php(rounding)}`, margin, y)
-    if (Number(slip.rounding_carry_out) > 0) {
-      doc.text(`${php(Number(slip.rounding_carry_out))} carried to the next payroll`, pageW - margin, y, { align: 'right' })
+    doc.text(`Computed net pay ${php(computed)}`, margin, y)
+    for (const l of rounding) {
+      y += 4
+      doc.text(`${l.label} ${l.amount > 0 ? '+' : ''}${php(l.amount)}`, margin, y)
     }
     y += 5
   }

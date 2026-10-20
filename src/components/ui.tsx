@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { useEffect, useId } from 'react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { useEntity } from '../lib/entity'
 
@@ -24,7 +25,7 @@ export function Button({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${variantClasses[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${variantClasses[variant]} ${className}`}
       {...props}
     />
   )
@@ -71,7 +72,7 @@ export function PageHeader({
         <h1 className="text-2xl font-extrabold tracking-tight text-brand-900">{title}</h1>
         {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   )
 }
@@ -132,39 +133,67 @@ export function Badge({ tone = 'slate', children }: { tone?: string; children: R
 
 // ---------- forms ----------
 
+/**
+ * A captioned form control. `group` is for several controls under one
+ * caption (checkbox lists, day pickers): a <label> would forward every click
+ * on its caption to the first control inside it.
+ */
 export function Field({
   label,
   children,
   hint,
   className = '',
+  group = false,
 }: {
   label: string
   children: ReactNode
   hint?: string
   className?: string
+  group?: boolean
 }) {
+  const id = useId()
+  const caption = (
+    <span id={id} className="mb-1 block text-xs font-semibold text-slate-600">
+      {label}
+    </span>
+  )
+  const note = hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>
+  if (group) {
+    return (
+      <div role="group" aria-labelledby={id} className={`block ${className}`}>
+        {caption}
+        {children}
+        {note}
+      </div>
+    )
+  }
   return (
     <label className={`block ${className}`}>
-      <span className="mb-1 block text-xs font-semibold text-slate-600">{label}</span>
+      {caption}
       {children}
-      {hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>}
+      {note}
     </label>
   )
 }
 
 const inputClass =
-  'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-slate-500'
+  'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-slate-500'
+
+/** Full width unless the caller sets a width (CSS order, not class order, decides between two widths). */
+function controlClass(className?: string): string {
+  return `${inputClass} ${/(^|\s)w-/.test(className ?? '') ? '' : 'w-full '}${className ?? ''}`
+}
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={`${inputClass} ${props.className ?? ''}`} />
+  return <input {...props} className={controlClass(props.className)} />
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={`${inputClass} ${props.className ?? ''}`} />
+  return <select {...props} className={controlClass(props.className)} />
 }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={`${inputClass} ${props.className ?? ''}`} />
+  return <textarea {...props} className={controlClass(props.className)} />
 }
 
 export function Toggle({
@@ -179,11 +208,13 @@ export function Toggle({
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className="flex items-center gap-2.5 text-sm text-slate-700"
+      className="flex items-center gap-2.5 text-left text-sm text-slate-700"
     >
       <span
-        className={`relative inline-flex h-5.5 w-10 items-center rounded-full transition-colors ${checked ? 'bg-brand-700' : 'bg-slate-300'}`}
+        className={`relative inline-flex h-5.5 w-10 shrink-0 items-center rounded-full transition-colors ${checked ? 'bg-brand-700' : 'bg-slate-300'}`}
       >
         <span
           className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-1'}`}
@@ -209,15 +240,29 @@ export function Modal({
   children: ReactNode
   wide?: boolean
 }) {
+  const titleId = useId()
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-brand-950/50 p-4 backdrop-blur-sm">
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className={`mt-8 w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} rounded-2xl bg-white shadow-2xl`}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h3 className="text-base font-bold text-brand-900">{title}</h3>
+          <h3 id={titleId} className="text-base font-bold text-brand-900">{title}</h3>
           <button
+            type="button"
+            aria-label="Close"
             onClick={onClose}
             className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
           >

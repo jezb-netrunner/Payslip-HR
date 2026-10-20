@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { fetchAll } from '../../lib/fetchAll'
 import type { Entity, Payslip, TaxRemittance } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtMonth, fmtTin, fullName, money } from '../../lib/format'
+import { fmtDate, fmtMonth, fmtTin, fullName, money, plural } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { alphalistCsv, buildAlphalist, type AlphalistRow } from '../../payroll/alphalist'
@@ -34,7 +34,7 @@ export default function Reports() {
         subtitle={`${entity.name} · TIN ${fmtTin(entity.tin, entity.tin_branch_code) || 'not set'} · RDO ${entity.rdo_code || '—'}`}
         actions={
           <Select value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-28">
-            {[thisYear - 2, thisYear - 1, thisYear].map((y) => (
+            {Array.from({ length: 6 }, (_, i) => thisYear - 5 + i).map((y) => (
               <option key={y} value={y}>{y}</option>
             ))}
           </Select>
@@ -115,7 +115,11 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
     )
 
   const sum = (f: (r: AlphalistRow) => number) => rows.reduce((s, r) => s + f(r), 0)
-  const withIssues = rows.filter((r) => r.issues.length > 0)
+  // until the year's last payroll is annualized, withheld vs due differs by design
+  const inProgress = todayManila() <= `${year}-12-31`
+  const problems = (r: AlphalistRow) => (inProgress || !r.withholdingGap ? r.issues : [...r.issues, r.withholdingGap])
+  const withIssues = rows.filter((r) => problems(r).length > 0)
+  const gaps = inProgress ? rows.filter((r) => r.withholdingGap) : []
 
   return (
     <div className="space-y-6">
@@ -126,10 +130,21 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
         <StatCard
           label="Withheld as adjusted"
           value={money(sum((r) => r.summary.withheldAsAdjusted + r.summary.prevTaxWithheld))}
-          sub={withIssues.length ? `${withIssues.length} employee/s need attention` : 'all reconciled'}
+          sub={withIssues.length ? `${plural(withIssues.length, 'employee')} need${withIssues.length === 1 ? 's' : ''} attention` : 'all reconciled'}
           tone={withIssues.length ? 'warn' : 'good'}
         />
       </div>
+
+      {inProgress && (
+        <div className="rounded-2xl border border-brand-100 bg-brand-50 p-4 text-xs text-brand-800">
+          <p className="font-bold">{year} is still in progress — these are year-to-date figures.</p>
+          <p className="mt-1">
+            Withheld and due tax only reconcile once the last payroll paid in December (or an employee's final pay)
+            is run with annualization.
+            {gaps.length > 0 && ` Currently ${plural(gaps.length, 'employee')} would need an adjustment if the year ended today.`}
+          </p>
+        </div>
+      )}
 
       {withIssues.length > 0 && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
@@ -138,7 +153,7 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
           </p>
           {withIssues.map((r) => (
             <p key={r.employee.id} className="text-xs text-amber-700">
-              • {fullName(r.employee)}: {r.issues.join('; ')}
+              • {fullName(r.employee)}: {problems(r).join('; ')}
             </p>
           ))}
           <p className="mt-2 text-[11px] text-amber-700">
@@ -474,7 +489,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
           </tbody>
         </TableShell>
         <p className="mt-3 text-[11px] text-slate-400">
-          "Withheld per payroll" sums finalized payslips by payroll month (refunds from annualization reduce it);
+          "Withheld per payroll" sums finalized payslips by the month they were paid (pay date) — refunds from annualization reduce it;
           record each monthly 1601-C payment under 1601-C remittances. Amber = payroll and remittance differ.
         </p>
       </Card>

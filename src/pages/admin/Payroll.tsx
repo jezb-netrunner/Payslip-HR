@@ -8,7 +8,7 @@ import { getEmployees, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, PayrollRun, RunType } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtMonth, fullName, money } from '../../lib/format'
+import { fmtDate, fmtMonth, fullName, money, plural } from '../../lib/format'
 import { FREQUENCY_LABELS, RUN_TYPE_LABELS } from '../../lib/labels'
 import { addDays, todayManila } from '../../lib/manila'
 import { slotFor, suggestPeriod } from '../../lib/payPeriods'
@@ -94,7 +94,7 @@ function RunList({ entity }: { entity: Entity }) {
                   <p className="text-xs text-slate-500">
                     Pay date {fmtDate(r.pay_date)} · {fmtMonth(r.period_month)}
                     {r.periods_in_month > 1 ? ` payroll ${r.period_index} of ${r.periods_in_month}` : ''} ·{' '}
-                    {r.totals?.employees ?? 0} employee/s
+                    {plural(r.totals?.employees ?? 0, 'employee')}
                   </p>
                 </div>
               </div>
@@ -206,7 +206,7 @@ function NewRunModal({
       // mirrors payroll_runs_frequency_check
       const [lo, hi] = frequency === 'monthly' ? [1, 1] : frequency === 'semi_monthly' ? [2, 2] : [4, 5]
       if (!Number.isInteger(slot.count) || slot.count < lo || slot.count > hi) {
-        toast('error', `${FREQUENCY_LABELS[frequency]} payroll has ${lo === hi ? lo : `${lo} or ${hi}`} payroll(s) in a month.`)
+        toast('error', `${FREQUENCY_LABELS[frequency]} payroll has ${lo === hi ? plural(lo, 'payroll') : `${lo} or ${hi} payrolls`} in a month.`)
         return
       }
       if (!Number.isInteger(slot.index) || slot.index < 1 || slot.index > slot.count) {
@@ -340,6 +340,7 @@ function NewRunModal({
         )}
         {(runType !== 'regular') && (
           <Field
+            group
             label={needsSubset ? 'Employees (required)' : 'Limit to employees (optional — default: everyone eligible)'}
           >
             <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-3">
