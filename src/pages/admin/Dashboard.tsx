@@ -331,11 +331,11 @@ function ClientDashboard({ entity }: { entity: Entity }) {
             <ObligationTile
               label={`BIR withholding tax — paid in ${derived.lastPayMonthLabel ?? '—'}`}
               amount={derived.monthObligations.tax}
-              due="File 1601-C by the 10th of the following month"
+              due="1601-C next month — the due date depends on your BIR filing group"
             />
-            <ObligationTile label="SSS (EE + ER + EC)" amount={derived.monthObligations.sss} due="Pay by end of the following month" />
-            <ObligationTile label="PhilHealth" amount={derived.monthObligations.philhealth} due="Pay within the following month" />
-            <ObligationTile label="Pag-IBIG" amount={derived.monthObligations.pagibig} due="Pay by the 10th–15th of the following month" />
+            <ObligationTile label="SSS (EE + ER + EC)" amount={derived.monthObligations.sss} due="Remit next month — check the SSS schedule for your due date" />
+            <ObligationTile label="PhilHealth" amount={derived.monthObligations.philhealth} due="Remit next month — PhilHealth's schedule depends on your employer number" />
+            <ObligationTile label="Pag-IBIG" amount={derived.monthObligations.pagibig} due="Remit next month — Pag-IBIG's window depends on your employer name" />
           </div>
         ) : (
           <p className="text-sm text-slate-400">Totals appear after the first finalized run.</p>

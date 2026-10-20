@@ -635,3 +635,11 @@ PhilHealth/Pag-IBIG collected (`src/payroll/flows/contributionOrder.test.ts`).
 
 Re-verify the exact column order against the current BIR Alphalist Data
 Entry module before relying on the CSV column positions.
+
+### Remittance due dates are not verified facts — the dashboard doesn't state them
+
+> On 2026-10-20 the dashboard's "File 1601-C by the 10th", "SSS by month-end", "Pag-IBIG by the 10th–15th" hints turned out to be unverified and contradicted by current sources (BIR eFPS deadlines go by filing group; Pag-IBIG's window runs to month-end by the first letter of the employer's name; PhilHealth's goes by employer number). The tiles now only say "remit next month — check the agency's schedule".
+
+Verify against each agency's own issuance before showing exact dates again
+(same rule as statutory figures: data from official sources, never memory).
+
