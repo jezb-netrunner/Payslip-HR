@@ -224,13 +224,16 @@ export default function PayrollRunDetail() {
         </p>
       )}
 
-      {(warnings.length > 0 || (result?.warnings.some((w) => w.employee === 'This run') ?? false)) && (
+      {(warnings.length > 0 || (result?.warnings.length ?? 0) > 0) && (
         <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
           <p className="mb-1 flex items-center gap-1.5 text-sm font-bold text-amber-800">
             <AlertTriangle className="size-4" /> Review warnings
           </p>
-          {result?.warnings.filter((w) => w.employee === 'This run').map((w, i) => (
-            <p key={`r${i}`} className="text-xs text-amber-700">• {w.warnings.join('; ')}</p>
+          {/* run-level notes and employees left out of the run (they have no payslip to carry them) */}
+          {result?.warnings.map((w, i) => (
+            <p key={`r${i}`} className="text-xs text-amber-700">
+              • {w.employee === 'This run' ? '' : `${w.employee}: `}{w.warnings.join('; ')}
+            </p>
           ))}
           {warnings.map((w, i) => (
             <p key={i} className="text-xs text-amber-700">• {w.name}: {w.warning}</p>

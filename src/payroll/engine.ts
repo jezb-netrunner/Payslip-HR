@@ -141,6 +141,19 @@ export interface ComputePayslipParams {
   ytdThirteenthPaid?: number
   /** 13th month: 13th month/other benefits a previous employer already exempted this year. */
   priorThirteenthOtherBenefitsExempt?: number
+  /**
+   * 13th month: 13th month pay and other benefits already PAID in the tax
+   * year of this payroll's pay date — the exemption cap is per tax year,
+   * which differs from the payroll year when the pay is released in January.
+   * Omitted = the payroll-year installments and other benefits.
+   */
+  taxYearBenefitsPaid?: number
+  /**
+   * Extras-only final pay: the separation month's contributions already
+   * deducted, to flag a month the last payroll never completed (the
+   * separation was recorded after that payroll was finalized).
+   */
+  separationMonth?: { label: string; already: ContributionSet }
 }
 
 export function deriveRates(
@@ -450,9 +463,13 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const mc = params.monthContributions
   const share = (monthlyAmount: number, already: number | undefined) => {
     if (extrasOnly) return 0
-    if (mc?.closes) return round2(Math.max(0, monthlyAmount - (already ?? 0)))
-    if (mc?.opens && settings.contributionTiming === 'first_period') return round2(monthlyAmount)
-    return contributionShare(monthlyAmount, settings.contributionTiming, period)
+    // Payrolls of a month can be finalized out of order (a late special run
+    // for days before a finalized closing payroll): never deduct beyond
+    // what the month still owes.
+    const left = round2(Math.max(0, monthlyAmount - (already ?? 0)))
+    if (mc?.closes) return left
+    if (mc?.opens && settings.contributionTiming === 'first_period') return left
+    return Math.min(contributionShare(monthlyAmount, settings.contributionTiming, period), left)
   }
   const sssEe = share(stat.sss.ee, mc?.already.sssEe)
   const sssMpfEe = share(stat.sss.mpfEe, mc?.already.sssMpfEe)
@@ -466,6 +483,24 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   if (extrasOnly) {
     notes.push('No statutory contributions: no compensation for work in this payroll.')
+    const sep = params.separationMonth
+    if (sep) {
+      const a = sep.already
+      const short = (due: number, done: number) => Math.max(0, due - done)
+      const ee = round2(
+        short(stat.sss.ee, a.sssEe) + short(stat.sss.mpfEe, a.sssMpfEe) +
+          short(stat.philhealthEe, a.philhealthEe) + short(stat.pagibigEe, a.pagibigEe),
+      )
+      const er = round2(
+        short(stat.sss.er, a.sssEr) + short(stat.sss.mpfEr, a.sssMpfEr) + short(stat.sss.ecEr, a.sssEcEr) +
+          short(stat.philhealthEr, a.philhealthEr) + short(stat.pagibigEr, a.pagibigEr),
+      )
+      if (ee > 0 || er > 0) {
+        warnings.push(
+          `${sep.label} contributions are short by ₱${ee.toLocaleString()} (employee) and ₱${er.toLocaleString()} (employer): the payroll holding the last day was finalized before the separation was recorded. Reopen and recompute that payroll so it completes the month.`,
+        )
+      }
+    }
   } else if (mc?.closes && (period.index < period.count || Object.values(mc.already).some((v) => v > 0))) {
     notes.push("Statutory contributions complete this month's amounts (less what earlier payrolls this month deducted).")
   } else if (mc?.opens && settings.contributionTiming === 'first_period' && period.index > 1) {
@@ -636,13 +671,14 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   const priorExempt = params.priorThirteenthOtherBenefitsExempt ?? 0
   const gross13 = round2(Math.max(0, ytdBasic / 12 - alreadyPaid))
   const cap = tables.bir_annual.other_benefits_exemption_cap
-  const exemptRemaining = Math.max(0, cap - priorExempt - otherBenefits - alreadyPaid)
+  const usedThisTaxYear = params.taxYearBenefitsPaid ?? otherBenefits + alreadyPaid
+  const exemptRemaining = Math.max(0, cap - priorExempt - usedThisTaxYear)
   const taxable13 = round2(Math.max(0, gross13 - exemptRemaining))
 
   notes.push(`13th month = 1/12 of YTD basic pay ₱${ytdBasic.toLocaleString()} (PD 851).`)
   if (alreadyPaid > 0) notes.push(`Less 13th month already paid this year: ₱${alreadyPaid.toLocaleString()}.`)
   notes.push(
-    `Tax-exempt cap for 13th month + other benefits: ₱${cap.toLocaleString()}; already used this year: ₱${(priorExempt + otherBenefits + alreadyPaid).toLocaleString()}.`,
+    `Tax-exempt cap for 13th month + other benefits: ₱${cap.toLocaleString()}; already used this tax year: ₱${round2(priorExempt + usedThisTaxYear).toLocaleString()}.`,
   )
   if (ytdBasic === 0) warnings.push('YTD basic pay is zero — no finalized payslips found for this year.')
 
@@ -651,7 +687,30 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     : []
 
   let withholdingTax = 0
-  if (taxable13 > 0 && !employee.isMinimumWageEarner) {
+  let whtLabel = 'Withholding Tax (13th month excess)'
+  if (params.annualization) {
+    // Paid after the year's tax was already annualized (last December
+    // payroll or final pay): true up the year again so it still reconciles.
+    const { withholding, summary } = annualizedWithholding(
+      params.annualization.ytd,
+      {
+        payMonth: params.annualization.payMonth,
+        isMwe: employee.isMinimumWageEarner,
+        earnings,
+        contributionsEe: 0,
+        unionDues: 0,
+        withholdingTax: 0,
+      },
+      tables.bir_annual,
+      params.annualization.prior,
+      params.annualization.peraCredit ?? 0,
+    )
+    withholdingTax = withholding
+    whtLabel = withholding < 0 ? 'Tax Refund (year-end adjustment)' : 'Withholding Tax (annualized)'
+    notes.push(
+      `Paid after this tax year was annualized: tax due for the year ₱${summary.taxDue.toLocaleString()} less tax already withheld.`,
+    )
+  } else if (taxable13 > 0 && !employee.isMinimumWageEarner) {
     // Supplemental compensation: marginal tax = tax(regular + excess) - tax(regular)
     const stat = computeStatutory(
       statutoryMonthlyBase,
@@ -673,8 +732,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   }
 
   const deductions: PayLine[] = []
-  if (withholdingTax > 0)
-    deductions.push({ code: 'wht', label: 'Withholding Tax (13th month excess)', amount: withholdingTax })
+  if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
 
   const totalDeductions = round2(deductions.reduce((s, l) => s + l.amount, 0))
   const netExact = round2(gross13 - totalDeductions)

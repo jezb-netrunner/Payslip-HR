@@ -98,6 +98,7 @@ function ClientsOverview({ onPick, currentId }: { onPick: (id: string) => void; 
 type DashSlip = Pick<
   Payslip,
   | 'period_month'
+  | 'pay_date'
   | 'net_pay'
   | 'sss_ee'
   | 'sss_mpf_ee'
@@ -148,7 +149,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         supabase
           .from('payslips')
           .select(
-            'period_month, net_pay, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, pagibig_ee, pagibig_er, withholding_tax, other_deductions_total, payroll_runs!inner(status)',
+            'period_month, pay_date, net_pay, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, pagibig_ee, pagibig_er, withholding_tax, other_deductions_total, payroll_runs!inner(status)',
           )
           .eq('entity_id', entity.id)
           .in('payroll_runs.status', ['finalized', 'paid'])
@@ -312,10 +313,14 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         </Card>
       </div>
 
-      <Card title="Statutory obligations — last finalized payroll month">
+      <Card title={`Statutory obligations${derived.lastMonthLabel ? ` — ${derived.lastMonthLabel} payroll` : ''}`}>
         {derived.lastMonthLabel ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <ObligationTile label="BIR withholding tax" amount={derived.monthObligations.tax} due="File 1601-C by the 10th of the following month" />
+            <ObligationTile
+              label={`BIR withholding tax — paid in ${derived.lastPayMonthLabel ?? '—'}`}
+              amount={derived.monthObligations.tax}
+              due="File 1601-C by the 10th of the following month"
+            />
             <ObligationTile label="SSS (EE + ER + EC)" amount={derived.monthObligations.sss} due="Pay by end of the following month" />
             <ObligationTile label="PhilHealth" amount={derived.monthObligations.philhealth} due="Pay within the following month" />
             <ObligationTile label="Pag-IBIG" amount={derived.monthObligations.pagibig} due="Pay by the 10th–15th of the following month" />
@@ -542,20 +547,26 @@ function derive(data: DashData, entity: Entity, today: string) {
   // ---- obligations for the latest finalized payroll month ----
   const lastRun = data.runs.find((r) => r.status !== 'draft' && r.run_type !== 'thirteenth_month') ?? null
   const lastMonthKey = data.slips.map((s) => s.period_month).filter(Boolean).sort().at(-1)?.slice(0, 7)
+  // withholding tax goes on the 1601-C of the month the pay was RELEASED
+  // (pay date); contributions belong to the payroll month
+  const lastPayMonthKey = data.slips.map((s) => (s.pay_date ?? '').slice(0, 7)).filter(Boolean).sort().at(-1)
   const monthObligations = { tax: 0, sss: 0, philhealth: 0, pagibig: 0 }
+  for (const s of data.slips) {
+    if (lastPayMonthKey && (s.pay_date ?? '').slice(0, 7) === lastPayMonthKey) monthObligations.tax += Number(s.withholding_tax)
+  }
   if (lastMonthKey) {
     for (const s of data.slips) {
       if ((s.period_month ?? '').slice(0, 7) !== lastMonthKey) continue
-      monthObligations.tax += Number(s.withholding_tax)
       monthObligations.sss +=
         Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.sss_er) + Number(s.sss_mpf_er) + Number(s.sss_ec_er)
       monthObligations.philhealth += Number(s.philhealth_ee) + Number(s.philhealth_er)
       monthObligations.pagibig += Number(s.pagibig_ee) + Number(s.pagibig_er)
     }
   }
-  const lastMonthLabel = lastMonthKey
-    ? new Date(`${lastMonthKey}-01T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })
-    : null
+  const monthLabel = (k: string | undefined) =>
+    k ? new Date(`${k}-01T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }) : null
+  const lastMonthLabel = monthLabel(lastMonthKey)
+  const lastPayMonthLabel = monthLabel(lastPayMonthKey)
 
   return {
     active,
@@ -566,6 +577,7 @@ function derive(data: DashData, entity: Entity, today: string) {
     attendanceTrend: attendanceTrend.slice(-10),
     lastRun,
     lastMonthLabel,
+    lastPayMonthLabel,
     monthObligations,
   }
 }
