@@ -79,30 +79,63 @@ run-info backfill added. 47 tests green. Migration
 verification round found most of its defects in code written to fix the
 previous round's defects.
 
+### 2026-10-19/20 — Multi-client conversion (owner's change list)
+
+**Asked:** admin-entered time in/out (no self-punch); multi-client app with
+three tiers (company admin / entity admin / employee); employees log in with
+an admin-set code; hire + separation dates and reasons; per-employee pay
+frequency (weekly / semi-monthly / monthly); company admins can amend
+statutory tables; announcements + employee dashboard with pay breakdown;
+whole-peso cash pay for minimum-wage workers; TIN and everything BIR 1604-C
+and the alphalist need.
+
+**Did:** migrations `20261019120000_multi_client_schema` +
+`20261019120100_multi_client_security` (entities, entity_admins, per-client
+RLS, announcements, payroll_adjustments, tax_remittances, employee_tax_years;
+clock RPCs / selfie policies / company_settings dropped); `admin-users` edge
+function v3 (login codes, admin users); engine rewrite (frequencies, payroll
+month slots, allocation, BIR buckets, MWE package, annualization, cash
+rounding); new admin pages (Clients, Admin Users, Time In/Out, Announcements,
+BIR & Reports, structured statutory editor) and employee dashboard. Tests 47
+→ 94. Validated both migrations + an RLS suite on a local PG16 replica (see
+lesson). **Live apply blocked** — see deployed state.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1):
-- All 9 migrations in `supabase/migrations/` are **applied** (verified via
-  `list_migrations`; versions match filenames — latest:
+**Live ≠ repo since 2026-10-19.** The repo (branch
+`claude/trusting-dirac-fqodu6`) is multi-client; the live backend and the
+Pages site are still the single-company version. Ship all three together —
+the old front end breaks on the new schema and vice versa:
+1. apply `20261019120000_multi_client_schema.sql` then
+   `20261019120100_multi_client_security.sql` (MCP `apply_migration` needs
+   the owner to approve the destructive-statement prompt — see lesson; or
+   paste them into the SQL editor). Precondition re-checked 2026-10-20: no
+   employees / time entries / runs / payslips / leave rows exist, one
+   profile (the owner, role `admin` → becomes `company_admin`). Afterwards
+   rename the repo files to the versions `list_migrations` reports, run the
+   security advisors;
+2. deploy edge function `admin-users` v3 (verify_jwt on);
+3. merge the branch to `main` (Pages deploys from `main` only).
+
+Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1), as of 2026-10-20:
+- Applied: the first 9 migrations (latest `20260824001426`
   `run_lifecycle_and_admin_protection`). Statutory versions, 2026 holidays,
-  leave types, and company settings (min wage ₱755, WO NCR-27) are **seeded**.
-- Payroll finalize/reopen go through the atomic DB RPCs, never direct status
-  updates. Admin profiles are trigger-protected: to manage a departed
-  co-admin's account, the DB owner must temporarily
-  `alter table profiles disable trigger profiles_protect_admins;` in the SQL
-  editor (deliberate escape hatch — document any use in the audit trail).
-- Edge function **`admin-users` deployed at v2** (verify_jwt on; v2 adds the
-  co-admin protection guard); repo copy at
-  `supabase/functions/admin-users/index.ts` matches.
-- Private storage buckets `punch-selfies` and `employee-photos` exist.
-- Security advisors clean except intentional WARNs on `clock_in`/`clock_out`/
-  `review_time_correction` being callable by `authenticated` — that IS the
-  punch API; do not "fix".
-- **The owner's admin account exists** (created 2026-08-24, confirmed,
-  role=admin via the first-signup bootstrap). Never create additional
-  accounts except through the app's admin provisioning flow.
+  leave types and company settings are seeded. The multi-client migration
+  keeps statutory versions, turns the holidays into the national list and
+  the leave types into global templates (copied into each new client), and
+  drops `company_settings` — each client carries its own policy, including
+  minimum-wage region/rate (no default; set per client).
+- Edge function **`admin-users` v2** live (verify_jwt on); the repo copy is
+  v3 and does NOT match until step 2 above.
+- Private storage buckets `punch-selfies` and `employee-photos` exist; after
+  the migration nothing uses `punch-selfies` (empty; safe to delete).
+- **The owner's account exists** (created 2026-08-24, confirmed, role
+  `admin`). Never create additional accounts except through the app.
+- To manage a departed co-admin's account the DB owner may need to disable
+  the admin-protection trigger temporarily in the SQL editor (deliberate
+  escape hatch — document any use in the audit trail).
 - **GitHub Pages deployment** is wired via
   `.github/workflows/deploy-pages.yml` (build with `--base=/Payslip-HR/`,
   Router basename from `import.meta.env.BASE_URL`, `404.html` SPA fallback).
@@ -113,11 +146,9 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1):
   https://jezb-netrunner.github.io/Payslip-HR/
 
 Known-open items (deliberate scope cuts, also in README disclaimers):
-year-end tax annualization / BIR 2316 true-up not automated; unworked
-regular-holiday qualification simplified (pays unless on unpaid leave that
-day); mid-period hires/separations on monthly pay handled as absence
-deductions (≈ proration); special/final-pay runs recompute their period like
-a regular run (UI warns about overlapping finalized periods).
+unworked regular-holiday qualification simplified (pays unless on unpaid
+leave that day); BIR DAT file not generated (CSV for the BIR Alphalist
+module instead).
 
 ---
 
@@ -208,8 +239,11 @@ deducting an unworked regular holiday).
 
 `getStatutoryTables(asOf)` picks, per kind, the newest row with
 `effective_from <= asOf`. `src/payroll/defaults.ts` mirrors the seeds for
-unit tests only — the DB is the runtime source of truth. Admins add versions
-in the Statutory page by copying the current JSON shape. Why it mattered:
+unit tests only — the DB is the runtime source of truth. Company admins add
+versions in the Statutory page's structured editor (brackets/rates as form
+fields, validated before save); entity admins read only. Numeric inputs are
+edited as text and parsed on save — binding them as numbers swallowed
+partial decimals like "0.0". Why it mattered:
 SSS stepped up every ~2 years through 2025 and wage orders/holidays change
 annually; an MSME admin must apply a new circular without a developer, and
 past periods must recompute with the tables in force back then.
@@ -218,38 +252,39 @@ past periods must recompute with the tables in force back then.
 
 > Payslips' employee policy checks the run's status while payroll_runs' policy checks for an own payslip — inline subqueries raise "infinite recursion detected in policy"; the fix is SECURITY DEFINER helper functions.
 
-`run_is_finalized(uuid)`, `run_has_own_payslip(uuid)`, `is_admin()`,
-`current_employee_id()` are security-definer (they bypass RLS on the tables
-they read) and policies call them instead of inline subqueries. Rules that
+Since the multi-client conversion the helpers are `is_company_admin()`,
+`can_manage_entity(uuid)`, `can_manage_employee(uuid)`,
+`current_employee_id()`, `current_employee_entity_id()`,
+`attendance_locked(uuid, date)` — security-definer (they bypass RLS on the
+tables they read) and policies call them instead of inline subqueries. Rules that
 came with it: always `set search_path = public` on definer functions; revoke
 EXECUTE from `anon` on helpers but KEEP it for `authenticated` (policies
 evaluate functions with the calling role's privileges — revoking
 authenticated breaks every SELECT); trigger functions get EXECUTE revoked
 from everyone (PostgREST exposes any executable function under /rpc).
 
-### Anti-buddy-punching: enforce identity in the database, not the UI (confirmed approach)
+### Employees never write attendance (confirmed approach)
 
-> Employees have zero INSERT/UPDATE/DELETE on time_entries; the only way to punch is the `clock_in()`/`clock_out()` SECURITY DEFINER RPCs, which derive the employee from `auth.uid()` — punching for a teammate is impossible by construction.
+> Employees have zero INSERT/UPDATE/DELETE on time_entries and payslips; since 2026-10-19 time in/out is entered by admins (owner's requirement), replacing the selfie/device/IP self-punch RPCs, which were dropped.
 
-Layers: server-derived identity (no employee_id parameter to spoof); DB-clock
-timestamps; one open entry per employee (partial unique index); per-punch
-evidence (selfie in private bucket where employees can only upload to their
-own folder, device fingerprint = persistent localStorage UUID, IP from
-request headers, optional geolocation); anomaly flags computed in the RPC
-(`no_selfie`, `no_location`, `new_device`, `device_mismatch`,
-`overlong_shift`) reviewed by admin with selfies side-by-side; immutable
-entries — fixes only via admin-reviewed correction requests; audit triggers
-on UPDATE/DELETE. Residual accepted risk: shared credentials + willing
-accomplice selfie — mitigated by the evidence trail, not prevented.
+Employees can only file time-correction and leave requests; an admin
+approves them (`review_time_correction` applies the change). Entries inside
+a finalized run's period are locked (`attendance_locked`) so paid
+attendance can't change under a payslip; reopen the run first. Why it
+mattered: the original design enforced punch identity in the database
+(server-derived identity, DB clock, selfie evidence); with admin-entered
+time the same rule — no employee write path at all — is what keeps
+attendance and pay trustworthy.
 
 ### Manila time is fixed UTC+8 — but convert deliberately
 
 > PH has no DST so attendance math uses fixed +8h arithmetic (`src/lib/manila.ts`); the trap is datetime-local inputs, which `new Date(value)` interprets in the *browser's* timezone — convert them as Manila wall time explicitly.
 
-`work_date` is derived server-side in the RPCs
-(`(now() at time zone settings.timezone)::date`). Form inputs
-(`"2026-08-23T09:30"`) must become `new Date(value + ":00Z") − 8h` (see
-`manilaLocalToIso` in MyAttendance.tsx and the manual-entry modal). ND
+Admin-entered times (`work_date` + `"09:30"`) become instants via
+`manilaWallToIso` in `src/lib/manila.ts` (= `new Date(value + ":00Z") − 8h`);
+display goes back through `manilaHHMM`. Month ranges use `endOfMonth()` —
+a hand-built `${month}-31` is an invalid date for 30-day months and
+February, which PostgREST rejects (that bug existed in MyAttendance). ND
 window 22:00–06:00 overlaps are computed per Manila date; ND minutes are
 capped at net worked minutes so unpaid breaks don't earn ND. Why it
 mattered: an admin filing from a non-PH browser would silently write shifted
@@ -262,23 +297,28 @@ timestamps — the classic way payroll hours drift by a day.
 Checklist: pin `search_path` on every function; trigger functions →
 `revoke execute from public, anon, authenticated` (triggers still fire — they
 run as table owner); RLS helpers → revoke `anon` only; intentional RPCs
-(`clock_in`/`clock_out`/`review_time_correction`) keep authenticated EXECUTE
-by design and will always WARN — leave them.
+(`finalize_payroll_run` / `reopen_payroll_run` / `review_time_correction`,
+which check the caller's rights inside) keep authenticated EXECUTE by design
+and will WARN — leave them; `revoke_user_sessions` is service-role only.
 
-### Employee logins: admin-users edge function + first-signup bootstrap
+### Employee logins: code → synthetic email, provisioned by the admin-users edge function
 
-> Employee auth accounts can't be created from the browser with the anon key, so the `admin-users` edge function (service role) does it — and the first account ever created becomes admin via the `handle_new_user` trigger.
+> Employees sign in with one admin-set code `<CLIENT>-<PART>`; Supabase Auth needs an email, so the code maps to `emp-<sha256("payslip-hr/employee-login/v1:"+code)[:32]>@jezb-netrunner.github.io` and the code is the password — the derivation exists twice (browser + edge function) and must stay byte-identical.
 
-Actions: `create_employee_account` (creates auth user with
-`app_metadata {role:'employee', employee_id}`, email pre-confirmed; DB
-trigger creates the profile, function upserts the link as belt-and-braces),
-`reset_password`, `set_active` (ban ~100y + `profiles.is_active`;
-self-deactivation blocked). Client must send the **user's access token** as
-the bearer, not the anon key (`callAdminUsers` in `src/lib/api.ts`). Edge
-functions get SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY env automatically —
-no secrets in the repo. Why it mattered: the alternatives were shipping the
-service key to the browser or letting employees self-signup — both
-unacceptable.
+Vector: `ACME-7Q4KX9TB` → `emp-bce06882b7902c9f3fdc424817f6a827@jezb-netrunner.github.io`
+(pinned in `src/lib/loginCode.test.ts`). The address must be on a real-looking
+domain the project owns: Supabase Auth rejects example/test domains. Only a
+hint (last characters) is stored; changing or disabling a code revokes the
+user's sessions (`revoke_user_sessions`, service-role only). The client
+prefix stops code guessing from reaching other clients. `admin-users` v3
+actions: `set_employee_code`, `set_employee_login_active` (company admins or
+entity admins of that employee's client), `create_admin`, `update_admin`
+(company admins only; another company admin is never manageable). The
+client must send the **user's access token** as the bearer
+(`callAdminUsers`). The very first account ever created becomes
+`company_admin` via `handle_new_user` — disable public sign-ups right after.
+Why it mattered: employees have no email to give, and the alternatives
+(service key in the browser, self-signup) were unacceptable.
 
 ### How statutory figures were verified (process lesson)
 
@@ -370,3 +410,50 @@ done by hand on any new project.
 Hit in `EmployeeDetail.tsx` (Profile/Career/Comp/Account tabs); fixed by
 hoisting to top level with `useToast()` inside each. Why it mattered: forms
 silently losing in-progress edits whenever the parent re-rendered.
+
+### Supabase MCP waits for a human on destructive SQL
+
+> `apply_migration` / `execute_sql` hold any statement containing DROP (even inside a larger migration) for the user to confirm in their client; unattended, the call times out after ~60 s and nothing is applied.
+
+Seen 2026-10-19 with the multi-client migrations (they drop the old policies,
+punch RPCs and `company_settings`). Non-destructive DDL and reads go through
+immediately. Verify nothing landed after a timeout (`list_migrations`,
+`to_regclass`) — it is all-or-nothing. Plan for it: validate locally first
+(next lesson), then apply while the owner is present to approve, or hand
+them the files for the SQL editor. Why it mattered: a "hung" migration looks
+like a broken database; it is just an unanswered prompt.
+
+### Test migrations and RLS on a local Postgres replica first
+
+> Postgres 16 is installed in the sandbox; replaying every migration onto a scratch database with a small Supabase stub (API roles, `auth.users`/`auth.sessions`, `auth.uid()` from `request.jwt.claims`, storage schema) plus a psql RLS suite caught real policy bugs before anything touched the live project.
+
+Stub, RLS suite and runner: `supabase/tests/`. Gotchas: postgres refuses
+to run as root (initdb/pg_ctl as a separate user); start it with `setsid`
+or it dies with the tool's shell; impersonate users with
+`set local role authenticated` + `set_config('request.jwt.claim.sub', …)`
+inside a transaction. Differences from Supabase (PG17, real GoTrue/storage)
+remain, so the security advisors still run after the live apply. Why it
+mattered: RLS mistakes are silent — a policy that is too open never errors.
+
+### Year-end tax true-up is a flag on the last run, not a separate run
+
+> Annualization (RR 11-2018 / Form 2316) happens inside the last regular payroll of the year or the final-pay run (`payroll_runs.annualize = true`): that run's withholding becomes annual tax due minus tax already withheld, refunds included.
+
+A separate "year-end" run type would have no earnings to pay out and would
+produce a negative net pay whenever the true-up is a refund. The alphalist
+flags employees whose year is not reconciled ("Under/Over-withheld … —
+annualize"). Why it mattered: BIR expects tax withheld = tax due per
+employee on the alphalist; the previous build left this manual.
+
+### Whole-peso cash pay: round up or carry forward, never down
+
+> Net-pay rounding for cash payroll is per client (`net_pay_rounding`, `rounding_scope`): `round_up` (employer adds the centavos) or `carry_forward` (centavos owed to the employee in `employees.rounding_balance`, added to the next payout and settled on final pay); there is no round-down.
+
+Labor Code Art. 113 forbids deductions from wages beyond the listed
+exceptions, so rounding down — even by centavos — is out. The carry chain
+is maintained only by `finalize_payroll_run` / `reopen_payroll_run` (a
+trigger blocks direct writes by API users); reopening must restore the
+balance the run consumed. The payslip shows the rounding as its own line
+so gross − deductions + rounding = net still ties to the centavo. Why it
+mattered: the owner's minimum-wage workers are paid in cash, and decimals
+there are impractical — but the fix must not shave wages.
