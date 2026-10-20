@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { Payslip } from '../lib/db'
 import type { PayslipCompany, PayslipRunInfo } from '../components/PayslipView'
+import { employerFor } from '../lib/payslip'
 
 const NAVY: [number, number, number] = [18, 45, 85]
 const ORANGE: [number, number, number] = [246, 134, 46]
@@ -38,6 +39,7 @@ export function generatePayslipPdf(
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 14
   const snap = slip.employee_snapshot as Record<string, string>
+  const employer = employerFor(slip, company)
 
   // ---- header ----
   doc.setFillColor(...NAVY)
@@ -45,10 +47,10 @@ export function generatePayslipPdf(
   doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(15)
-  doc.text(company.name || 'Company', margin, 11)
+  doc.text(employer.name || 'Company', margin, 11)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
-  const sub = [company.registered_address, company.tin ? `TIN ${company.tin}` : '']
+  const sub = [employer.registered_address, employer.tin ? `TIN ${employer.tin}` : '']
     .filter(Boolean)
     .join('  •  ')
   if (sub) doc.text(sub, margin, 17)
@@ -208,11 +210,14 @@ export function generatePayslipPdf(
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'italic')
   doc.setTextColor(...SLATE)
-  doc.text(company.payslip_footer_note ?? '', margin, y)
+  // the note is free text from client settings: wrap it, and start the
+  // "Generated" line below however many lines it took
+  const note: string[] = doc.splitTextToSize(company.payslip_footer_note ?? '', pageW - margin * 2)
+  doc.text(note, margin, y)
   doc.text(
     `Generated ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} • Confidential`,
     margin,
-    y + 4.5,
+    y + Math.max(1, note.length) * 3.6 + 1,
   )
 
   const fileBase = `${(snap.employee_no ?? 'payslip').replace(/[^\w-]/g, '_')}_${run.period_end}`

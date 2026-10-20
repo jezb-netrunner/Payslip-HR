@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Badge, Card, EmptyState, PageHeader, Select, Spinner, TableShell, Td, Th } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import type { AuditLog as AuditRow } from '../../lib/db'
@@ -35,13 +35,22 @@ export default function AuditLog() {
   const [scope, setScope] = useState<'client' | 'global'>('client')
   const [loading, setLoading] = useState(true)
 
+  const latest = useRef(0)
   const load = useCallback(async () => {
+    const mine = ++latest.current
+    // client scope needs a client: never fall back to an unfiltered query
+    if (scope === 'client' && !entity) {
+      setRows([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     let q = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(300)
     if (scope === 'global') q = q.is('entity_id', null)
     else if (entity) q = q.eq('entity_id', entity.id)
     if (table) q = q.eq('table_name', table)
     const { data } = await q
+    if (mine !== latest.current) return // a newer filter/client superseded this request
     setRows((data ?? []) as AuditRow[])
     setLoading(false)
   }, [table, scope, entity])

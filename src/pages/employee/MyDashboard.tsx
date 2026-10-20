@@ -4,8 +4,10 @@ import { ArrowRight, CalendarCheck, Eye, Megaphone, Pin, Wallet } from 'lucide-r
 import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView'
 import { Card, EmptyState, Modal, Spinner, StatCard } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
-import type { Announcement, Entity, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
+import { getHolidaysBetween } from '../../lib/api'
+import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtDateTime, fmtHours, money } from '../../lib/format'
+import { leaveDaysInYear } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 
@@ -18,6 +20,7 @@ export default function MyDashboard() {
   const [types, setTypes] = useState<LeaveType[]>([])
   const [leaves, setLeaves] = useState<LeaveRequest[]>([])
   const [ents, setEnts] = useState<Record<string, number>>({})
+  const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
   const [viewing, setViewing] = useState<Payslip | null>(null)
 
@@ -27,7 +30,7 @@ export default function MyDashboard() {
 
   const load = useCallback(async () => {
     if (!employee) return
-    const [ent, ps, an, te, lt, lr, le] = await Promise.all([
+    const [ent, ps, an, te, lt, lr, le, hols] = await Promise.all([
       supabase.from('entities').select('*').eq('id', employee.entity_id).maybeSingle(),
       supabase.from('payslips').select('*').eq('employee_id', employee.id).order('pay_date', { ascending: false }).limit(60),
       supabase.from('announcements').select('*').order('pinned', { ascending: false }).order('published_at', { ascending: false }).limit(5),
@@ -35,7 +38,9 @@ export default function MyDashboard() {
       supabase.from('leave_types').select('*').eq('active', true),
       supabase.from('leave_requests').select('*').eq('employee_id', employee.id).eq('status', 'approved'),
       supabase.from('employee_leave_entitlements').select('*').eq('employee_id', employee.id).eq('year', Number(year)),
+      getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year}-12-31`),
     ])
+    setHolidays(hols)
     setEntity((ent.data as Entity) ?? null)
     setSlips((ps.data ?? []) as Payslip[])
     setNews((an.data ?? []) as Announcement[])
@@ -66,7 +71,10 @@ export default function MyDashboard() {
   const daysWithEntries = new Set(entries.map((e) => e.work_date)).size
 
   const used: Record<string, number> = {}
-  for (const r of leaves) if (r.start_date.slice(0, 4) === year) used[r.leave_type_id] = (used[r.leave_type_id] ?? 0) + Number(r.days)
+  for (const r of leaves) {
+    const d = leaveDaysInYear(r, Number(year), employee.work_schedule.days, holidays)
+    if (d > 0) used[r.leave_type_id] = (used[r.leave_type_id] ?? 0) + d
+  }
   const balances = types
     .map((t) => ({ t, total: ents[t.id] ?? Number(t.default_annual_days) }))
     .filter((x) => x.total > 0 && x.t.paid)
@@ -148,8 +156,8 @@ export default function MyDashboard() {
           <StatCard
             key={t.id}
             label={t.name}
-            value={`${Math.max(0, total - (used[t.id] ?? 0))} / ${total}`}
-            sub="days left this year"
+            value={`${total - (used[t.id] ?? 0)} / ${total}`}
+            sub={total - (used[t.id] ?? 0) < 0 ? 'days beyond your entitlement' : 'days left this year'}
           />
         ))}
       </div>
@@ -204,6 +212,12 @@ function PayBreakdown({ slip }: { slip: Payslip }) {
             <span className="font-semibold text-slate-700">{money(p.amount)}</span>
           </div>
         ))}
+        {Number(slip.withholding_tax) < 0 && (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-emerald-700">Tax refund (year-end adjustment)</span>
+            <span className="font-semibold text-emerald-700">+{money(-Number(slip.withholding_tax))}</span>
+          </div>
+        )}
         {Number(slip.rounding_adjustment) !== 0 && (
           <div className="flex items-center justify-between text-xs">
             <span className="text-slate-500">Cash rounding</span>

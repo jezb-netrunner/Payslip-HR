@@ -47,7 +47,7 @@ function Leaves({ entity }: { entity: Entity }) {
 
   async function review(id: string, approve: boolean) {
     const { data: userData } = await supabase.auth.getUser()
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('leave_requests')
       .update({
         status: approve ? 'approved' : 'rejected',
@@ -57,8 +57,12 @@ function Leaves({ entity }: { entity: Entity }) {
       })
       .eq('id', id)
       .eq('status', 'pending')
+      .select('id')
     if (error) toast('error', error.message)
-    else {
+    else if (!data || data.length === 0) {
+      toast('error', 'This request is no longer pending (the employee may have cancelled it).')
+      await load()
+    } else {
       toast('success', approve ? 'Leave approved — payroll will treat these days accordingly.' : 'Leave rejected.')
       await load()
     }

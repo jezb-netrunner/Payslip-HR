@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
+import { useEntity } from '../lib/entity'
 
 // ---------- buttons ----------
 
@@ -317,6 +318,8 @@ export function TableShell({ children }: { children: ReactNode }) {
 
 /** Shown by client-scoped pages when no client is selected or assigned. */
 export function NoClient({ companyAdmin }: { companyAdmin: boolean }) {
+  // the client list is still loading: don't claim there are none
+  if (useEntity().loading) return <Spinner />
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
       <p className="text-sm font-semibold text-slate-700">

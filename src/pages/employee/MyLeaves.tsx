@@ -3,9 +3,11 @@ import { Plus } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, Textarea } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
-import type { LeaveRequest, LeaveType } from '../../lib/db'
+import { getHolidaysBetween } from '../../lib/api'
+import type { Holiday, LeaveRequest, LeaveType } from '../../lib/db'
 import { fmtDate } from '../../lib/format'
-import { eachDate, isoWeekday, todayManila } from '../../lib/manila'
+import { leaveDaysInYear, leaveWorkdays } from '../../lib/leave'
+import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 
@@ -15,6 +17,7 @@ export default function MyLeaves() {
   const [types, setTypes] = useState<LeaveType[]>([])
   const [requests, setRequests] = useState<LeaveRequest[]>([])
   const [entitlements, setEntitlements] = useState<Record<string, number>>({})
+  const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -24,7 +27,7 @@ export default function MyLeaves() {
 
   const load = useCallback(async () => {
     if (!employee) return
-    const [{ data: t }, { data: r }, { data: ents }] = await Promise.all([
+    const [{ data: t }, { data: r }, { data: ents }, hols] = await Promise.all([
       supabase.from('leave_types').select('*').eq('active', true).order('code'),
       supabase
         .from('leave_requests')
@@ -36,7 +39,10 @@ export default function MyLeaves() {
         .select('*')
         .eq('employee_id', employee.id)
         .eq('year', year),
+      // this year and next: leave can be filed ahead and across New Year
+      getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year + 1}-12-31`),
     ])
+    setHolidays(hols)
     setTypes((t ?? []) as LeaveType[])
     setRequests((r ?? []) as LeaveRequest[])
     const map: Record<string, number> = {}
@@ -49,11 +55,10 @@ export default function MyLeaves() {
     load()
   }, [load])
 
+  /** Leave days charged: scheduled workdays that aren't holidays. */
   function workdayCount(start: string, end: string): number {
-    if (!employee || end < start) return 0
-    return eachDate(start, end).filter((d) =>
-      employee.work_schedule.days.includes(isoWeekday(d)),
-    ).length
+    if (!employee) return 0
+    return leaveWorkdays(start, end, employee.work_schedule.days, holidays)
   }
 
   async function submit() {
@@ -102,9 +107,9 @@ export default function MyLeaves() {
 
   const usedByType: Record<string, number> = {}
   for (const r of requests) {
-    if (r.status === 'approved' && r.start_date.slice(0, 4) === String(year)) {
-      usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + Number(r.days)
-    }
+    if (r.status !== 'approved') continue
+    const d = leaveDaysInYear(r, year, employee.work_schedule.days, holidays)
+    if (d > 0) usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + d
   }
 
   const balanceTypes = types.filter(
@@ -127,18 +132,19 @@ export default function MyLeaves() {
         {balanceTypes.map((t) => {
           const total = entitlements[t.id] ?? t.default_annual_days
           const used = usedByType[t.id] ?? 0
-          const left = Math.max(0, total - used)
+          const left = total - used // negative = taken beyond the entitlement
           return (
             <div key={t.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold text-slate-500">{t.name}</p>
-              <p className="mt-1 text-xl font-extrabold text-brand-900">
+              <p className={`mt-1 text-xl font-extrabold ${left < 0 ? 'text-rose-600' : 'text-brand-900'}`}>
                 {left}
                 <span className="text-sm font-medium text-slate-400"> / {total} days</span>
               </p>
+              {left < 0 && <p className="text-[11px] text-rose-600">{-left} day/s beyond your entitlement</p>}
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-brand-600"
-                  style={{ width: `${total > 0 ? (left / total) * 100 : 0}%` }}
+                  style={{ width: `${total > 0 ? Math.max(0, (left / total) * 100) : 0}%` }}
                 />
               </div>
             </div>

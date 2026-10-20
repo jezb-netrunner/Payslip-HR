@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Spinner, TableShell, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
@@ -27,7 +27,9 @@ export default function Holidays() {
   const [f, setF] = useState({ date: '', name: '', kind: 'regular' })
   const [busy, setBusy] = useState(false)
 
+  const latest = useRef(0)
   const load = useCallback(async () => {
+    const mine = ++latest.current
     setLoading(true)
     let q = supabase
       .from('holidays')
@@ -37,6 +39,7 @@ export default function Holidays() {
       .order('holiday_date')
     q = entity ? q.or(`entity_id.is.null,entity_id.eq.${entity.id}`) : q.is('entity_id', null)
     const { data } = await q
+    if (mine !== latest.current) return // switched client/year meanwhile
     setHolidays((data ?? []) as Holiday[])
     setLoading(false)
   }, [year, entity])

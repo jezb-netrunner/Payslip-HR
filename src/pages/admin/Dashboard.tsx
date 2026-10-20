@@ -15,6 +15,7 @@ import {
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Badge, Card, NoClient, PageHeader, Spinner, StatCard } from '../../components/ui'
 import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
+import { fetchAll } from '../../lib/fetchAll'
 import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, Holiday, PayrollRun, Payslip, TimeEntry } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
@@ -45,9 +46,13 @@ function ClientsOverview({ onPick, currentId }: { onPick: (id: string) => void; 
   useEffect(() => {
     const today = todayManila()
     Promise.all([
-      supabase.from('employees').select('entity_id, separation_date'),
-      supabase.from('payroll_runs').select('entity_id, status, pay_date').order('pay_date', { ascending: false }).limit(1000),
-    ]).then(([{ data: emps }, { data: runs }]) => {
+      fetchAll<{ entity_id: string; separation_date: string | null }>((from, to) =>
+        supabase.from('employees').select('entity_id, separation_date').order('id').range(from, to),
+      ),
+      fetchAll<{ entity_id: string; status: string; pay_date: string }>((from, to) =>
+        supabase.from('payroll_runs').select('entity_id, status, pay_date').order('pay_date', { ascending: false }).order('id').range(from, to),
+      ),
+    ]).then(([emps, runs]) => {
       const s: Record<string, { headcount: number; lastPay: string | null; drafts: number }> = {}
       const get = (id: string) => (s[id] ??= { headcount: 0, lastPay: null, drafts: 0 })
       for (const e of emps ?? []) if (!e.separation_date || e.separation_date >= today) get(e.entity_id as string).headcount++
@@ -90,12 +95,31 @@ function ClientsOverview({ onPick, currentId }: { onPick: (id: string) => void; 
   )
 }
 
+type DashSlip = Pick<
+  Payslip,
+  | 'period_month'
+  | 'net_pay'
+  | 'sss_ee'
+  | 'sss_mpf_ee'
+  | 'sss_er'
+  | 'sss_mpf_er'
+  | 'sss_ec_er'
+  | 'philhealth_ee'
+  | 'philhealth_er'
+  | 'pagibig_ee'
+  | 'pagibig_er'
+  | 'withholding_tax'
+  | 'other_deductions_total'
+>
+
 interface DashData {
   employees: Employee[]
-  recentEntries: TimeEntry[]
+  recentEntries: Pick<TimeEntry, 'employee_id' | 'work_date'>[]
   runs: PayrollRun[]
-  slips: (Payslip & { payroll_runs: PayrollRun })[]
+  slips: DashSlip[]
+  /** from two weeks back (attendance) to 45 days ahead (upcoming list) */
   holidays: Holiday[]
+  recentLeaves: { employee_id: string; start_date: string; end_date: string }[]
   pendingCorrections: number
   pendingLeaves: number
 }
@@ -106,27 +130,54 @@ function ClientDashboard({ entity }: { entity: Entity }) {
 
   const load = useCallback(async () => {
     const twoWeeksAgo = addDays(today, -13)
-    const [emps, recentEnt, runsRes, slipsRes, hols, corr, leaves] = await Promise.all([
+    // six payroll months for the cost chart, plus the current one
+    const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
+    const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves] = await Promise.all([
       getEmployees(entity.id),
-      supabase.from('time_entries').select('*').eq('entity_id', entity.id).gte('work_date', twoWeeksAgo),
+      fetchAll<TimeEntry>((from, to) =>
+        supabase
+          .from('time_entries')
+          .select('employee_id, work_date')
+          .eq('entity_id', entity.id)
+          .gte('work_date', twoWeeksAgo)
+          .order('id')
+          .range(from, to),
+      ),
       supabase.from('payroll_runs').select('*').eq('entity_id', entity.id).order('period_end', { ascending: false }).limit(60),
-      supabase
-        .from('payslips')
-        .select('*, payroll_runs!inner(*)')
-        .eq('entity_id', entity.id)
-        .in('payroll_runs.status', ['finalized', 'paid'])
-        .order('created_at', { ascending: false })
-        .limit(1000),
-      getHolidaysBetween(entity.id, today, addDays(today, 45)),
+      fetchAll<DashSlip>((from, to) =>
+        supabase
+          .from('payslips')
+          .select(
+            'period_month, net_pay, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, pagibig_ee, pagibig_er, withholding_tax, other_deductions_total, payroll_runs!inner(status)',
+          )
+          .eq('entity_id', entity.id)
+          .in('payroll_runs.status', ['finalized', 'paid'])
+          .gte('period_month', sinceMonth)
+          .order('id')
+          .range(from, to),
+      ),
+      getHolidaysBetween(entity.id, twoWeeksAgo, addDays(today, 45)),
+      fetchAll<{ employee_id: string; start_date: string; end_date: string }>((from, to) =>
+        supabase
+          .from('leave_requests')
+          .select('employee_id, start_date, end_date')
+          .eq('entity_id', entity.id)
+          .eq('status', 'approved')
+          .lte('start_date', today)
+          .gte('end_date', twoWeeksAgo)
+          .order('id')
+          .range(from, to),
+      ),
       supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
       supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
     ])
     setData({
       employees: emps,
-      recentEntries: (recentEnt.data ?? []) as TimeEntry[],
+      recentEntries: recentEnt,
       runs: (runsRes.data ?? []) as PayrollRun[],
-      slips: (slipsRes.data ?? []) as (Payslip & { payroll_runs: PayrollRun })[],
+      slips,
       holidays: hols,
+      recentLeaves,
       pendingCorrections: corr.count ?? 0,
       pendingLeaves: leaves.count ?? 0,
     })
@@ -241,11 +292,11 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         </Card>
 
         <Card title="Upcoming holidays">
-          {data.holidays.length === 0 ? (
+          {data.holidays.filter((h) => h.holiday_date >= today).length === 0 ? (
             <p className="text-sm text-slate-400">None in the next 45 days.</p>
           ) : (
             <div className="space-y-2.5">
-              {data.holidays.slice(0, 6).map((h) => (
+              {data.holidays.filter((h) => h.holiday_date >= today).slice(0, 6).map((h) => (
                 <div key={h.id} className="flex items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-700">{h.name}</p>
@@ -299,6 +350,13 @@ interface ActionItem {
   icon: React.ReactNode
 }
 
+/** YYYY-MM shifted by n months. */
+function addMonths(ym: string, n: number): string {
+  const [y, m] = ym.split('-').map(Number)
+  const t = y * 12 + (m - 1) + n
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`
+}
+
 function derive(data: DashData, entity: Entity, today: string) {
   const active = data.employees.filter((e) => e.hire_date <= today && isActiveOn(e, today))
   const freqCounts = (['weekly', 'semi_monthly', 'monthly'] as const)
@@ -308,12 +366,24 @@ function derive(data: DashData, entity: Entity, today: string) {
 
   const entered = (date: string) =>
     new Set(data.recentEntries.filter((t) => t.work_date === date).map((t) => t.employee_id))
+  // who was expected at work on a date: scheduled that weekday, employed,
+  // not on approved leave — and nobody on a non-working holiday
+  const expected = (date: string) => {
+    const h = data.holidays.find((x) => x.holiday_date === date)
+    if (h && h.kind !== 'special_working') return []
+    return active.filter(
+      (e) =>
+        e.work_schedule.days.includes(isoWeekday(date)) &&
+        e.hire_date <= date &&
+        !data.recentLeaves.some((l) => l.employee_id === e.id && l.start_date <= date && l.end_date >= date),
+    )
+  }
 
-  // most recent scheduled workday before today
+  // most recent workday before today
   let lastWorkday = { date: '', scheduled: 0, entered: 0 }
   for (let i = 1; i <= 7; i++) {
     const d = addDays(today, -i)
-    const scheduled = active.filter((e) => e.work_schedule.days.includes(isoWeekday(d)))
+    const scheduled = expected(d)
     if (scheduled.length > 0) {
       const set = entered(d)
       lastWorkday = { date: d, scheduled: scheduled.length, entered: scheduled.filter((e) => set.has(e.id)).length }
@@ -438,7 +508,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   // ---- payroll cost by payroll month (finalized) ----
   const byMonth = new Map<string, { net: number; ee: number; er: number }>()
   for (const s of data.slips) {
-    const key = (s.period_month ?? s.payroll_runs.period_end).slice(0, 7)
+    const key = (s.period_month ?? '').slice(0, 7)
     const cur = byMonth.get(key) ?? { net: 0, ee: 0, er: 0 }
     cur.net += Number(s.net_pay)
     cur.ee +=
@@ -460,7 +530,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   // ---- attendance trend ----
   const attendanceTrend: { day: string; rate: number }[] = []
   for (const d of eachDate(addDays(today, -13), addDays(today, -1))) {
-    const scheduled = active.filter((e) => e.work_schedule.days.includes(isoWeekday(d)))
+    const scheduled = expected(d)
     if (scheduled.length === 0) continue
     const set = entered(d)
     attendanceTrend.push({

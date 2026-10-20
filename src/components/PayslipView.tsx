@@ -4,6 +4,7 @@ import { fmtDate, fmtPeriod, money } from '../lib/format'
 import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
 import { generatePayslipPdf } from '../pdf/payslipPdf'
 import { Badge, Button } from './ui'
+import { employerFor } from '../lib/payslip'
 
 export type PayslipCompany = Pick<Entity, 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'payslip_footer_note'>
 
@@ -40,6 +41,7 @@ export default function PayslipView({
   showTrace?: boolean
 }) {
   const snap = slip.employee_snapshot as Record<string, string>
+  const employer = employerFor(slip, company)
   const employerTotal =
     Number(slip.sss_er) + Number(slip.sss_mpf_er) + Number(slip.sss_ec_er) +
     Number(slip.philhealth_er) + Number(slip.pagibig_er)
@@ -172,10 +174,10 @@ export default function PayslipView({
           </p>
         </div>
       ) : null}
-      {company.name && (
+      {employer.name && (
         <p className="text-[11px] text-slate-400">
-          {company.name}
-          {company.tin ? ` · TIN ${company.tin}` : ''}
+          {employer.name}
+          {employer.tin ? ` · TIN ${employer.tin}` : ''}
         </p>
       )}
     </div>

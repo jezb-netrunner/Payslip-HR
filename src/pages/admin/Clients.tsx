@@ -10,6 +10,8 @@ import { FREQUENCY_LABELS, PH_REGIONS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
+import { fetchAll } from '../../lib/fetchAll'
+import { todayManila } from '../../lib/manila'
 
 export default function Clients() {
   const toast = useToast()
@@ -21,13 +23,15 @@ export default function Clients() {
   const [showArchived, setShowArchived] = useState(false)
 
   const loadCounts = useCallback(async () => {
-    const [{ data: emps }, { data: links }] = await Promise.all([
-      supabase.from('employees').select('entity_id, separation_date'),
+    const [emps, { data: links }] = await Promise.all([
+      fetchAll<{ entity_id: string; separation_date: string | null }>((from, to) =>
+        supabase.from('employees').select('entity_id, separation_date').order('id').range(from, to),
+      ),
       supabase.from('entity_admins').select('entity_id'),
     ])
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayManila()
     const hc: Record<string, number> = {}
-    for (const e of emps ?? []) {
+    for (const e of emps) {
       if (e.separation_date && e.separation_date < today) continue
       hc[e.entity_id as string] = (hc[e.entity_id as string] ?? 0) + 1
     }

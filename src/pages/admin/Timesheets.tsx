@@ -13,7 +13,7 @@ import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, Holiday, TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { fmtDate, fmtDateTime, fmtHours, fullName } from '../../lib/format'
-import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
+import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 
@@ -128,6 +128,19 @@ function buildRows(
   })
 }
 
+/**
+ * Time in after midnight on an overnight shift (e.g. 00:30 on a 22:00–06:00
+ * schedule) falls on the day after the work date. An unchanged time keeps
+ * the day it was stored with (corrections may have put it there).
+ */
+function timeInNextDay(r: Row): boolean {
+  if (r.entry && manilaHHMM(r.entry.clock_in) === r.timeIn) {
+    return manilaDateStr(new Date(r.entry.clock_in)) > r.date
+  }
+  const { start, end } = r.employee.work_schedule
+  return hhmmToMinutes(end) <= hhmmToMinutes(start) && hhmmToMinutes(r.timeIn) < hhmmToMinutes(end)
+}
+
 function changed(r: Row): boolean {
   const origIn = r.entry ? manilaHHMM(r.entry.clock_in) : ''
   const origOut = r.entry?.clock_out ? manilaHHMM(r.entry.clock_out) : ''
@@ -148,9 +161,10 @@ async function saveRows(rows: Row[]): Promise<{ saved: number; errors: string[] 
         }
       } else {
         if (!r.timeIn) throw new Error('time in is required')
-        const clockIn = manilaWallToIso(r.date, r.timeIn)
+        const inNext = timeInNextDay(r)
+        const clockIn = manilaWallToIso(r.date, r.timeIn, inNext)
         const clockOut = r.timeOut
-          ? manilaWallToIso(r.date, r.timeOut, hhmmToMinutes(r.timeOut) <= hhmmToMinutes(r.timeIn))
+          ? manilaWallToIso(r.date, r.timeOut, inNext || hhmmToMinutes(r.timeOut) <= hhmmToMinutes(r.timeIn))
           : null
         if (r.entry) {
           const { error } = await supabase
@@ -180,7 +194,8 @@ async function saveRows(rows: Row[]): Promise<{ saved: number; errors: string[] 
 function RowCells({ row, onChange }: { row: Row; onChange: (patch: Partial<Row>) => void }) {
   const mins = spanMinutes(row.timeIn, row.timeOut)
   const net = mins === null ? null : mins >= 360 ? Math.max(0, mins - row.employee.work_schedule.break_minutes) : mins
-  const overnight = !!row.timeIn && !!row.timeOut && hhmmToMinutes(row.timeOut) <= hhmmToMinutes(row.timeIn)
+  const inNext = !!row.timeIn && timeInNextDay(row)
+  const overnight = !!row.timeIn && !!row.timeOut && (inNext || hhmmToMinutes(row.timeOut) <= hhmmToMinutes(row.timeIn))
   const disabled = row.locked || row.extra.length > 0
   return (
     <>
@@ -192,6 +207,7 @@ function RowCells({ row, onChange }: { row: Row; onChange: (patch: Partial<Row>)
           onChange={(e) => onChange({ timeIn: e.target.value })}
           className={`w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
         />
+        {inNext && <p className="mt-0.5 text-[10px] text-violet-600">next day</p>}
       </Td>
       <Td>
         <Input

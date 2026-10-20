@@ -7,6 +7,19 @@ import { errorMessage } from '../lib/errors'
 
 type Mode = 'employee' | 'admin' | 'reset' | 'bootstrap'
 
+/**
+ * A rejected code and a busy or unreachable server need different advice:
+ * on payday many employees sign in from one office IP and can hit the
+ * sign-in rate limit with a perfectly good code.
+ */
+function signInProblem(err: { status?: number; name?: string }, badCredentials: string): string {
+  if (err.status === 429) return 'Too many sign-in attempts from this network. Wait a few minutes, then try again.'
+  if (err.name === 'AuthRetryableFetchError' || !err.status || err.status >= 500) {
+    return "Can't reach the server right now. Check your connection and try again."
+  }
+  return badCredentials
+}
+
 export default function Login() {
   const [mode, setMode] = useState<Mode>('employee')
   const [code, setCode] = useState('')
@@ -37,10 +50,10 @@ export default function Login() {
           email: await employeeLoginEmail(normalized),
           password: normalized,
         })
-        if (err) throw new Error('That code did not work. Check it with your HR or payroll officer.')
+        if (err) throw new Error(signInProblem(err, 'That code did not work. Check it with your HR or payroll officer.'))
       } else if (mode === 'admin') {
         const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-        if (err) throw err
+        if (err) throw new Error(signInProblem(err, err.message))
       } else if (mode === 'reset') {
         const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: window.location.origin + import.meta.env.BASE_URL,
