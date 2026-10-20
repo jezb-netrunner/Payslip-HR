@@ -15,7 +15,9 @@ Auth + Edge Functions) with a **React + TypeScript + Tailwind** front end.
 
 Login codes are prefixed with the client code, can be changed or disabled by
 the entity admin at any time (signing the employee out everywhere), and are
-never stored — only their last characters are kept as a hint.
+never stored — only their last characters are kept as a hint. Guessable
+codes (all digits, runs, too few different characters, the employee number)
+are refused; the Generate button makes random ones.
 
 ## What it does
 
@@ -37,12 +39,14 @@ never stored — only their last characters are kept as a hint.
   e-wallet / check), allowances with BIR classification, recurring deductions
   and loans, union dues, previous-employer and PERA data per tax year
 - **Time In / Out**: daily sheet (whole team, one day) and per-employee sheet
-  (one person, a whole period) — admins key in time in/out (or fill a day
-  from each employee's shift), with rest days, holidays and approved leaves
-  shown; employees can only *request* corrections.
-  Attendance is locked once it has been paid in a finalized run
+  (one person, a whole period) — admins key in time in/out (or fill the
+  scheduled days from each employee's shift; Fill skips approved leaves and
+  non-working holidays), split shifts as extra in/out pairs, with rest days,
+  holidays and approved leaves shown; employees can only *request*
+  corrections. Attendance is locked once it has been paid in a finalized run
 - Leaves: per-client leave types (seeded from statutory templates),
-  entitlements, approvals that feed payroll
+  per-employee credits, approvals that feed payroll, leaves filed by HR for
+  an employee, and revoking an approved leave (until its days are paid)
 - Payroll runs per **pay frequency** (weekly / semi-monthly / monthly) with
   regular, 13th-month, special and final-pay run types; adjustments
   (bonuses, deductions, back pay); review → finalize (immutable) → reopen
@@ -120,7 +124,12 @@ The app captures everything the annual information return needs:
   1604-C remittance schedule
 
 Reports export as CSV, one per schedule, and flag employees whose data is
-incomplete or whose tax is not yet reconciled. They are the working data you
+incomplete or whose tax is not yet reconciled (while the year is still in
+progress, withholding differences are shown as a note — they settle on the
+last payroll paid in December or on final pay). Schedule 2 takes the
+statutory minimum wage from the employee's last payslip of the year, and the
+previous-employer section carries TIN, status, period, reason of separation
+and itemized amounts. They are the working data you
 key or import into the **BIR Alphalist Data Entry and Validation Module**,
 which produces the DAT file to submit; the return itself is filed through
 eBIRForms / eFPS.
@@ -155,7 +164,10 @@ whichever version is in force for each period. No code changes.
    finalize / reopen run as atomic database functions that also maintain the
    cash-rounding carry balance.
 4. Sensitive changes are audit-logged by database triggers (who, when, what,
-   which client).
+   which client) — including login-code changes made through the edge
+   function and leave / correction reviews; bookkeeping writes (draft
+   totals, payroll sequence) are skipped. CSV exports neutralize
+   formula-like text so a typed name can't run as a spreadsheet formula.
 5. Employee login codes are client-prefixed (no cross-client guessing),
    high-entropy, revocable, and never stored in readable form.
 
@@ -167,7 +179,9 @@ whichever version is in force for each period. No code changes.
 - **Frontend**: Vite + React 19 + TypeScript + Tailwind CSS v4, React Router,
   Recharts, jsPDF, Lucide icons
 - **Tests**: Vitest — payroll engine, frequencies, annualization, alphalist,
-  cash rounding, login codes
+  cash rounding, login codes, CSV safety, and end-to-end `computeRun` flows
+  against an in-memory Supabase (`src/payroll/flows/`); SQL suites for RLS,
+  RPCs and triggers (`supabase/tests/`)
 
 ## Getting started
 

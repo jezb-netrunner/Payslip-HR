@@ -117,6 +117,43 @@ recorded them in the migration history, verified the live schema against
 the local replica, deployed `admin-users` v3, ran the security advisors.
 The `main` merge (front end) awaits the owner.
 
+### 2026-10-20 — Comprehensive audit (owner: "check everything works, patch holes")
+
+**Did:** browser walkthrough of every role and page on a local Supabase
+stack (see lesson), desktop + 390/360 px; four parallel reviewers
+(requirements trace, payroll math, DB concurrency, front end/security);
+every verified finding fixed and regression-tested. Owner said **not** to
+merge to `main` yet.
+
+- Payroll: contributions over-collected when a month's runs were finalized
+  out of order; a 13th month paid after the year's annualization never
+  reconciled (and used the payroll year's ₱90k cap); tax tables were picked
+  by period end instead of pay date; extras-only final pay applied loans
+  and hid its warnings; employees left out of a run were never shown.
+  `src/payroll/flows/` now runs computeRun end to end on an in-memory
+  Supabase (fake mirrors the finalize RPC — keep it in sync).
+- DB (`20261020031639_audit_fixes`, `20261020033538_alphalist_prev_employer_and_audit`):
+  statutory / leave-type / tax-year changes now stale drafts; finalize and
+  reopen lock in writer order (no deadlock, no entry slipping into a paid
+  period); reopen resets totals (must recompute); finalize refuses
+  adjustments for employees without a payslip; approved paid leave can't be
+  deleted or re-pointed; audit log skips bookkeeping writes and records the
+  admin behind edge-function writes; more tables audited; previous
+  employer's status/reason columns.
+- Front end: CSV formula injection; timesheet grid could save one day's rows
+  under another date (stale response) and couldn't edit split shifts; Fill
+  turned leave/holiday days into worked days; double-click duplicated
+  allowances/loans; BIR tab could save blanks over data it failed to load;
+  load failures spun forever or read as "no data"; label-wrapped control
+  groups; widths and overflow on phones; weak login codes accepted.
+- Added: admin "File leave", revoke approved leave, per-employee leave
+  credits, allowance/loan edit with start/end dates, previous-employer
+  section in the alphalist, year-end SMW for Schedule 2, Add Client asks
+  for whole-peso cash pay (round up by default).
+- Tests 109 → 147 unit/flow; SQL suite + `11_audit_fixes_tests.sql`.
+  Both migrations applied live through MCP (non-destructive), `admin-users`
+  v4 deployed, live fingerprint = replica, advisors unchanged.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -128,20 +165,24 @@ which does NOT work against the new schema — merging
 the live app usable again. Nothing else is outstanding for the backend.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-20:
-- **All 11 migrations applied.** The two multi-client ones were run by the
+- **All 13 migrations applied.** The two multi-client ones were run by the
   owner in the SQL editor (MCP could not — see lesson) and then recorded in
   `supabase_migrations.schema_migrations` under the repo versions
   `20261019120000 multi_client_schema` / `20261019120100
-  multi_client_security`. Verified with `supabase/tests/fingerprint.sql`:
-  tables, columns, constraints, indexes, policies, functions, grants and
-  triggers all match the local replica (function bodies arrived with CRLF
-  line endings from the paste — harmless). Data after migration: owner =
+  multi_client_security`. The audit ones (`20261020031639 audit_fixes`,
+  `20261020033538 alphalist_prev_employer_and_audit`) went through MCP
+  `apply_migration` (non-destructive) — repo files renamed to the versions
+  MCP recorded. Verified with `supabase/tests/fingerprint.sql`: tables,
+  columns, constraints, indexes, policies, functions, grants and triggers
+  all match the local replica (21 tables, 328 columns, 120 constraints, 57
+  indexes, 46 policies, 36 functions, 61 triggers). Data: owner =
   `company_admin`, 5 statutory versions, 9 global leave templates, 21
-  national 2026 holidays; `company_settings` gone; RLS on every table.
-  No clients, employees or payroll data yet; each client carries its own
-  policy incl. minimum-wage region/rate (no default).
-- Edge function **`admin-users` v3** live (verify_jwt on), deployed
-  2026-10-20; deployed source = repo copy.
+  national 2026 holidays; RLS on every table. No clients, employees or
+  payroll data yet; each client carries its own policy incl. minimum-wage
+  region/rate (no default).
+- Edge function **`admin-users` v4** live (verify_jwt on), deployed
+  2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
+  login codes refused).
 - Security advisors after the migration: 9 intentional WARNs (RLS helpers
   `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
   `current_employee_id` / `current_employee_entity_id` / `run_is_finalized`
@@ -449,6 +490,9 @@ local replica. Don't evade the confirmation (e.g. dynamic SQL to hide DROP);
 `skip_elicitations` in the connector URL exists but removes a safety check.
 Why it mattered: a "hung" migration looks like a broken database; it is an
 unreachable prompt, and the all-or-nothing timeout leaves nothing behind.
+Non-destructive migrations (CREATE OR REPLACE FUNCTION, CREATE TRIGGER,
+ADD COLUMN, REVOKE) do apply through `apply_migration` — MCP records them
+under the apply timestamp, so rename the repo file to that version.
 
 ### Test migrations and RLS on a local Postgres replica first
 
@@ -502,9 +546,12 @@ Cutoffs don't move when a payday is moved for a holiday, so every month
 keeps a complete slot set (pay-date slots left a weekly month with 5 slots
 and the next with no slot 1, and a 10th/25th client's Feb 11–25 period paid
 Mar 2 collided with March's first). A Dec 16–31 payroll paid Jan 5 is
-December for contributions and the next year for BIR. Why it mattered:
-mixing the two bases either breaks contribution months or files
-compensation in the wrong tax year.
+December for contributions and the next year for BIR. Withholding and
+annual tax TABLES are also picked by pay date (contribution tables by
+period end); the 13th month's ₱90k cap is measured on the tax year, and a
+13th month paid after the year's annualizing payroll re-annualizes (else
+the year never reconciles). Why it mattered: mixing the two bases either
+breaks contribution months or files compensation in the wrong tax year.
 
 ### A draft is finalizable only if it is complete and current
 
@@ -541,3 +588,50 @@ Audit rows name employee actors by full name. Why it mattered: admins
 could silently sign in as an employee, and a leaked code kept working for
 up to an hour after it was "replaced".
 
+### Browser walkthroughs need a local Supabase stack, not just the SQL replica
+
+> Supabase Auth (GoTrue v2.180.0 binary) + PostgREST 12.2.12 + a tiny Node gateway (routes /auth/v1, /rest/v1, /functions/v1; answers CORS) + the edge function under Deno + Vite, all against the local PG16 with every migration, let Playwright drive the real app as each role.
+
+Gotchas: GoTrue needs an existing `auth` schema and `search_path=auth` in
+its DATABASE_URL (quote `&` in env files); kill services by pid file —
+`pkill -f` matches its own shell; after a session/worker restart start
+Postgres again as its own user (`pg_ctl -D … -o '-p 54329 -k /tmp' start`).
+Why it mattered: the walkthrough found what unit tests and SQL tests
+couldn't — wrong-date saves, mislabeled controls, phone overflow, a
+double-click that duplicated loans.
+
+### Audit actor for service-role writes comes from x-actor-id — service role only
+
+> The admin-users function writes with the service role, so `auth.uid()` is null in the audit trigger; it now sends `x-actor-id: <calling admin>` and `audit_trigger()` honours that header only when the JWT role is `service_role` (a signed-in user's header is ignored, a malformed one yields no actor).
+
+Why it mattered: login-code changes — the most security-sensitive admin
+action — were logged with no actor. Tested in `11_audit_fixes_tests.sql`.
+
+### A <label> around several controls clicks the first one
+
+> `Field` used to render a `<label>`; around a checkbox list or day buttons, clicking its caption toggled the first item. Multi-control fields use `<Field group>` (div role=group + aria-labelledby).
+
+Why it mattered: an admin clicking "Employees (required)" silently
+selected someone for a final-pay run.
+
+### Two Tailwind width classes on one element: stylesheet order wins
+
+> `Input`/`Select` always added `w-full`; a caller's `w-44` lost or won depending on CSS order, not class order — controls rendered full-width. `controlClass()` adds `w-full` only when the caller gave no `w-*`.
+
+### Monthly contributions: never deduct beyond what the month still owes
+
+> Runs of one payroll month can be finalized out of order (week 2 before week 1, a late special run for days before a finalized closing run). Every share is capped at `monthly − already deducted this month`; the closing run takes exactly the remainder.
+
+Why it mattered: the reviewer's probes showed 1.5–2× the month's SSS/
+PhilHealth/Pag-IBIG collected (`src/payroll/flows/contributionOrder.test.ts`).
+
+### Event-based statutory leaves are not yearly balances
+
+> Maternity (105 calendar days), paternity, solo parent, VAWC and special leave for women are granted per event/status; showing them as a default balance for everyone (portal cards, admin credits) was wrong. They show only once HR sets an entitlement (`showsBalance` in `src/lib/leave.ts`).
+
+### The alphalist previous-employer section has its own status, period and reason
+
+> Per the BIR 1604-C alphalist format (RMC 73-2019; read via search extracts of the BIR PDF on 2026-10-20 — the PDF itself was unreachable from the sandbox), the previous-employer block carries TIN, employment status, period of employment and reason of separation, besides the amounts. Stored in `employee_tax_years` and exported itemized.
+
+Re-verify the exact column order against the current BIR Alphalist Data
+Entry module before relying on the CSV column positions.
