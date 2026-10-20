@@ -100,6 +100,18 @@ BIR & Reports, structured statutory editor) and employee dashboard. Tests 47
 → 94. Validated both migrations + an RLS suite on a local PG16 replica (see
 lesson). **Live apply blocked** — see deployed state.
 
+**Review round (same session):** five parallel reviewers (DB security,
+payroll math, admin UI, schema↔query, auth/portal) reported ~45 verified
+defects; all fixed with regression tests (109 unit tests; RLS suite grew to
+cover each DB finding). The worst: a forged payslip deduction line could
+zero another client's loan; finalized runs were writable outside the RPCs;
+finalize accepted stale/partial drafts; final pay double-paid days or
+skipped the separated employee; moved paydays broke weekly payroll-month
+slots; employees could rewrite pending requests that approval then
+applied; login codes were recoverable offline from the admin-readable
+email hash. Every DB/RPC error message was hidden behind generic "Failed"
+toasts (supabase-js error objects aren't `Error`s). See the lessons below.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -113,7 +125,8 @@ the old front end breaks on the new schema and vice versa:
    the owner to approve the destructive-statement prompt — see lesson; or
    paste them into the SQL editor). Precondition re-checked 2026-10-20: no
    employees / time entries / runs / payslips / leave rows exist, one
-   profile (the owner, role `admin` → becomes `company_admin`). Afterwards
+   profile (the owner, role `admin` → becomes `company_admin`); the schema
+  migration now refuses to run if any HR/payroll rows exist. Afterwards
    rename the repo files to the versions `list_migrations` reports, run the
    security advisors;
 2. deploy edge function `admin-users` v3 (verify_jwt on);
@@ -440,10 +453,17 @@ mattered: RLS mistakes are silent — a policy that is too open never errors.
 > Annualization (RR 11-2018 / Form 2316) happens inside the last regular payroll of the year or the final-pay run (`payroll_runs.annualize = true`): that run's withholding becomes annual tax due minus tax already withheld, refunds included.
 
 A separate "year-end" run type would have no earnings to pay out and would
-produce a negative net pay whenever the true-up is a refund. The alphalist
-flags employees whose year is not reconciled ("Under/Over-withheld … —
-annualize"). Why it mattered: BIR expects tax withheld = tax due per
-employee on the alphalist; the previous build left this manual.
+produce a negative net pay whenever the true-up is a refund. Separations
+annualize per employee automatically: any payroll whose period includes an
+employee's separation date settles their tax (and cash-rounding balance). A
+final pay released after the last paid day (`final_pay` run, employee picked,
+period after the separation) computes `extrasOnly`: one-time items, the
+tax adjustment and the rounding settlement — no attendance pay, allowances
+or contributions. The alphalist flags employees whose year is not
+reconciled ("Under/Over-withheld … — annualize"). Why it mattered: BIR
+expects tax withheld = tax due per employee on the alphalist; the previous
+build left this manual, and final pay either double-paid days or skipped
+the employee.
 
 ### Whole-peso cash pay: round up or carry forward, never down
 
@@ -457,3 +477,53 @@ balance the run consumed. The payslip shows the rounding as its own line
 so gross − deductions + rounding = net still ties to the centavo. Why it
 mattered: the owner's minimum-wage workers are paid in cash, and decimals
 there are impractical — but the fix must not shave wages.
+
+### Tax year follows the pay date; the payroll month follows the cutoff
+
+> Withholding on compensation is reported when PAID, so the alphalist, 2316, annualization YTD and 1601-C months use `pay_date`; monthly allocation, contributions and the 13th month (PD 851: basic EARNED in the year) use `period_month`, which is derived from the period END (cutoff), never from the pay date.
+
+`slotFor(frequency, periodEnd)`: semi-monthly cutoff ≤ 15th = payroll 1,
+else 2; weekly = k-th of the 4–5 cutoffs on that weekday in the month.
+Cutoffs don't move when a payday is moved for a holiday, so every month
+keeps a complete slot set (pay-date slots left a weekly month with 5 slots
+and the next with no slot 1, and a 10th/25th client's Feb 11–25 period paid
+Mar 2 collided with March's first). A Dec 16–31 payroll paid Jan 5 is
+December for contributions and the next year for BIR. Why it mattered:
+mixing the two bases either breaks contribution months or files
+compensation in the wrong tax year.
+
+### A draft is finalizable only if it is complete and current
+
+> `totals.employees` must equal the draft's payslip count; computeRun first writes a one-time `{computing: token}`, and DB triggers reset totals to `{}` whenever attendance, approved leave, adjustments, allowances, deductions, employee records, holidays or client settings change — so finalize rejects partial, interrupted or stale drafts.
+
+Plus `employees.payroll_seq` (bumped by every finalize/reopen touching the
+employee, copied onto each payslip as `employee_payroll_seq`): a draft
+computed before another payroll for the same person was finalized or
+reopened has stale year-to-date, 13th-month or carry inputs and must be
+recomputed. Finalize also refuses paying the same days twice (overlapping
+finalized non-13th runs) — computeRun leaves such employees out with a
+warning. Status changes only inside the RPCs (`payroll.lifecycle` GUC
+checked by the run guard trigger). Why it mattered: reviewers finalized a
+bonus that was added after computing (never paid, then locked) and paid a
+separated employee's last days twice.
+
+### supabase-js returns errors as plain objects, not Error instances
+
+> `if (error) throw error` + `err instanceof Error ? err.message : 'Failed'` always shows the fallback: PostgREST/RPC failures are `{ message, code, details, hint }` objects. Use `errorMessage(err, fallback)` from `src/lib/errors.ts`.
+
+Also check `res.ok` on raw `fetch` to edge functions: gateway failures
+(expired JWT, function not deployed) carry no `error` key. Why it mattered:
+every RPC's own guidance ("Recompute the draft…", "Reopen that later run
+first") and every constraint-specific message was invisible.
+
+### Never store a value derived from a credential where admins can read it
+
+> Employee profiles keep `email = null`: the auth email is an unsalted SHA-256 of the login code, and with the 3-character hint an entity admin recovered a code in seconds; the derived address now lives only in `auth.users` (service role).
+
+Replacing a code also stamps `profiles.sessions_revoked_at`;
+`current_employee_id()` rejects access tokens whose `iat` is older, so the
+old code's live JWT stops working immediately instead of within the hour.
+Audit rows name employee actors by full name. Why it mattered: admins
+could silently sign in as an employee, and a leaked code kept working for
+up to an hour after it was "replaced".
+

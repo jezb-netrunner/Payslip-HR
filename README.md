@@ -65,12 +65,21 @@ never stored — only their last characters are kept as a hint.
 
 Each employee has their own pay frequency, so a client can pay some staff
 weekly and others semi-monthly or monthly. Each run covers one client and one
-frequency and is tied to a **payroll month slot** (e.g. "October 2026, period
-2 of 2", or "period 5 of 5" for weekly). Monthly amounts — allowances,
-recurring deductions, SSS / PhilHealth / Pag-IBIG — are split across the
-month's periods so the parts always add up to the monthly figure, or
-deducted on the first or last period only (client setting). Withholding tax
-uses the BIR table for the run's frequency.
+frequency and is tied to a **payroll month slot** taken from the period's
+cutoff (e.g. "October 2026, payroll 2 of 2", or "payroll 5 of 5" for weekly),
+so moving a payday for a holiday never breaks a month. Monthly amounts —
+allowances, recurring deductions, SSS / PhilHealth / Pag-IBIG — are split
+across the month's periods so the parts always add up to the monthly
+figure, or deducted on the first or last period only (client setting); an
+employee hired or separated mid-month still has the month's contributions
+completed on their own first or last payroll. Withholding tax uses the BIR
+table for the run's frequency, and the tax year follows the **pay date**
+(a December 16–31 payroll paid in January is next year's compensation).
+
+Safety rules enforced by the database: a draft can only be finalized if it
+was fully computed after its latest input change (attendance, leave,
+adjustments, rates or client settings); nobody is paid twice for the same
+days; finalized payrolls are frozen until reopened.
 
 ## Cash payroll without centavos
 
@@ -103,8 +112,9 @@ The app captures everything the annual information return needs:
   supplementary) so the 2316 / alphalist columns are summed, not guessed.
   Minimum wage earners' exempt package (basic, holiday, OT, ND, hazard) is
   kept separate, the ₱90,000 13th-month/other-benefits exemption is tracked
-  across the year, and an **annualizing run** (last payroll of the year or
-  final pay) trues up the year's tax
+  across the year, and an **annualizing run** (last payroll of the year, a
+  payroll that includes an employee's separation, or final pay) trues up
+  the year's tax
 - 1601-C remittances (date, bank/agency, TRA/eROR/eAR, amounts) for the
   1604-C remittance schedule
 
