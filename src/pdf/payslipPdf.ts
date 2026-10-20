@@ -3,7 +3,9 @@
 
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import type { CompanySettings, Payslip, PayrollRun } from '../lib/db'
+import type { Payslip } from '../lib/db'
+import type { PayslipCompany, PayslipRunInfo } from '../components/PayslipView'
+import { employerFor, roundingLines } from '../lib/payslip'
 
 const NAVY: [number, number, number] = [18, 45, 85]
 const ORANGE: [number, number, number] = [246, 134, 46]
@@ -18,7 +20,7 @@ function php(v: number): string {
   )
 }
 
-function periodLabel(run: PayrollRun): string {
+function periodLabel(run: PayslipRunInfo): string {
   const fmt = (d: string) =>
     new Date(`${d}T00:00:00`).toLocaleDateString('en-PH', {
       month: 'short',
@@ -28,46 +30,62 @@ function periodLabel(run: PayrollRun): string {
   return `${fmt(run.period_start)} – ${fmt(run.period_end)}`
 }
 
+/** One line no wider than maxW (current font), cut with an ellipsis. */
+function fitText(doc: jsPDF, text: string, maxW: number): string {
+  if (doc.getTextWidth(text) <= maxW) return text
+  let t = text
+  while (t.length > 1 && doc.getTextWidth(`${t}…`) > maxW) t = t.slice(0, -1)
+  return `${t.trimEnd()}…`
+}
+
 export function generatePayslipPdf(
   slip: Payslip,
-  run: PayrollRun,
-  company: CompanySettings,
+  run: PayslipRunInfo,
+  company: PayslipCompany,
 ): void {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 14
   const snap = slip.employee_snapshot as Record<string, string>
+  const employer = employerFor(slip, company)
 
   // ---- header ----
   doc.setFillColor(...NAVY)
   doc.rect(0, 0, pageW, 26, 'F')
   doc.setTextColor(255, 255, 255)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(15)
-  doc.text(company.company_name || 'Company', margin, 11)
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8)
-  const sub = [company.address, company.tin ? `TIN ${company.tin}` : '']
-    .filter(Boolean)
-    .join('  •  ')
-  if (sub) doc.text(sub, margin, 17)
 
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(14)
-  doc.text('PAYSLIP', pageW - margin, 11, { align: 'right' })
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(8.5)
+  // right block first: the employer's name and address get what is left
   const runLabel =
     run.run_type === 'thirteenth_month'
       ? `13th Month Pay ${run.period_end.slice(0, 4)}`
       : periodLabel(run)
+  const payDate = `Pay date: ${new Date(`${run.pay_date}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}`
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(14)
+  doc.text('PAYSLIP', pageW - margin, 11, { align: 'right' })
+  let rightW = doc.getTextWidth('PAYSLIP')
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8.5)
   doc.text(runLabel, pageW - margin, 16.5, { align: 'right' })
-  doc.text(
-    `Pay date: ${new Date(`${run.pay_date}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}`,
-    pageW - margin,
-    21.5,
-    { align: 'right' },
-  )
+  doc.text(payDate, pageW - margin, 21.5, { align: 'right' })
+  rightW = Math.max(rightW, doc.getTextWidth(runLabel), doc.getTextWidth(payDate))
+  const leftW = pageW - margin * 2 - rightW - 6
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(15)
+  const name = employer.name || 'Company'
+  if (doc.getTextWidth(name) > leftW) doc.setFontSize(12)
+  doc.text(fitText(doc, name, leftW), margin, 11)
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  const sub = [employer.registered_address, employer.tin ? `TIN ${employer.tin}` : '']
+    .filter(Boolean)
+    .join('  •  ')
+  if (sub) {
+    const lines = doc.splitTextToSize(sub, leftW) as string[]
+    doc.text(lines[0], margin, 16.5)
+    if (lines.length > 1) doc.text(fitText(doc, lines.slice(1).join(' '), leftW), margin, 20.5)
+  }
 
   // ---- employee block ----
   let y = 33
@@ -88,8 +106,9 @@ export function generatePayslipPdf(
     `PhilHealth: ${snap.philhealth_no || '—'}`,
     `Pag-IBIG: ${snap.pagibig_no || '—'}   TIN: ${snap.tin || '—'}`,
   ]
-  infoLeft.forEach((t, i) => doc.text(t, margin, y + 5.5 + i * 4.2))
-  infoRight.forEach((t, i) => doc.text(t, pageW / 2 + 4, y + 5.5 + i * 4.2))
+  const halfW = pageW / 2 - margin - 2
+  infoLeft.forEach((t, i) => doc.text(fitText(doc, t, halfW), margin, y + 5.5 + i * 4.2))
+  infoRight.forEach((t, i) => doc.text(fitText(doc, t, halfW), pageW / 2 + 4, y + 5.5 + i * 4.2))
   y += 21
 
   // ---- earnings & deductions tables side by side ----
@@ -130,6 +149,21 @@ export function generatePayslipPdf(
   })
   const rightEndY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY
   y = Math.max(leftEndY, rightEndY) + 7
+
+  // ---- cash rounding (whole-peso cash payroll) ----
+  const rounding = roundingLines(slip)
+  if (rounding.length > 0) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...SLATE)
+    const computed = Number(slip.gross_pay) - Number(slip.total_deductions)
+    doc.text(`Computed net pay ${php(computed)}`, margin, y)
+    for (const l of rounding) {
+      y += 4
+      doc.text(`${l.label} ${l.amount > 0 ? '+' : ''}${php(l.amount)}`, margin, y)
+    }
+    y += 5
+  }
 
   // ---- net pay banner ----
   doc.setFillColor(...ORANGE)
@@ -193,11 +227,14 @@ export function generatePayslipPdf(
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'italic')
   doc.setTextColor(...SLATE)
-  doc.text(company.payslip_footer_note ?? '', margin, y)
+  // the note is free text from client settings: wrap it, and start the
+  // "Generated" line below however many lines it took
+  const note: string[] = doc.splitTextToSize(company.payslip_footer_note ?? '', pageW - margin * 2)
+  doc.text(note, margin, y)
   doc.text(
-    `Generated ${new Date().toLocaleString('en-PH', { timeZone: company.timezone || 'Asia/Manila' })} • Confidential`,
+    `Generated ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} • Confidential`,
     margin,
-    y + 4.5,
+    y + Math.max(1, note.length) * 3.6 + 1,
   )
 
   const fileBase = `${(snap.employee_no ?? 'payslip').replace(/[^\w-]/g, '_')}_${run.period_end}`

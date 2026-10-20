@@ -1,140 +1,468 @@
 // Orchestrates a payroll run: pulls everything the engine needs from
-// Supabase, computes every employee's payslip, and stores the drafts.
-// Only admins can call these paths (enforced by RLS).
+// Supabase for one client, computes every employee's payslip, and stores
+// the drafts. RLS limits all of this to admins of the run's client.
 
-import { getHolidaysBetween, getSettings, getStatutoryTables } from '../lib/api'
+import { getEntity, getHolidaysBetween, getStatutoryTables } from '../lib/api'
+import { fetchAll } from '../lib/fetchAll'
 import { supabase } from '../lib/supabase'
-import type { CompanySettings, Employee, PayrollRun } from '../lib/db'
-import { computeAttendance } from './attendance'
-import { computePayslip } from './engine'
 import type {
+  Employee,
+  EmployeeAllowance,
+  EmployeeTaxYear,
+  Entity,
+  PayrollAdjustment,
+  PayrollRun,
+  Payslip,
+  RecurringDeduction,
+} from '../lib/db'
+import type { AnnualPayslipFact } from './annual'
+import { priorFromTaxYear } from './alphalist'
+import { computeAttendance } from './attendance'
+import { computePayslip, type ContributionSet } from './engine'
+import type {
+  BirBucket,
   HolidayLite,
   LeaveLite,
   PayrollSettingsInput,
   PayslipComputation,
-  PeriodHalf,
+  RoundingInput,
   TimeEntryLite,
 } from './types'
-
-function periodHalf(run: PayrollRun, settings: CompanySettings): PeriodHalf {
-  if (settings.pay_frequency === 'monthly') return 'full'
-  const sameMonth = run.period_start.slice(0, 7) === run.period_end.slice(0, 7)
-  const startDay = Number(run.period_start.slice(8, 10))
-  const endDay = Number(run.period_end.slice(8, 10))
-  const [y, m] = run.period_end.split('-').map(Number)
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
-  // 'full' means EXACTLY a calendar month — anything else that crosses the
-  // 15th/16th boundary would silently pay a full month's basic for a partial
-  // period, so refuse it instead of guessing.
-  if (sameMonth && startDay === 1 && endDay === lastDay) return 'full'
-  if (sameMonth && endDay <= 15) return 'first'
-  if (sameMonth && startDay >= 16) return 'second'
-  throw new Error(
-    'Semi-monthly payroll periods must be the 1st–15th, the 16th–end of month, or one exact calendar month. Adjust the run dates.',
-  )
-}
 
 export interface RunComputationResult {
   computed: number
   totals: Record<string, number>
+  /** Run-level notes ('This run') and employees left out of the run; per-payslip warnings live in each payslip's trace. */
   warnings: { employee: string; warnings: string[] }[]
 }
 
-export async function computeRun(run: PayrollRun): Promise<RunComputationResult> {
-  const settings = await getSettings()
-  const tables = await getStatutoryTables(run.period_end)
-  const holidays = (await getHolidaysBetween(run.period_start, run.period_end)).map(
-    (h): HolidayLite => ({ holiday_date: h.holiday_date, name: h.name, kind: h.kind }),
-  )
+/** Finalized payslip facts the tax year and the 13th month are built from. */
+export type YearPayslip = Pick<
+  Payslip,
+  | 'employee_id'
+  | 'payroll_run_id'
+  | 'run_type'
+  | 'period_month'
+  | 'pay_date'
+  | 'is_minimum_wage_earner'
+  | 'earnings'
+  | 'basic_pay'
+  | 'gross_pay'
+  | 'sss_ee'
+  | 'sss_mpf_ee'
+  | 'philhealth_ee'
+  | 'pagibig_ee'
+  | 'union_dues'
+  | 'withholding_tax'
+  | 'net_pay'
+  | 'period_end'
+> & { payroll_runs?: { annualize?: boolean } | null }
 
-  const engineSettings: PayrollSettingsInput = {
-    standardHoursPerDay: Number(settings.standard_hours_per_day),
-    workingDaysDivisor: Number(settings.working_days_divisor),
-    gracePeriodMinutes: settings.grace_period_minutes,
-    nightDiffRate: Number(settings.night_diff_rate),
-    contributionTiming: settings.contribution_deduction_timing,
-    payFrequency: settings.pay_frequency,
-    minimumWageDaily: Number(settings.minimum_wage_daily),
+const YEAR_PAYSLIP_COLUMNS =
+  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, net_pay, payroll_runs!inner(status, annualize)'
+
+/**
+ * Finalized payslips of one client whose payroll month falls in `year` —
+ * the 13th month counts basic pay EARNED in the calendar year (PD 851).
+ */
+export async function fetchFinalizedPayslipsForYear(entityId: string, year: number): Promise<YearPayslip[]> {
+  return fetchAll<YearPayslip>((from, to) =>
+    supabase
+      .from('payslips')
+      .select(YEAR_PAYSLIP_COLUMNS)
+      .eq('entity_id', entityId)
+      .in('payroll_runs.status', ['finalized', 'paid'])
+      .gte('period_month', `${year}-01-01`)
+      .lte('period_month', `${year}-12-01`)
+      .order('id')
+      .range(from, to),
+  )
+}
+
+/**
+ * Finalized payslips of one client PAID in `year` — the tax year: BIR
+ * withholding on compensation is reported when paid, so a Dec 16–31 payroll
+ * released on Jan 5 belongs to the next year's 2316 and alphalist.
+ */
+export async function fetchFinalizedPayslipsForTaxYear(entityId: string, year: number): Promise<YearPayslip[]> {
+  return fetchAll<YearPayslip>((from, to) =>
+    supabase
+      .from('payslips')
+      .select(YEAR_PAYSLIP_COLUMNS)
+      .eq('entity_id', entityId)
+      .in('payroll_runs.status', ['finalized', 'paid'])
+      .gte('pay_date', `${year}-01-01`)
+      .lte('pay_date', `${year}-12-31`)
+      .order('id')
+      .range(from, to),
+  )
+}
+
+export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
+  return {
+    payMonth: p.pay_date ? `${p.pay_date.slice(0, 7)}-01` : (p.period_month ?? ''),
+    isMwe: p.is_minimum_wage_earner,
+    earnings: p.earnings.map((l) => ({ amount: Number(l.amount), bir: l.bir, taxable: l.taxable })),
+    contributionsEe: Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee),
+    unionDues: Number(p.union_dues),
+    withholdingTax: Number(p.withholding_tax),
   }
-  const half = periodHalf(run, settings)
+}
 
-  // Employees on payroll for the period: hired on/before the period end and
-  // not separated before the period start.
-  const { data: empData, error: empErr } = await supabase
-    .from('employees')
+export async function fetchTaxYears(entityId: string, year: number): Promise<EmployeeTaxYear[]> {
+  const { data, error } = await supabase
+    .from('employee_tax_years')
     .select('*')
-    .lte('hire_date', run.period_end)
-    .order('last_name')
-  if (empErr) throw empErr
-  const employees = ((empData ?? []) as Employee[]).filter(
-    (e) => !e.separation_date || e.separation_date >= run.period_start,
+    .eq('entity_id', entityId)
+    .eq('year', year)
+  if (error) throw error
+  return (data ?? []) as EmployeeTaxYear[]
+}
+
+/** Employees a run covers: right client, frequency, employment overlapping the period. */
+export function employeesForRun(run: PayrollRun, all: Employee[]): Employee[] {
+  const picked = run.employee_ids && run.employee_ids.length > 0 ? new Set(run.employee_ids) : null
+  return all.filter((e) => {
+    if (picked && !picked.has(e.id)) return false
+    if (e.hire_date > run.period_end) return false
+    // A final pay released after the period holding the last day covers the
+    // employees picked for it (one-time items and tax adjustment only).
+    if (e.separation_date && e.separation_date < run.period_start && !(run.run_type === 'final_pay' && picked)) {
+      return false
+    }
+    if (run.run_type !== 'thirteenth_month' && e.pay_frequency !== run.pay_frequency) return false
+    return true
+  })
+}
+
+/** Separated on or before the end of the run's period. */
+function separatedBy(e: Employee, run: PayrollRun): boolean {
+  return !!e.separation_date && e.separation_date <= run.period_end
+}
+
+/** Final pay released after the employee's last day: nothing worked to pay. */
+function extrasOnly(e: Employee, run: PayrollRun): boolean {
+  return run.run_type === 'final_pay' && !!e.separation_date && e.separation_date < run.period_start
+}
+
+const CONTRIBUTION_COLUMNS =
+  'sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_er, pagibig_er'
+
+type MonthSlip = Pick<
+  Payslip,
+  | 'employee_id'
+  | 'sss_ee'
+  | 'sss_mpf_ee'
+  | 'philhealth_ee'
+  | 'pagibig_ee'
+  | 'sss_er'
+  | 'sss_mpf_er'
+  | 'sss_ec_er'
+  | 'philhealth_er'
+  | 'pagibig_er'
+>
+
+function sumContributions(slips: MonthSlip[]): ContributionSet {
+  const n = (f: (p: MonthSlip) => unknown) => slips.reduce((s, p) => s + Number(f(p) ?? 0), 0)
+  return {
+    sssEe: n((p) => p.sss_ee),
+    sssMpfEe: n((p) => p.sss_mpf_ee),
+    philhealthEe: n((p) => p.philhealth_ee),
+    pagibigEe: n((p) => p.pagibig_ee),
+    sssEr: n((p) => p.sss_er),
+    sssMpfEr: n((p) => p.sss_mpf_er),
+    sssEcEr: n((p) => p.sss_ec_er),
+    philhealthEr: n((p) => p.philhealth_er),
+    pagibigEr: n((p) => p.pagibig_er),
+  }
+}
+
+function roundingFor(entity: Entity, emp: Employee, run: PayrollRun): RoundingInput {
+  const applies =
+    entity.net_pay_rounding !== 'none' &&
+    (entity.rounding_scope === 'all' || emp.payment_method === 'cash')
+  return {
+    mode: applies ? entity.net_pay_rounding : 'none',
+    // A balance left from an earlier carry-forward is always paid out, even
+    // after the client switches rounding off or the employee to bank pay.
+    carryIn: Number(emp.rounding_balance),
+    settle: run.run_type === 'final_pay' || separatedBy(emp, run),
+  }
+}
+
+export async function computeRun(run: PayrollRun, selected: Entity): Promise<RunComputationResult> {
+  if (run.entity_id !== selected.id) throw new Error('This run belongs to another client.')
+  // Another admin may have changed the client's pay policy since this
+  // console loaded it: compute from the current record.
+  const entity = await getEntity(run.entity_id)
+  const isThirteenth = run.run_type === 'thirteenth_month'
+  const payrollYear = Number(run.period_month.slice(0, 4))
+  const taxYear = Number(run.pay_date.slice(0, 4))
+  const warnings: { employee: string; warnings: string[] }[] = []
+  // contributions follow the period worked; withholding follows the pay
+  // date, like the tax year
+  const [periodTables, payTables] = await Promise.all([
+    getStatutoryTables(run.period_end),
+    run.pay_date === run.period_end ? null : getStatutoryTables(run.pay_date),
+  ])
+  const tables = payTables
+    ? { ...periodTables, bir_wht: payTables.bir_wht, bir_annual: payTables.bir_annual }
+    : periodTables
+  const holidays: HolidayLite[] = isThirteenth
+    ? []
+    : (await getHolidaysBetween(entity.id, run.period_start, run.period_end)).map((h) => ({
+        holiday_date: h.holiday_date,
+        name: h.name,
+        kind: h.kind,
+      }))
+
+  const candidates = employeesForRun(
+    run,
+    await fetchAll<Employee>((from, to) =>
+      supabase
+        .from('employees')
+        .select('*')
+        .eq('entity_id', entity.id)
+        .lte('hire_date', run.period_end)
+        .order('last_name')
+        .order('id')
+        .range(from, to),
+    ),
   )
 
-  const year = run.period_end.slice(0, 4)
+  // Never pay the same days twice: anyone a finalized run already paid for
+  // part of this period is left out (finalize enforces the same rule).
+  let employees = candidates
+  if (!isThirteenth) {
+    const paid = await fetchAll<{ employee_id: string; period_start: string; period_end: string }>((from, to) =>
+      supabase
+        .from('payslips')
+        .select('employee_id, period_start, period_end, payroll_runs!inner(status)')
+        .eq('entity_id', entity.id)
+        .neq('payroll_run_id', run.id)
+        .neq('run_type', 'thirteenth_month')
+        .in('payroll_runs.status', ['finalized', 'paid'])
+        .lte('period_start', run.period_end)
+        .gte('period_end', run.period_start)
+        .order('id')
+        .range(from, to),
+    )
+    const paidBy = new Map(paid.map((p) => [p.employee_id, p]))
+    employees = candidates.filter((e) => {
+      const p = paidBy.get(e.id)
+      if (!p) return true
+      warnings.push({
+        employee: `${e.first_name} ${e.last_name}`,
+        warnings: [
+          `Left out: already paid for ${p.period_start} to ${p.period_end} in another finalized payroll. Pay any remaining days in a run that doesn't overlap that period.`,
+        ],
+      })
+      return false
+    })
+  }
+  const ids = new Set(employees.map((e) => e.id))
+
+  // A final pay after the last day only carries one-time items and the tax
+  // adjustment: flag anyone whose last days were never paid, and pick up
+  // the separation month's contributions to check that month was completed.
+  const slipWarnings = new Map<string, string[]>()
+  const separationMonth = new Map<string, { label: string; already: ContributionSet }>()
+  for (const e of employees.filter((x) => extrasOnly(x, run))) {
+    const separation = e.separation_date as string
+    const { data: last, error: lastErr } = await supabase
+      .from('payslips')
+      .select('period_end, payroll_runs!inner(status)')
+      .eq('employee_id', e.id)
+      .neq('run_type', 'thirteenth_month')
+      .in('payroll_runs.status', ['finalized', 'paid'])
+      .order('period_end', { ascending: false })
+      .limit(1)
+    if (lastErr) throw lastErr
+    const paidThrough = (last?.[0] as { period_end: string } | undefined)?.period_end
+    if (!paidThrough || paidThrough < separation) {
+      slipWarnings.set(e.id, [
+        `Separated ${separation}, but finalized payrolls only paid ${paidThrough ? `through ${paidThrough}` : 'nothing yet'}: this final pay (after the last day) carries one-time items and the tax adjustment only. Use a final-pay period that includes the last day to pay the remaining days.`,
+      ])
+      continue
+    }
+    // the last day was paid: did that payroll complete the month's contributions?
+    const sepMonth = `${separation.slice(0, 7)}-01`
+    const { data: sepSlips, error: sepErr } = await supabase
+      .from('payslips')
+      .select(`employee_id, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status)`)
+      .eq('employee_id', e.id)
+      .eq('period_month', sepMonth)
+      .neq('run_type', 'thirteenth_month')
+      .neq('payroll_run_id', run.id)
+      .in('payroll_runs.status', ['finalized', 'paid'])
+    if (sepErr) throw sepErr
+    if ((sepSlips ?? []).length > 0) {
+      separationMonth.set(e.id, {
+        label: new Date(`${sepMonth}T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
+        already: sumContributions(sepSlips as unknown as MonthSlip[]),
+      })
+    }
+  }
+
+  const [entries, leaves, allowances, deductions, adjustments] = await Promise.all([
+    isThirteenth
+      ? Promise.resolve([] as (TimeEntryLite & { employee_id: string })[])
+      : fetchAll<TimeEntryLite & { employee_id: string }>((from, to) =>
+          supabase
+            .from('time_entries')
+            .select('employee_id, work_date, clock_in, clock_out')
+            .eq('entity_id', entity.id)
+            .gte('work_date', run.period_start)
+            .lte('work_date', run.period_end)
+            .order('id')
+            .range(from, to),
+        ),
+    isThirteenth
+      ? Promise.resolve([])
+      : fetchAll<{ employee_id: string; start_date: string; end_date: string; leave_types: { name: string; paid: boolean } | null }>(
+          (from, to) =>
+            supabase
+              .from('leave_requests')
+              .select('employee_id, start_date, end_date, leave_types(name, paid)')
+              .eq('entity_id', entity.id)
+              .eq('status', 'approved')
+              .lte('start_date', run.period_end)
+              .gte('end_date', run.period_start)
+              .order('id')
+              .range(from, to),
+        ),
+    fetchAll<EmployeeAllowance>((from, to) =>
+      supabase
+        .from('employee_allowances')
+        .select('*, employees!inner(entity_id)')
+        .eq('employees.entity_id', entity.id)
+        .eq('active', true)
+        .order('id')
+        .range(from, to),
+    ),
+    isThirteenth
+      ? Promise.resolve([] as RecurringDeduction[])
+      : fetchAll<RecurringDeduction>((from, to) =>
+          supabase
+            .from('recurring_deductions')
+            .select('*, employees!inner(entity_id)')
+            .eq('employees.entity_id', entity.id)
+            .eq('active', true)
+            .order('id')
+            .range(from, to),
+        ),
+    fetchAll<PayrollAdjustment>((from, to) =>
+      supabase.from('payroll_adjustments').select('*').eq('payroll_run_id', run.id).order('id').range(from, to),
+    ),
+  ])
+
+  // Year-to-date data. 13th month: basic earned in the payroll year.
+  // Annualization (the run's flag, or the employee separating within the
+  // period — the last pay of a separated employee settles their tax):
+  // everything PAID in the tax year.
+  // 13th month: the exemption cap is per TAX year, and a 13th month paid
+  // after the year was annualized re-annualizes.
+  const annualizes = (e: Employee) => !isThirteenth && (run.annualize || separatedBy(e, run))
+  const needsTaxYear = isThirteenth || employees.some(annualizes)
+  const [yearSlips, taxSlips, taxYears, monthSlips] = await Promise.all([
+    isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
+    needsTaxYear ? fetchFinalizedPayslipsForTaxYear(entity.id, taxYear) : Promise.resolve([] as YearPayslip[]),
+    needsTaxYear ? fetchTaxYears(entity.id, taxYear) : Promise.resolve([] as EmployeeTaxYear[]),
+    // contributions already deducted this payroll month (completing months
+    // around hires and separations)
+    isThirteenth
+      ? Promise.resolve([] as MonthSlip[])
+      : fetchAll<MonthSlip>((from, to) =>
+          supabase
+            .from('payslips')
+            .select(`employee_id, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status)`)
+            .eq('entity_id', entity.id)
+            .eq('period_month', run.period_month)
+            .neq('payroll_run_id', run.id)
+            .neq('run_type', 'thirteenth_month')
+            .in('payroll_runs.status', ['finalized', 'paid'])
+            .order('id')
+            .range(from, to),
+        ),
+  ])
+
+  const groupBy = <T extends { employee_id: string }>(rows: T[]) => {
+    const m = new Map<string, T[]>()
+    for (const r of rows) {
+      if (!ids.has(r.employee_id)) continue
+      const list = m.get(r.employee_id) ?? []
+      list.push(r)
+      m.set(r.employee_id, list)
+    }
+    return m
+  }
+  const entriesBy = groupBy(entries)
+  const leavesBy = groupBy(leaves)
+  const allowancesBy = groupBy(allowances)
+  const deductionsBy = groupBy(deductions)
+  const adjustmentsBy = groupBy(adjustments)
+  const yearBy = groupBy(yearSlips.filter((p) => p.payroll_run_id !== run.id))
+  const taxBy = groupBy(taxSlips.filter((p) => p.payroll_run_id !== run.id))
+  const monthBy = groupBy(monthSlips)
 
   const results: { employee: Employee; slip: PayslipComputation }[] = []
-  const warnings: { employee: string; warnings: string[] }[] = []
 
   for (const emp of employees) {
-    const [entriesRes, leavesRes, allowancesRes, deductionsRes] = await Promise.all([
-      supabase
-        .from('time_entries')
-        .select('work_date, clock_in, clock_out')
-        .eq('employee_id', emp.id)
-        .gte('work_date', run.period_start)
-        .lte('work_date', run.period_end),
-      supabase
-        .from('leave_requests')
-        .select('start_date, end_date, status, leave_types(name, paid)')
-        .eq('employee_id', emp.id)
-        .eq('status', 'approved')
-        .lte('start_date', run.period_end)
-        .gte('end_date', run.period_start),
-      supabase.from('employee_allowances').select('*').eq('employee_id', emp.id).eq('active', true),
-      supabase
-        .from('recurring_deductions')
-        .select('*')
-        .eq('employee_id', emp.id)
-        .eq('active', true),
-    ])
-
-    const entries = (entriesRes.data ?? []) as TimeEntryLite[]
-    const leaves: LeaveLite[] = (leavesRes.data ?? []).map((l) => {
-      const lt = l.leave_types as unknown as { name: string; paid: boolean } | null
-      return {
-        start_date: l.start_date as string,
-        end_date: l.end_date as string,
-        paid: lt?.paid ?? false,
-        type_name: lt?.name ?? 'Leave',
-      }
-    })
-
-    const days =
-      run.run_type === 'thirteenth_month'
-        ? []
-        : computeAttendance({
-            periodStart: run.period_start,
-            periodEnd: run.period_end,
-            schedule: emp.work_schedule,
-            standardHoursPerDay: engineSettings.standardHoursPerDay,
-            gracePeriodMinutes: engineSettings.gracePeriodMinutes,
-            entries,
-            holidays,
-            approvedLeaves: leaves,
-          })
-
-    let ytdBasicPay = 0
-    if (run.run_type === 'thirteenth_month') {
-      const { data: ytdRows } = await supabase
-        .from('payslips')
-        .select('basic_pay, payroll_run_id, payroll_runs!inner(status, period_start, run_type)')
-        .eq('employee_id', emp.id)
-        .in('payroll_runs.status', ['finalized', 'paid'])
-        .eq('payroll_runs.run_type', 'regular')
-        .gte('payroll_runs.period_start', `${year}-01-01`)
-        .lte('payroll_runs.period_start', `${year}-12-31`)
-      ytdBasicPay = (ytdRows ?? []).reduce((s, r) => s + Number(r.basic_pay), 0)
+    const engineSettings: PayrollSettingsInput = {
+      standardHoursPerDay: Number(entity.standard_hours_per_day),
+      workingDaysDivisor: Number(emp.days_per_year ?? entity.working_days_divisor),
+      gracePeriodMinutes: entity.grace_period_minutes,
+      nightDiffRate: Number(entity.night_diff_rate),
+      contributionTiming: entity.contribution_deduction_timing,
+      payFrequency: run.pay_frequency ?? emp.pay_frequency,
+      minimumWageDaily: Number(entity.minimum_wage_daily),
     }
+
+    const leaveList: LeaveLite[] = (leavesBy.get(emp.id) ?? []).map((l) => ({
+      start_date: l.start_date,
+      end_date: l.end_date,
+      paid: l.leave_types?.paid ?? false,
+      type_name: l.leave_types?.name ?? 'Leave',
+    }))
+
+    const days = isThirteenth
+      ? []
+      : computeAttendance({
+          periodStart: run.period_start,
+          periodEnd: run.period_end,
+          schedule: emp.work_schedule,
+          standardHoursPerDay: engineSettings.standardHoursPerDay,
+          gracePeriodMinutes: engineSettings.gracePeriodMinutes,
+          entries: entriesBy.get(emp.id) ?? [],
+          holidays,
+          approvedLeaves: leaveList,
+        })
+
+    const empAdjustments = adjustmentsBy.get(emp.id) ?? []
+    // a final pay after the last day carries one-time items only
+    const recurring = extrasOnly(emp, run)
+      ? []
+      : (deductionsBy.get(emp.id) ?? []).filter(
+          (d) => (!d.start_date || d.start_date <= run.period_end) && (!d.end_date || d.end_date >= run.period_start),
+        )
+
+    const empYear = yearBy.get(emp.id) ?? []
+    const empTax = taxBy.get(emp.id) ?? []
+    const empMonth = monthBy.get(emp.id) ?? []
+    // the year's tax was already trued up (annualizing run, final pay, or
+    // the payroll that included the separation)
+    const taxYearAnnualized = empTax.some(
+      (p) =>
+        p.run_type !== 'thirteenth_month' &&
+        (p.payroll_runs?.annualize || p.run_type === 'final_pay' || (!!emp.separation_date && (p.period_end ?? '') >= emp.separation_date)),
+    )
+    const prior = priorFromTaxYear(taxYears.find((t) => t.employee_id === emp.id))
+    const peraCredit = Number(taxYears.find((t) => t.employee_id === emp.id)?.pera_tax_credit ?? 0)
+    const linesSum = (bucket: BirBucket) =>
+      empYear.reduce(
+        (s, p) => s + p.earnings.filter((l) => l.bir === bucket).reduce((a, l) => a + Number(l.amount), 0),
+        0,
+      )
 
     const slip = computePayslip({
       employee: {
@@ -145,39 +473,120 @@ export async function computeRun(run: PayrollRun): Promise<RunComputationResult>
         dailyRate: Number(emp.daily_rate),
         isMinimumWageEarner: emp.is_minimum_wage_earner,
         schedule: emp.work_schedule,
-        allowances: (allowancesRes.data ?? []).map((a) => ({
-          label: a.label as string,
-          monthlyAmount: Number(a.monthly_amount),
-          taxable: a.taxable as boolean,
-          deMinimis: a.de_minimis as boolean,
+        allowances: (allowancesBy.get(emp.id) ?? []).map((a) => ({
+          label: a.label,
+          amount: Number(a.amount),
+          category: a.category,
+          basis: a.basis,
         })),
-        extraDeductions:
-          run.run_type === 'thirteenth_month'
-            ? []
-            : (deductionsRes.data ?? []).map((d) => ({
-                id: d.id as string,
-                label: d.label as string,
-                category: d.category as string,
+        extraDeductions: isThirteenth
+          ? []
+          : [
+              ...recurring.map((d) => ({
+                id: d.id,
+                label: d.label,
+                category: d.category,
                 // Never deduct more than what's left of a tracked balance.
                 amount:
                   d.balance !== null && d.balance !== undefined
                     ? Math.min(Number(d.amount_per_period), Math.max(0, Number(d.balance)))
                     : Number(d.amount_per_period),
               })),
+              ...empAdjustments
+                .filter((a) => a.kind === 'deduction')
+                .map((a) => ({ id: a.id, label: a.label, category: a.category, amount: Number(a.amount), oneTime: true })),
+            ],
+        oneTimeEarnings: empAdjustments
+          .filter((a) => a.kind === 'earning')
+          .map((a) => ({ id: a.id, label: a.label, amount: Number(a.amount), category: a.category as BirBucket })),
       },
       settings: engineSettings,
-      period: { start: run.period_start, end: run.period_end, half },
+      period: {
+        start: run.period_start,
+        end: run.period_end,
+        index: run.period_index,
+        count: run.periods_in_month,
+      },
       tables,
       days,
       runType: run.run_type,
-      ytdBasicPay,
+      rounding: roundingFor(entity, emp, run),
+      annualization:
+        annualizes(emp) || (isThirteenth && taxYearAnnualized)
+          ? {
+              payMonth: `${run.pay_date.slice(0, 7)}-01`,
+              ytd: empTax.map(toAnnualFact),
+              prior,
+              peraCredit,
+            }
+          : undefined,
+      extrasOnly: extrasOnly(emp, run),
+      separationMonth: separationMonth.get(emp.id),
+      monthContributions: isThirteenth
+        ? undefined
+        : {
+            already: sumContributions(empMonth),
+            closes: run.period_index >= run.periods_in_month || separatedBy(emp, run),
+            opens: empMonth.length === 0,
+          },
+      ytdBasicPay: empYear
+        .filter((p) => p.run_type !== 'thirteenth_month')
+        .reduce((s, p) => s + Number(p.basic_pay), 0),
+      ytdThirteenthPaid: empYear
+        .filter((p) => p.run_type === 'thirteenth_month')
+        .reduce((s, p) => s + Number(p.gross_pay), 0),
+      ytdOtherBenefits: linesSum('other_benefits'),
+      priorThirteenthOtherBenefitsExempt: prior.thirteenthOtherBenefitsExempt,
+      taxYearBenefitsPaid: isThirteenth
+        ? empTax.reduce(
+            (s, p) =>
+              s +
+              p.earnings
+                .filter((l) => l.bir === 'thirteenth' || l.bir === 'other_benefits')
+                .reduce((a, l) => a + Number(l.amount), 0),
+            0,
+          )
+        : undefined,
     })
+    slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
 
     results.push({ employee: emp, slip })
-    if (slip.trace.warnings.length > 0) {
-      warnings.push({ employee: `${emp.first_name} ${emp.last_name}`, warnings: slip.trace.warnings })
+  }
+
+  // Regular runs of one frequency must agree on how many pay periods the
+  // month has, or contributions get split into the wrong number of parts.
+  if (run.run_type === 'regular') {
+    const { data: siblings } = await supabase
+      .from('payroll_runs')
+      .select('period_index, periods_in_month')
+      .eq('entity_id', entity.id)
+      .eq('run_type', 'regular')
+      .eq('pay_frequency', run.pay_frequency ?? '')
+      .eq('period_month', run.period_month)
+      .neq('id', run.id)
+    const mismatch = (siblings ?? []).some((s) => s.periods_in_month !== run.periods_in_month)
+    if (mismatch) {
+      warnings.push({
+        employee: 'This run',
+        warnings: [
+          'Another regular run of this month uses a different number of pay periods — monthly contributions will not split correctly. Make the period counts match.',
+        ],
+      })
     }
   }
+
+  // Mark the draft as being computed. Any change to its inputs meanwhile
+  // (database staleness triggers) wipes this token, and the totals update
+  // at the end then refuses to complete the draft.
+  const token = crypto.randomUUID()
+  const { data: marked, error: tokErr } = await supabase
+    .from('payroll_runs')
+    .update({ totals: { computing: token } })
+    .eq('id', run.id)
+    .eq('status', 'draft')
+    .select('id')
+  if (tokErr) throw tokErr
+  if (!marked || marked.length === 0) throw new Error('This run is no longer a draft.')
 
   // Replace existing draft payslips for this run.
   const { error: delErr } = await supabase.from('payslips').delete().eq('payroll_run_id', run.id)
@@ -186,12 +595,9 @@ export async function computeRun(run: PayrollRun): Promise<RunComputationResult>
   const rows = results.map(({ employee: e, slip }) => ({
     payroll_run_id: run.id,
     employee_id: e.id,
-    // Run info denormalized onto the payslip so employees never need read
-    // access to payroll_runs rows (which carry company-wide totals/notes).
-    period_start: run.period_start,
-    period_end: run.period_end,
-    pay_date: run.pay_date,
-    run_type: run.run_type,
+    employee_payroll_seq: e.payroll_seq,
+    payment_method: e.payment_method,
+    is_minimum_wage_earner: e.is_minimum_wage_earner,
     employee_snapshot: {
       name: `${e.first_name} ${e.middle_name ? e.middle_name + ' ' : ''}${e.last_name}${e.suffix ? ' ' + e.suffix : ''}`,
       employee_no: e.employee_no,
@@ -202,9 +608,16 @@ export async function computeRun(run: PayrollRun): Promise<RunComputationResult>
       pagibig_no: e.pagibig_no,
       tin: e.tin,
       pay_type: e.pay_type,
+      pay_frequency: e.pay_frequency,
+      payment_method: e.payment_method,
       monthly_rate: e.monthly_rate,
       daily_rate: e.daily_rate,
       hire_date: e.hire_date,
+      employer: {
+        name: entity.name,
+        tin: entity.tin,
+        address: entity.registered_address,
+      },
     },
     days_worked: slip.daysWorked,
     hours_worked: slip.hoursWorked,
@@ -228,63 +641,66 @@ export async function computeRun(run: PayrollRun): Promise<RunComputationResult>
     pagibig_ee: slip.pagibigEe,
     pagibig_er: slip.pagibigEr,
     withholding_tax: slip.withholdingTax,
+    union_dues: slip.unionDues,
     other_deductions_total: slip.otherDeductionsTotal,
     total_deductions: slip.totalDeductions,
     net_pay: slip.netPay,
+    rounding_adjustment: slip.roundingAdjustment,
+    rounding_carry_in: slip.roundingCarryIn,
+    rounding_carry_out: slip.roundingCarryOut,
     computation_trace: slip.trace,
   }))
 
-  if (rows.length > 0) {
-    const { error: insErr } = await supabase.from('payslips').insert(rows)
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error: insErr } = await supabase.from('payslips').insert(rows.slice(i, i + 200))
     if (insErr) throw insErr
   }
 
+  const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((s, r) => s + f(r), 0)
+  const cash = rows.filter((r) => r.payment_method === 'cash')
   const totals: Record<string, number> = {
     employees: rows.length,
-    gross: sum(rows.map((r) => r.gross_pay)),
-    net: sum(rows.map((r) => r.net_pay)),
-    withholding_tax: sum(rows.map((r) => r.withholding_tax)),
-    sss_ee: sum(rows.map((r) => r.sss_ee + r.sss_mpf_ee)),
-    sss_er: sum(rows.map((r) => r.sss_er + r.sss_mpf_er + r.sss_ec_er)),
-    philhealth_ee: sum(rows.map((r) => r.philhealth_ee)),
-    philhealth_er: sum(rows.map((r) => r.philhealth_er)),
-    pagibig_ee: sum(rows.map((r) => r.pagibig_ee)),
-    pagibig_er: sum(rows.map((r) => r.pagibig_er)),
+    gross: sum((r) => r.gross_pay),
+    net: sum((r) => r.net_pay),
+    withholding_tax: sum((r) => r.withholding_tax),
+    sss_ee: sum((r) => r.sss_ee + r.sss_mpf_ee),
+    sss_er: sum((r) => r.sss_er + r.sss_mpf_er + r.sss_ec_er),
+    philhealth_ee: sum((r) => r.philhealth_ee),
+    philhealth_er: sum((r) => r.philhealth_er),
+    pagibig_ee: sum((r) => r.pagibig_ee),
+    pagibig_er: sum((r) => r.pagibig_er),
+    rounding: sum((r) => r.rounding_adjustment),
+    cash_employees: cash.length,
+    cash_net: cash.reduce((s, r) => s + r.net_pay, 0),
     employer_cost: 0,
   }
-  totals.employer_cost = round2(totals.gross + totals.sss_er + totals.philhealth_er + totals.pagibig_er)
-  for (const k of Object.keys(totals)) totals[k] = round2(totals[k])
+  totals.employer_cost = totals.gross + totals.sss_er + totals.philhealth_er + totals.pagibig_er + totals.rounding
+  for (const k of Object.keys(totals)) totals[k] = Math.round((totals[k] + Number.EPSILON) * 100) / 100
 
-  const { error: updErr } = await supabase
+  const { data: done, error: updErr } = await supabase
     .from('payroll_runs')
     .update({ totals })
     .eq('id', run.id)
+    .eq('totals->>computing', token)
+    .select('id')
   if (updErr) throw updErr
+  if (!done || done.length === 0) {
+    throw new Error('Attendance, adjustments or settings changed while this payroll was being computed. Compute it again.')
+  }
 
   return { computed: rows.length, totals, warnings }
 }
 
-function sum(ns: number[]): number {
-  return ns.reduce((a, b) => a + b, 0)
-}
-function round2(v: number): number {
-  return Math.round((v + Number.EPSILON) * 100) / 100
-}
-
 export async function finalizeRun(run: PayrollRun): Promise<void> {
-  // Atomic DB RPC: the draft->finalized flip and the recurring-deduction
-  // balance decrements happen in ONE transaction, exactly once per
-  // transition — a double-click, stale screen, or mid-flight network
-  // failure can neither double-decrement nor leave half-applied state.
+  // Atomic DB RPC: the draft->finalized flip, loan balance decrements and
+  // the cash-rounding carry chain settle in ONE transaction, exactly once.
   const { error } = await supabase.rpc('finalize_payroll_run', { p_run: run.id })
   if (error) throw error
 }
 
 export async function reopenRun(runId: string): Promise<void> {
-  // Atomic DB RPC: flips finalized/paid -> draft and restores the loan
-  // balances this run had decremented, in one transaction. Manually paused
-  // deductions stay paused; only loans auto-deactivated at zero balance are
-  // re-activated.
+  // Atomic DB RPC: flips finalized/paid -> draft and restores loan balances
+  // and rounding carries this run had moved, in one transaction.
   const { error } = await supabase.rpc('reopen_payroll_run', { p_run: runId })
   if (error) throw error
 }

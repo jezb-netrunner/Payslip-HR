@@ -3,10 +3,13 @@ import { Plus } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, Textarea } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
-import type { LeaveRequest, LeaveType } from '../../lib/db'
-import { fmtDate } from '../../lib/format'
-import { eachDate, isoWeekday, todayManila } from '../../lib/manila'
+import { getHolidaysBetween } from '../../lib/api'
+import type { Holiday, LeaveRequest, LeaveType } from '../../lib/db'
+import { fmtDate, plural } from '../../lib/format'
+import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
+import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { errorMessage } from '../../lib/errors'
 
 export default function MyLeaves() {
   const { employee } = useAuth()
@@ -14,6 +17,7 @@ export default function MyLeaves() {
   const [types, setTypes] = useState<LeaveType[]>([])
   const [requests, setRequests] = useState<LeaveRequest[]>([])
   const [entitlements, setEntitlements] = useState<Record<string, number>>({})
+  const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -21,38 +25,51 @@ export default function MyLeaves() {
 
   const year = Number(todayManila().slice(0, 4))
 
+  const [loadError, setLoadError] = useState('')
+
   const load = useCallback(async () => {
     if (!employee) return
-    const [{ data: t }, { data: r }, { data: ents }] = await Promise.all([
-      supabase.from('leave_types').select('*').eq('active', true).order('code'),
-      supabase
-        .from('leave_requests')
-        .select('*')
-        .eq('employee_id', employee.id)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('employee_leave_entitlements')
-        .select('*')
-        .eq('employee_id', employee.id)
-        .eq('year', year),
-    ])
-    setTypes((t ?? []) as LeaveType[])
-    setRequests((r ?? []) as LeaveRequest[])
-    const map: Record<string, number> = {}
-    for (const e of ents ?? []) map[e.leave_type_id as string] = Number(e.days)
-    setEntitlements(map)
-    setLoading(false)
+    setLoadError('')
+    try {
+      const [tRes, rRes, eRes, hols] = await Promise.all([
+        supabase.from('leave_types').select('*').eq('active', true).order('code'),
+        supabase
+          .from('leave_requests')
+          .select('*')
+          .eq('employee_id', employee.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('employee_leave_entitlements')
+          .select('*')
+          .eq('employee_id', employee.id)
+          .eq('year', year),
+        // this year and next: leave can be filed ahead and across New Year
+        getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year + 1}-12-31`),
+      ])
+      // a failed read must not show as zero balances
+      const failed = tRes.error ?? rRes.error ?? eRes.error
+      if (failed) throw failed
+      setHolidays(hols)
+      setTypes((tRes.data ?? []) as LeaveType[])
+      setRequests((rRes.data ?? []) as LeaveRequest[])
+      const map: Record<string, number> = {}
+      for (const e of eRes.data ?? []) map[e.leave_type_id as string] = Number(e.days)
+      setEntitlements(map)
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Failed to load your leaves'))
+    } finally {
+      setLoading(false)
+    }
   }, [employee, year])
 
   useEffect(() => {
     load()
   }, [load])
 
+  /** Leave days charged: scheduled workdays that aren't holidays. */
   function workdayCount(start: string, end: string): number {
-    if (!employee || end < start) return 0
-    return eachDate(start, end).filter((d) =>
-      employee.work_schedule.days.includes(isoWeekday(d)),
-    ).length
+    if (!employee) return 0
+    return leaveWorkdays(start, end, employee.work_schedule.days, holidays)
   }
 
   async function submit() {
@@ -79,36 +96,47 @@ export default function MyLeaves() {
       setForm({ type: '', start: todayManila(), end: todayManila(), reason: '' })
       await load()
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : 'Failed to submit')
+      toast('error', errorMessage(err, 'Failed to submit'))
     } finally {
       setBusy(false)
     }
   }
 
   async function cancel(id: string) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('leave_requests')
       .update({ status: 'cancelled' })
       .eq('id', id)
-    if (error) toast('error', error.message)
-    else {
-      toast('success', 'Request cancelled.')
-      await load()
-    }
+      .eq('status', 'pending')
+      .select('id')
+    if (error) toast('error', errorMessage(error, 'Could not cancel the request'))
+    else if (!data || data.length === 0) toast('error', 'This request was already reviewed — it can no longer be cancelled.')
+    else toast('success', 'Request cancelled.')
+    await load()
   }
 
+  if (loadError) {
+    return (
+      <Card>
+        <p className="text-sm text-rose-600">
+          {loadError}{' '}
+          <button type="button" onClick={load} className="font-semibold underline">
+            Try again
+          </button>
+        </p>
+      </Card>
+    )
+  }
   if (loading || !employee) return <Spinner />
 
   const usedByType: Record<string, number> = {}
   for (const r of requests) {
-    if (r.status === 'approved' && r.start_date.slice(0, 4) === String(year)) {
-      usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + Number(r.days)
-    }
+    if (r.status !== 'approved') continue
+    const d = leaveDaysInYear(r, year, employee.work_schedule.days, holidays)
+    if (d > 0) usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + d
   }
 
-  const balanceTypes = types.filter(
-    (t) => (entitlements[t.id] ?? t.default_annual_days) > 0,
-  )
+  const balanceTypes = types.filter((t) => showsBalance(t, entitlements[t.id]))
 
   return (
     <div>
@@ -126,18 +154,19 @@ export default function MyLeaves() {
         {balanceTypes.map((t) => {
           const total = entitlements[t.id] ?? t.default_annual_days
           const used = usedByType[t.id] ?? 0
-          const left = Math.max(0, total - used)
+          const left = total - used // negative = taken beyond the entitlement
           return (
             <div key={t.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold text-slate-500">{t.name}</p>
-              <p className="mt-1 text-xl font-extrabold text-brand-900">
+              <p className={`mt-1 text-xl font-extrabold ${left < 0 ? 'text-rose-600' : 'text-brand-900'}`}>
                 {left}
                 <span className="text-sm font-medium text-slate-400"> / {total} days</span>
               </p>
+              {left < 0 && <p className="text-[11px] text-rose-600">{plural(-left, 'day')} beyond your entitlement</p>}
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-brand-600"
-                  style={{ width: `${total > 0 ? (left / total) * 100 : 0}%` }}
+                  style={{ width: `${total > 0 ? Math.max(0, (left / total) * 100) : 0}%` }}
                 />
               </div>
             </div>
@@ -154,16 +183,16 @@ export default function MyLeaves() {
               const type = types.find((t) => t.id === r.leave_type_id)
               return (
                 <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm font-semibold text-slate-700">
-                      {type?.name ?? 'Leave'} · {Number(r.days)} day/s
+                      {type?.name ?? 'Leave'} · {plural(Number(r.days), 'day')}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="break-words text-xs text-slate-500">
                       {fmtDate(r.start_date)} → {fmtDate(r.end_date)}
                       {r.reason ? ` · ${r.reason}` : ''}
                     </p>
                     {r.review_notes && (
-                      <p className="text-xs italic text-slate-400">Admin: {r.review_notes}</p>
+                      <p className="break-words text-xs italic text-slate-400">Admin: {r.review_notes}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2">

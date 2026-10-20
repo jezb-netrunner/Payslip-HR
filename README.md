@@ -1,89 +1,187 @@
 # Payslip HR
 
-An all-in-one **HR & Payroll (HCM) platform for Philippine MSMEs** — a
-Paylocity-style unified system adapted to PH statutory rules, built as a
-single-entity deployment on **Supabase** (Postgres + Auth + Storage + Edge
-Functions) with a **React + TypeScript + Tailwind** front end.
+A **multi-client HR & Payroll platform for the Philippines**: one payroll
+service company (the *company*) runs HR, timekeeping, payroll and BIR
+reporting for many client employers (*clients*), on **Supabase** (Postgres +
+Auth + Edge Functions) with a **React + TypeScript + Tailwind** front end.
+
+## Who uses it
+
+| Role | Signs in with | Can do |
+|---|---|---|
+| **Company admin** | email + password | Everything, across all clients: add/archive clients, create and assign admin users, update statutory tables and national holidays |
+| **Entity admin** (client payroll staff / heads) | email + password | Full HR & payroll for the clients assigned to them — nothing else |
+| **Employee** | a **login code** set by their entity admin (e.g. `ACME-7Q4KX9TB`) | Own dashboard, payslips, attendance, leaves, announcements, profile |
+
+Login codes are prefixed with the client code, can be changed or disabled by
+the entity admin at any time (signing the employee out everywhere), and are
+never stored — only their last characters are kept as a hint. Guessable
+codes (all digits, runs, too few different characters, the employee number)
+are refused; the Generate button makes random ones.
 
 ## What it does
 
-**Admin console**
-- Employee 201-file management: personal data, government IDs (SSS,
-  PhilHealth, Pag-IBIG, TIN), employment status, work schedules, bank details
-- Career history timeline: hires, regularizations, promotions, salary
-  adjustments, disciplinary actions, separations — with option to apply the
-  event to the live record
-- Live time & attendance monitoring: who's on the clock, flagged-punch review
-  with selfie evidence, device/IP/location detail, manual entries (flagged +
-  audit-logged), time-correction approvals
-- Leave management: statutory leave types seeded (SIL, maternity RA 11210,
-  paternity RA 8187, solo parent RA 11861, VAWC RA 9262, MCW RA 9710),
-  approvals feed straight into payroll
-- Payroll runs: draft → compute → review (with warnings) → finalize (immutable)
-  → reopen (audited); semi-monthly or monthly; 13th-month, special, and
-  final-pay run types; payroll register CSV export; payslip PDFs
-- Statutory tables viewer/editor: versioned by effective date, with a live
-  sample-salary calculator
-- Insights dashboard: headcount & tenure, payroll cost trend (net / employee
-  deductions / employer contributions), attendance rate, tardiness leaderboard,
-  statutory remittance amounts with deadlines, minimum-wage compliance alerts,
-  probation-ending reminders, 13th-month reminder, upcoming holidays
-- Company settings: pay frequency, contribution timing, admin-set minimum wage,
-  divisor, grace period, punch-security toggles — all audit-logged
-- Full audit log of sensitive changes (database triggers)
+**Company admin**
+- Clients: registered name, client code, TIN + branch code, RDO, address,
+  withholding-agent category, top-withholding-agent flag, pay policy defaults
+- Admin users: create entity/company admins, assign clients, deactivate
+- Statutory tables editor: add a new version (effective date) of the WHT,
+  SSS, PhilHealth, Pag-IBIG or BIR annual table when a law changes — past
+  periods keep computing with the tables in force back then
+- National holidays (clients add their own local holidays)
+- Dashboard across all clients
+
+**Entity admin (per selected client)**
+- Employee 201 file: personal data, TIN / SSS / PhilHealth / Pag-IBIG,
+  nationality and ZIP (for the alphalist), **hire date and separation date with
+  reason** (resignation, termination, retirement, end of contract, death…),
+  career history, pay frequency, pay type, payment method (cash / bank /
+  e-wallet / check), allowances with BIR classification, recurring deductions
+  and loans, union dues, previous-employer and PERA data per tax year
+- **Time In / Out**: daily sheet (whole team, one day) and per-employee sheet
+  (one person, a whole period) — admins key in time in/out (or fill the
+  scheduled days from each employee's shift; Fill skips approved leaves and
+  non-working holidays), split shifts as extra in/out pairs, with rest days,
+  holidays and approved leaves shown; employees can only *request*
+  corrections. Attendance is locked once it has been paid in a finalized run
+- Leaves: per-client leave types (seeded from statutory templates),
+  per-employee credits, approvals that feed payroll, leaves filed by HR for
+  an employee, and revoking an approved leave (until its days are paid)
+- Payroll runs per **pay frequency** (weekly / semi-monthly / monthly) with
+  regular, 13th-month, special and final-pay run types; adjustments
+  (bonuses, deductions, back pay); review → finalize (immutable) → reopen
+  (audited); payroll register CSV; payslip PDFs; **cash payout sheet** with
+  bill/coin breakdown per employee and per run
+- **Announcements** (pinned / expiring) shown on the employee portal
+- **BIR & Reports**: 1604-C alphalist Schedule 1 and Schedule 2 (MWEs), BIR
+  2316 working copies, 1604-C summary, 1601-C monthly remittance log,
+  SSS / PhilHealth / Pag-IBIG contribution reports
+- Client settings, audit log
 
 **Employee portal**
-- Time clock with verification selfie, device fingerprint, IP and optional
-  geolocation — timestamps come from the server clock
-- Own attendance records (read-only) + correction requests
-- Leave balances and requests
-- Own payslips (finalized only) with **PDF download**
-- Own HR profile and career history
+- Dashboard: latest take-home pay and where the gross went (SSS, PhilHealth,
+  Pag-IBIG, tax, other deductions, cash rounding), year-to-date totals, days
+  and hours on record this month, leave balances, announcements
+- Payslips (finalized only) with PDF download, attendance records +
+  correction requests, leave requests, profile (the login code is their only
+  credential — a lost code is replaced by the entity admin)
+
+## Pay frequency and periods
+
+Each employee has their own pay frequency, so a client can pay some staff
+weekly and others semi-monthly or monthly. Each run covers one client and one
+frequency and is tied to a **payroll month slot** taken from the period's
+cutoff (e.g. "October 2026, payroll 2 of 2", or "payroll 5 of 5" for weekly),
+so moving a payday for a holiday never breaks a month. Monthly amounts —
+allowances, recurring deductions, SSS / PhilHealth / Pag-IBIG — are split
+across the month's periods so the parts always add up to the monthly
+figure, or deducted on the first or last period only (client setting); an
+employee hired or separated mid-month still has the month's contributions
+completed on their own first or last payroll. Withholding tax uses the BIR
+table for the run's frequency, and the tax year follows the **pay date**
+(a December 16–31 payroll paid in January is next year's compensation).
+
+Safety rules enforced by the database: a draft can only be finalized if it
+was fully computed after its latest input change (attendance, leave,
+adjustments, rates or client settings); nobody is paid twice for the same
+days; finalized payrolls are frozen until reopened.
+
+## Cash payroll without centavos
+
+For cash-paid staff (or everyone, per client setting) net pay can be paid in
+whole pesos:
+
+- **Round up** — the employer adds the centavos (e.g. ₱4,321.40 → ₱4,322).
+- **Carry forward** — pay ₱4,321 now; the ₱0.40 is owed to the employee,
+  added to the next payout and settled in full on final pay.
+
+There is deliberately **no round-down** option: withholding any part of a
+worker's wage is prohibited (Labor Code Art. 113). The rounding is shown as
+its own payslip line so the payslip still ties out to the centavo, and the
+payout sheet gives the bills and coins to prepare.
+
+## BIR 1604-C and the Alphalist of Employees
+
+The app captures everything the annual information return needs:
+
+- Client: TIN + branch code, RDO, registered name and address, ZIP,
+  withholding-agent category, top withholding agent, contact details
+- Employee: TIN, name, birth date, nationality, address + ZIP, employment
+  status (regular / casual / contractual / probationary / seasonal…),
+  inclusive dates of employment, reason of separation, previous employer
+  (TIN, name, compensation and tax withheld), PERA tax credit, substituted
+  filing
+- Every earning carries its BIR classification (basic, holiday, overtime,
+  night differential, hazard, 13th month & other benefits, de minimis,
+  representation, transportation, COLA, housing, other regular /
+  supplementary) so the 2316 / alphalist columns are summed, not guessed.
+  Minimum wage earners' exempt package (basic, holiday, OT, ND, hazard) is
+  kept separate, the ₱90,000 13th-month/other-benefits exemption is tracked
+  across the year, and an **annualizing run** (last payroll of the year, a
+  payroll that includes an employee's separation, or final pay) trues up
+  the year's tax
+- 1601-C remittances (date, bank/agency, TRA/eROR/eAR, amounts) for the
+  1604-C remittance schedule
+
+Reports export as CSV, one per schedule, and flag employees whose data is
+incomplete or whose tax is not yet reconciled (while the year is still in
+progress, withholding differences are shown as a note — they settle on the
+last payroll paid in December or on final pay). Schedule 2 takes the
+statutory minimum wage from the employee's last payslip of the year, and the
+previous-employer section carries TIN, status, period, reason of separation
+and itemized amounts. They are the working data you
+key or import into the **BIR Alphalist Data Entry and Validation Module**,
+which produces the DAT file to submit; the return itself is filed through
+eBIRForms / eFPS.
 
 ## Philippine statutory compliance (verified as of Aug 2026)
 
 | Item | Basis | Implementation |
 |---|---|---|
-| Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward | Daily/weekly/semi-monthly/monthly bracket tables, versioned in DB |
+| Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward | Daily / weekly / semi-monthly / monthly tables + annual table for annualization, versioned in DB |
 | SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MPF/WISP above ₱20k; EC ₱10/₱30 | MSC bracket mapping + MPF split + EC, versioned in DB |
 | PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50 | Odd centavo carried by employer (official convention) |
 | Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | Capped computation |
-| 13th month | PD 851: 1/12 of YTD basic, due Dec 24; ₱90k tax-exempt cap | Dedicated run type, taxable-excess handling |
-| OT / ND / premiums | Labor Code Arts. 86–94: OT +25%/×1.3, ND +10% (10pm–6am), rest 130%, special 130/150%, regular holiday 200/260% | Per-day engine with computation trace |
-| Minimum wage | RA 6727 regional wage orders | Admin-configurable (seeded: NCR ₱755, WO NCR-27) with MWE tax exemption (RA 9504) |
-| Holidays 2026 | Proclamations 1006 / 1189 / 1264 | Seeded, admin-editable |
+| 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap | Dedicated run type; cap tracked across the year |
+| OT / ND / premiums | Labor Code Arts. 86–94 | Per-day engine with computation trace |
+| Minimum wage | RA 6727 regional wage orders; MWE exemption RA 9504 | Per-client wage region and rate; MWE exempt package |
+| Holidays 2026 | Proclamations 1006 / 1189 / 1264 | National list + per-client local holidays |
 
-Statutory tables live in the `statutory_versions` table **versioned by
-effective date** — when a law changes, the admin adds a new version; payroll
-runs automatically use the tables in force for their period. No code changes.
+Statutory tables live in `statutory_versions`, **versioned by effective
+date**: a company admin adds a version when a law changes and payroll uses
+whichever version is in force for each period. No code changes.
 
-## Internal controls (anti-buddy-punching and beyond)
+## Internal controls
 
-1. Employees **cannot write** to `time_entries` at all — punching happens only
-   through `clock_in()` / `clock_out()` SECURITY DEFINER RPCs that derive the
-   employee from the authenticated user (`auth.uid()`). Punching for someone
-   else is impossible at the API level, not just in the UI.
-2. Server-side timestamps (database clock) — client time is never trusted.
-3. Mandatory verification **selfie** per punch (configurable), stored in a
-   private bucket where each employee can only upload to their own folder and
-   only admins can view all.
-4. **Device fingerprint, IP address, geolocation** recorded per punch;
-   anomalies auto-flagged (`new_device`, `device_mismatch`, `no_selfie`,
-   `overlong_shift`) for admin review with selfie evidence.
-5. One open entry per employee (DB constraint), corrections only via
-   admin-approved requests, finalized payslips immutable (DB trigger),
-   payroll-run deletions blocked, everything sensitive audit-logged by trigger.
-6. Row Level Security everywhere: employees see only their own records;
-   payslips only after finalization.
+1. Employees have **no write access** to time entries, payroll runs or
+   payslips — not just in the UI but in the database (row-level security).
+   Time is entered by admins; employees can only file correction and leave
+   requests.
+2. Entity admins can only reach the clients assigned to them; everything is
+   scoped by client in the database, and archiving a client locks its entity
+   admins out.
+3. Finalized payslips are immutable; attendance already paid is locked;
+   finalize / reopen run as atomic database functions that also maintain the
+   cash-rounding carry balance.
+4. Sensitive changes are audit-logged by database triggers (who, when, what,
+   which client) — including login-code changes made through the edge
+   function and leave / correction reviews; bookkeeping writes (draft
+   totals, payroll sequence) are skipped. CSV exports neutralize
+   formula-like text so a typed name can't run as a spreadsheet formula.
+5. Employee login codes are client-prefixed (no cross-client guessing),
+   high-entropy, revocable, and never stored in readable form.
 
 ## Stack
 
 - **Backend**: Supabase (project `ruuhpghcgccvezkjhisy`, ap-southeast-1) —
-  Postgres 17, RLS, triggers, RPCs, Storage, `admin-users` edge function for
-  account provisioning
+  Postgres 17, RLS, triggers, RPCs, `admin-users` edge function for login
+  codes and admin accounts
 - **Frontend**: Vite + React 19 + TypeScript + Tailwind CSS v4, React Router,
-  Recharts (dashboard), jsPDF (payslip PDFs), Lucide icons
-- **Tests**: Vitest — payroll engine covered with official computation vectors
+  Recharts, jsPDF, Lucide icons
+- **Tests**: Vitest — payroll engine, frequencies, annualization, alphalist,
+  cash rounding, login codes, CSV safety, and end-to-end `computeRun` flows
+  against an in-memory Supabase (`src/payroll/flows/`); SQL suites for RLS,
+  RPCs and triggers (`supabase/tests/`)
 
 ## Getting started
 
@@ -94,58 +192,59 @@ npm run dev
 ```
 
 1. Open the app → **“First time here? Create the admin account.”** The first
-   account ever created becomes the administrator — do this immediately after
+   account ever created becomes a company admin — do this immediately after
    deploying, then **disable public sign-ups** in the Supabase dashboard
-   (Authentication → Sign In / Up) so the bootstrap can't be raced; all
-   employee accounts are provisioned by the admin from inside the app.
-2. Settings → fill in company identity, employer numbers, pay policy.
-3. Employees → add employees → each employee's **Login Account** tab → create
-   their login (they sign in and punch from their own account).
-4. Payroll → New payroll run → Compute draft → review → Finalize.
+   (Authentication → Sign In / Up) so the bootstrap can't be raced.
+2. **Clients** → add a client (its code becomes the prefix of its employees'
+   login codes), fill in its BIR details and pay policy.
+3. **Admin Users** → create entity admins and assign their clients.
+4. **Employees** → add employees → each employee's **Login** tab → set their
+   login code and hand it to them.
+5. **Time In / Out** → enter attendance → **Payroll** → new run → compute →
+   review → finalize.
 
 ```bash
-npm test           # payroll engine unit tests
+npm test           # unit tests
 npm run build      # typecheck + production build
 npm run lint       # oxlint
 ```
 
 ## Deploying to GitHub Pages
 
-The app is a static SPA (Supabase is the backend), so GitHub Pages hosts it
-directly. A workflow at `.github/workflows/deploy-pages.yml` builds and
-deploys on every push to `main` (tests must pass first).
+The app is a static SPA (Supabase is the backend), so GitHub Pages hosts it.
+`.github/workflows/deploy-pages.yml` builds and deploys on every push to
+`main` (tests must pass first).
 
-1. One-time: repo **Settings → Pages → Source: “GitHub Actions”** (the
-   workflow also attempts to enable this automatically on first run).
+1. One-time: repo **Settings → Pages → Source: “GitHub Actions”**.
 2. Push to `main` (or run the workflow manually from the Actions tab).
 3. The app goes live at `https://<your-username>.github.io/Payslip-HR/`.
 
-How it works: the build passes `--base=/Payslip-HR/` so assets resolve under
-the project path, React Router picks the same basename from
-`import.meta.env.BASE_URL`, and `index.html` is copied to `404.html` so deep
-links (e.g. `/admin/payroll`) survive refreshes — Pages has no SPA rewrites.
-No secrets are needed in CI: the Supabase URL and anon key are public by
-design (RLS protects all data).
-
-Right after the first deploy, open the site, create the admin account, and
-disable public sign-ups in Supabase (see Getting started).
+The build passes `--base=/Payslip-HR/`, React Router takes the same basename
+from `import.meta.env.BASE_URL`, and `index.html` is copied to `404.html` so
+deep links survive refreshes. No secrets are needed in CI: the Supabase URL
+and anon key are public by design (RLS protects all data).
 
 ### Database
 
-The applied migrations are in `supabase/migrations/` (schema, RLS, RPCs,
-storage policies, seeds, hardening) and the edge function source is in
-`supabase/functions/admin-users/`. The live project already has all of them
-applied.
+Migrations are in `supabase/migrations/` and the edge function source is in
+`supabase/functions/admin-users/`. The front end, the migrations and the edge
+function must be deployed **together**: the multi-client migrations
+(`*_multi_client_schema.sql`, `*_multi_client_security.sql`) replace the
+single-company schema, so an older front end stops working once they are
+applied, and this front end needs them. Apply the migrations, deploy the edge
+function, then merge to `main`. See `MEMORY.md` → *Current deployed state* for
+what is live.
 
 ## Repository map
 
 ```
 src/
-  payroll/        # the engine: statutory calcs, attendance, payslip math (+tests)
-  pages/admin/    # admin console
+  payroll/        # engine, statutory calcs, attendance, annual tax / 2316, alphalist (+tests)
+  pages/admin/    # admin console (company + entity admins)
   pages/employee/ # employee portal
-  components/     # UI kit, camera capture, payslip view
-  lib/            # supabase client, auth, api helpers, Manila-time utils
+  components/     # UI kit, shell, payslip view
+  lib/            # supabase client, auth, client context, login codes, pay periods,
+                  # cash denominations, Manila-time utils, labels
   pdf/            # payslip PDF generation
 supabase/         # migrations + edge functions (source of truth for schema)
 MEMORY.md         # running memory log: session history, deployed state, lessons
@@ -153,12 +252,12 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
 
 ## Disclaimers & known simplifications
 
-- Withholding is computed per period from the BIR tables; **year-end
-  annualization/adjustment (BIR Form 2316 true-up) is not yet automated**.
+- The BIR reports are working data for the BIR Alphalist module and
+  eBIRForms; the app does not generate the DAT file or file returns.
 - Unworked regular-holiday pay qualification (presence on the preceding
   workday) is simplified — the engine pays unless the employee is on unpaid
   leave; see the computation trace notes.
-- De minimis ceilings are the admin's responsibility when flagging allowances
-  as de minimis (current caps are listed in the UI, per RR 29-2025).
+- De minimis ceilings are the admin's responsibility when classifying
+  allowances as de minimis (current caps per RR 29-2025 are shown in the UI).
 - This software assists with compliance but is not legal advice — always
   reconcile remittances with each agency's official schedules and forms.

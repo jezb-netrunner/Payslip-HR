@@ -127,10 +127,53 @@ export interface DayComputation {
 
 // ---------- payroll ----------
 
-export type PayFrequency = 'semi_monthly' | 'monthly'
-export type PeriodHalf = 'first' | 'second' | 'full'
-export type ContributionTiming = 'split' | 'first_half' | 'second_half'
+export type PayFrequency = 'weekly' | 'semi_monthly' | 'monthly'
+/** How monthly SSS/PhilHealth/Pag-IBIG are spread over a month's pay periods. */
+export type ContributionTiming = 'split' | 'first_period' | 'last_period'
 export type RunType = 'regular' | 'thirteenth_month' | 'special' | 'final_pay'
+/**
+ * Cash net-pay rounding. 'round_up' pays the next whole peso (employer
+ * absorbs < ₱1); 'carry_forward' pays the whole pesos now and the centavos
+ * on the next payroll. A plain round-down would be an unauthorized wage
+ * deduction (Labor Code Art. 113), so it is not offered.
+ */
+export type RoundingMode = 'none' | 'round_up' | 'carry_forward'
+
+/**
+ * BIR classification of an earnings line — drives the BIR Form 2316 and
+ * 1604-C alphalist columns. For minimum wage earners the statutory minimum
+ * wage package (basic, holiday, overtime, night differential, hazard pay)
+ * is exempt (NIRC Sec. 24(A)(2)).
+ */
+export type BirBucket =
+  | 'basic' //             basic salary / SMW, net of absence, tardiness, undertime lines
+  | 'holiday' //           holiday, special-day and rest-day premium pay
+  | 'overtime'
+  | 'night_diff'
+  | 'hazard'
+  | 'thirteenth' //        13th month pay
+  | 'other_benefits' //    bonuses etc. — shares the ₱90,000 cap with the 13th month
+  | 'de_minimis'
+  | 'representation'
+  | 'transportation'
+  | 'cola'
+  | 'housing'
+  | 'other_taxable'
+  | 'other_non_taxable'
+
+export type AllowanceCategory =
+  | 'de_minimis'
+  | 'other_benefits'
+  | 'hazard'
+  | 'representation'
+  | 'transportation'
+  | 'cola'
+  | 'housing'
+  | 'other_taxable'
+  | 'other_non_taxable'
+
+/** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
+export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'
 
 export interface PayrollEmployeeInput {
   id: string
@@ -142,20 +185,32 @@ export interface PayrollEmployeeInput {
   schedule: WorkSchedule
   allowances: AllowanceInput[]
   extraDeductions: ExtraDeductionInput[]
+  /** One-time earnings for this run (payroll adjustments). */
+  oneTimeEarnings?: OneTimeEarningInput[]
 }
 
 export interface AllowanceInput {
   label: string
-  monthlyAmount: number
-  taxable: boolean
-  deMinimis: boolean
+  amount: number
+  category: AllowanceCategory
+  basis: AllowanceBasis
+}
+
+export interface OneTimeEarningInput {
+  id?: string
+  label: string
+  amount: number
+  category: BirBucket
 }
 
 export interface ExtraDeductionInput {
   id?: string
   label: string
+  /** Recurring-deduction category; 'union_dues' is excluded from taxable income. */
   category: string
   amount: number
+  /** One-time payroll adjustment rather than a recurring deduction. */
+  oneTime?: boolean
 }
 
 export interface PayrollSettingsInput {
@@ -172,7 +227,18 @@ export interface PayrollSettingsInput {
 export interface PeriodInput {
   start: string
   end: string
-  half: PeriodHalf
+  /** 1-based position of this payroll among the pay periods of its payroll month. */
+  index: number
+  /** Pay periods of this frequency in the payroll month: monthly 1, semi-monthly 2, weekly 4–5. */
+  count: number
+}
+
+export interface RoundingInput {
+  mode: RoundingMode
+  /** Centavos carried from the employee's previous payroll (carry_forward). */
+  carryIn: number
+  /** Final payroll for the employee: pay out everything, never carry. */
+  settle?: boolean
 }
 
 export interface PayLine {
@@ -181,6 +247,8 @@ export interface PayLine {
   amount: number
   /** Earnings only: whether the line is subject to withholding tax. */
   taxable?: boolean
+  /** Earnings only: BIR 2316 / alphalist classification. */
+  bir?: BirBucket
   hours?: number
   meta?: string
 }
@@ -201,7 +269,7 @@ export interface StatutoryComputation {
   philhealthEr: number
   pagibigEe: number
   pagibigEr: number
-  /** Fraction of monthly contribution charged to this period (0, 0.5 or 1). */
+  /** Fraction of the monthly contribution charged to this period (0, 1/count or 1). */
   periodFactor: number
 }
 
@@ -230,9 +298,14 @@ export interface PayslipComputation {
   pagibigEe: number
   pagibigEr: number
   withholdingTax: number
+  unionDues: number
   otherDeductionsTotal: number
   totalDeductions: number
+  /** Amount actually paid: gross − deductions + roundingAdjustment. */
   netPay: number
+  roundingAdjustment: number
+  roundingCarryIn: number
+  roundingCarryOut: number
   trace: {
     dailyRate: number
     hourlyRate: number
