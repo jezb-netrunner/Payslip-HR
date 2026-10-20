@@ -1,4 +1,4 @@
--- Tests for 20261020120000_audit_fixes.sql: draft staleness gaps, reopen
+-- Tests for 20261020031639_audit_fixes.sql: draft staleness gaps, reopen
 -- and finalize guards, paid-leave guards, audit noise and actor.
 \set ON_ERROR_STOP 1
 \set owner '''00000000-0000-0000-0000-0000000000c1'''
