@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { employeeLoginEmail, generateCodePart, isValidLoginCode, normalizeLoginCode } from './loginCode'
+import { employeeLoginEmail, generateCodePart, isValidLoginCode, normalizeLoginCode, weakCodeReason } from './loginCode'
 
 describe('employee login codes', () => {
   it('normalizes what employees type', () => {
@@ -21,8 +21,23 @@ describe('employee login codes', () => {
     )
   })
 
-  it('generates unambiguous random parts', () => {
-    const part = generateCodePart()
-    expect(part).toMatch(/^[2-9A-HJKMNP-Z]{8}$/)
+  it('generates unambiguous random parts that pass the strength rules', () => {
+    for (let i = 0; i < 200; i++) {
+      const part = generateCodePart()
+      expect(part).toMatch(/^[2-9A-HJKMNP-Z]{8}$/)
+      expect(weakCodeReason(part)).toBeNull()
+    }
+  })
+
+  it('rejects guessable codes', () => {
+    expect(weakCodeReason('7Q4KX9TB')).toBeNull()
+    expect(weakCodeReason('SHORT1')).toMatch(/8–24/)
+    expect(weakCodeReason('K7M2Q9XA', 'A-001')).toBeNull()
+    expect(weakCodeReason('EMP12345', 'emp-12345')).toMatch(/employee number/)
+    expect(weakCodeReason('19900115')).toMatch(/letters/)
+    expect(weakCodeReason('AAAABBBB')).toMatch(/5 different/)
+    expect(weakCodeReason('ABCDEFGH')).toMatch(/runs/)
+    expect(weakCodeReason('98765432')).toMatch(/letters/)
+    expect(weakCodeReason('HGFEDCBA')).toMatch(/runs/)
   })
 })

@@ -44,6 +44,23 @@ async function employeeLoginEmail(code: string): Promise<string> {
   return `emp-${hex.slice(0, 32)}@${EMPLOYEE_LOGIN_DOMAIN}`;
 }
 
+/** KEEP IN SYNC with weakCodeReason in src/lib/loginCode.ts. */
+function weakCodeReason(part: string, employeeNo = ""): string | null {
+  if (!/^[A-Z0-9]{8,24}$/.test(part)) return "The code must be 8–24 letters or digits.";
+  if (part === employeeNo.toUpperCase().replace(/[^A-Z0-9]/g, "")) {
+    return "Don't use the employee number as the login code — it is easy to guess.";
+  }
+  if (/^[0-9]+$/.test(part)) {
+    return "Mix in letters: an all-number code (a date, a phone number) is easy to guess.";
+  }
+  if (new Set(part).size < 5) return "Use at least 5 different characters.";
+  const steps = [...part].slice(1).map((c, i) => c.charCodeAt(0) - part.charCodeAt(i));
+  if (steps.every((d) => d === 1) || steps.every((d) => d === -1)) {
+    return "Avoid runs like ABCDEFGH or 23456789.";
+  }
+  return null;
+}
+
 function isAlreadyRegistered(message: string | undefined): boolean {
   return /already (been )?registered|already exists|duplicate/i.test(message ?? "");
 }
@@ -84,9 +101,16 @@ Deno.serve(async (req: Request) => {
     }
     const isCompanyAdmin = caller.role === "company_admin";
 
+    // Database writes from here on name the admin they act for: the audit
+    // trigger takes the actor from x-actor-id on service-role requests.
+    const db = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { "x-actor-id": callerId } },
+    });
+
     async function canManageEntity(entityId: string): Promise<boolean> {
       if (isCompanyAdmin) return true;
-      const { data } = await admin
+      const { data } = await db
         .from("entity_admins")
         .select("entity_id, entities!inner(is_active)")
         .eq("profile_id", callerId)
@@ -97,7 +121,7 @@ Deno.serve(async (req: Request) => {
     }
 
     async function loadEmployee(employeeId: string) {
-      const { data } = await admin
+      const { data } = await db
         .from("employees")
         .select("id, entity_id, first_name, last_name, employee_no, entities(code)")
         .eq("id", employeeId)
@@ -124,9 +148,8 @@ Deno.serve(async (req: Request) => {
       }
       const emp = await loadEmployee(String(body.employee_id ?? ""));
       if (!emp || !emp.entities?.code) return json({ error: "Employee not found" }, 404);
-      if (part === emp.employee_no.toUpperCase().replace(/[^A-Z0-9]/g, "")) {
-        return json({ error: "Don't use the employee number as the login code — it is easy to guess." }, 400);
-      }
+      const weak = weakCodeReason(part, emp.employee_no);
+      if (weak) return json({ error: weak }, 400);
 
       const code = `${emp.entities.code}-${part}`;
       const email = await employeeLoginEmail(code);
@@ -135,7 +158,7 @@ Deno.serve(async (req: Request) => {
         error: "That code is already used by another employee of this client. Choose a different code.",
       };
 
-      const { data: existing } = await admin
+      const { data: existing } = await db
         .from("profiles")
         .select("id")
         .eq("employee_id", emp.id)
@@ -157,7 +180,7 @@ Deno.serve(async (req: Request) => {
         // The on_auth_user_created trigger creates the profile; upsert to be
         // safe and to guarantee the employee link. No email on the profile:
         // it is derived from the code, and admins can read profiles.
-        await admin.from("profiles").upsert({
+        await db.from("profiles").upsert({
           id: created.user.id,
           role: "employee",
           employee_id: emp.id,
@@ -174,15 +197,15 @@ Deno.serve(async (req: Request) => {
           if (isAlreadyRegistered(updErr.message)) return json(inUse, 409);
           return json({ error: updErr.message }, 400);
         }
-        await admin.from("profiles").update({ email: null, full_name: fullName }).eq(
+        await db.from("profiles").update({ email: null, full_name: fullName }).eq(
           "id",
           existing.id,
         );
         // the old code must stop working everywhere, not just for new sign-ins
-        await admin.rpc("revoke_user_sessions", { p_user: existing.id });
+        await db.rpc("revoke_user_sessions", { p_user: existing.id });
       }
 
-      await admin
+      await db
         .from("employees")
         .update({
           login_code_hint: part.slice(-3),
@@ -198,7 +221,7 @@ Deno.serve(async (req: Request) => {
       }
       const emp = await loadEmployee(String(body.employee_id ?? ""));
       if (!emp) return json({ error: "Employee not found" }, 404);
-      const { data: prof } = await admin
+      const { data: prof } = await db
         .from("profiles")
         .select("id")
         .eq("employee_id", emp.id)
@@ -208,8 +231,8 @@ Deno.serve(async (req: Request) => {
         ban_duration: body.active ? "none" : "876000h",
       });
       if (banErr) return json({ error: banErr.message }, 400);
-      await admin.from("profiles").update({ is_active: body.active }).eq("id", prof.id);
-      if (!body.active) await admin.rpc("revoke_user_sessions", { p_user: prof.id });
+      await db.from("profiles").update({ is_active: body.active }).eq("id", prof.id);
+      if (!body.active) await db.rpc("revoke_user_sessions", { p_user: prof.id });
       return json({ ok: true });
     }
 
@@ -221,14 +244,14 @@ Deno.serve(async (req: Request) => {
     async function setAssignments(userId: string, entityIds: unknown) {
       if (!Array.isArray(entityIds)) return;
       const ids = entityIds.map(String);
-      await admin.from("entity_admins").delete().eq("profile_id", userId);
+      await db.from("entity_admins").delete().eq("profile_id", userId);
       if (ids.length > 0) {
-        const { data: valid } = await admin.from("entities").select("id").in("id", ids);
+        const { data: valid } = await db.from("entities").select("id").in("id", ids);
         const rows = (valid ?? []).map((e: { id: string }) => ({
           profile_id: userId,
           entity_id: e.id,
         }));
-        if (rows.length > 0) await admin.from("entity_admins").insert(rows);
+        if (rows.length > 0) await db.from("entity_admins").insert(rows);
       }
     }
 
@@ -254,7 +277,7 @@ Deno.serve(async (req: Request) => {
       if (createErr || !created?.user) {
         return json({ error: createErr?.message ?? "Failed to create user" }, 400);
       }
-      await admin.from("profiles").upsert({
+      await db.from("profiles").upsert({
         id: created.user.id,
         role,
         employee_id: null,
@@ -268,7 +291,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === "update_admin") {
       const userId = String(body.user_id ?? "");
-      const { data: target } = await admin
+      const { data: target } = await db
         .from("profiles")
         .select("id, role")
         .eq("id", userId)
@@ -288,9 +311,9 @@ Deno.serve(async (req: Request) => {
           ban_duration: body.active ? "none" : "876000h",
         });
         if (banErr) return json({ error: banErr.message }, 400);
-        const { error: profErr } = await admin.from("profiles").update({ is_active: body.active }).eq("id", userId);
+        const { error: profErr } = await db.from("profiles").update({ is_active: body.active }).eq("id", userId);
         if (profErr) return json({ error: profErr.message }, 400);
-        if (!body.active) await admin.rpc("revoke_user_sessions", { p_user: userId });
+        if (!body.active) await db.rpc("revoke_user_sessions", { p_user: userId });
       }
       if (typeof body.password === "string" && body.password.length > 0) {
         if (body.password.length < 8) {
@@ -302,7 +325,7 @@ Deno.serve(async (req: Request) => {
         if (pwErr) return json({ error: pwErr.message }, 400);
       }
       if (typeof body.full_name === "string" && body.full_name.trim()) {
-        await admin.from("profiles").update({ full_name: body.full_name.trim() }).eq("id", userId);
+        await db.from("profiles").update({ full_name: body.full_name.trim() }).eq("id", userId);
       }
       if (target.role === "entity_admin" && body.entity_ids !== undefined) {
         await setAssignments(userId, body.entity_ids);

@@ -26,7 +26,7 @@ import {
   PAYMENT_METHOD_LABELS,
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
-import { generateCodePart } from '../../lib/loginCode'
+import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import type { AllowanceBasis, AllowanceCategory, PayFrequency } from '../../payroll/types'
@@ -747,6 +747,11 @@ function LoginTab({
   const [busy, setBusy] = useState(false)
 
   async function setCode() {
+    const weak = weakCodeReason(part, employee.employee_no)
+    if (weak) {
+      toast('error', weak)
+      return
+    }
     setBusy(true)
     try {
       const res = await callAdminUsers({ action: 'set_employee_code', employee_id: employee.id, code_part: part })
@@ -835,7 +840,7 @@ function LoginTab({
         )}
 
         <div className="flex flex-wrap items-end gap-3">
-          <Field label={account ? 'New code' : 'Code'} hint="8–24 letters or digits; not the employee number">
+          <Field label={account ? 'New code' : 'Code'} hint="8–24 letters and digits, hard to guess — or Generate one">
             <div className="flex items-center gap-1">
               <span className="rounded-lg bg-slate-100 px-2.5 py-2 font-mono text-sm font-bold text-slate-600">{entity.code}-</span>
               <Input

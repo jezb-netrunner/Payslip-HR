@@ -34,12 +34,37 @@ export async function employeeLoginEmail(code: string): Promise<string> {
   return `emp-${hex.slice(0, 32)}@${EMPLOYEE_LOGIN_DOMAIN}`
 }
 
+/**
+ * Why an admin-chosen code part is too easy to guess, or null when it is
+ * acceptable. The client prefix is public and every guess hits a different
+ * synthetic account, so per-account lockout can't help: the code itself has
+ * to be hard to guess. KEEP IN SYNC with the edge function.
+ */
+export function weakCodeReason(part: string, employeeNo = ''): string | null {
+  if (!/^[A-Z0-9]{8,24}$/.test(part)) return 'The code must be 8–24 letters or digits.'
+  if (part === employeeNo.toUpperCase().replace(/[^A-Z0-9]/g, '')) {
+    return "Don't use the employee number as the login code — it is easy to guess."
+  }
+  if (/^[0-9]+$/.test(part)) return 'Mix in letters: an all-number code (a date, a phone number) is easy to guess.'
+  if (new Set(part).size < 5) return 'Use at least 5 different characters.'
+  const steps = [...part].slice(1).map((c, i) => c.charCodeAt(0) - part.charCodeAt(i))
+  if (steps.every((d) => d === 1) || steps.every((d) => d === -1)) return 'Avoid runs like ABCDEFGH or 23456789.'
+  return null
+}
+
 // Unambiguous alphabet: no 0/O, 1/I/L.
 const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'
 
-/** Random 8-character code part (~39 bits). */
+/** Random code part (8 characters ≈ 39 bits), unbiased and never "weak". */
 export function generateCodePart(length = 8): string {
-  const bytes = new Uint8Array(length)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join('')
+  const limit = 256 - (256 % ALPHABET.length) // reject bytes that would bias the alphabet
+  for (;;) {
+    let part = ''
+    while (part.length < length) {
+      const bytes = new Uint8Array(length)
+      crypto.getRandomValues(bytes)
+      for (const b of bytes) if (b < limit && part.length < length) part += ALPHABET[b % ALPHABET.length]
+    }
+    if (!weakCodeReason(part)) return part
+  }
 }
