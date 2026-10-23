@@ -5,6 +5,8 @@ service company (the *company*) runs HR, timekeeping, payroll and BIR
 reporting for many client employers (*clients*), on **Supabase** (Postgres +
 Auth + Edge Functions) with a **React + TypeScript + Tailwind** front end.
 
+**New here?** See the [Quick Guide](docs/USER_GUIDE.md).
+
 ## Who uses it
 
 | Role | Signs in with | Can do |
