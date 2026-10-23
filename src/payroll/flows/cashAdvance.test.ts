@@ -83,7 +83,7 @@ describe('cash advances in payroll', () => {
     expect(line(second.id, emp.id, adv.id)?.amount).toBe(1000)
   })
 
-  it('a short payroll defers the rest of the installment to the next one', async () => {
+  it('a short payroll leaves the rest of the installment in the balance', async () => {
     const ent = addEntity()
     const emp = addEmployee(ent, { pay_type: 'daily', daily_rate: 755, monthly_rate: 0, is_minimum_wage_earner: true })
     addAttendance(emp, '2026-10-01', '2026-10-02') // two days worked: net about ₱1,500 less contributions
@@ -93,7 +93,7 @@ describe('cash advances in payroll', () => {
     const s1 = slipsOf(r1.id, emp.id)[0]
     expect(s1.net_pay).toBe(0)
     expect(line(r1.id, emp.id, adv.id).amount).toBeLessThan(3000)
-    expect(s1.computation_trace.warnings.some((w: string) => w.includes('stays in the balance for the next payroll'))).toBe(true)
+    expect(s1.computation_trace.warnings.some((w: string) => w.includes('stays in the balance for later payrolls'))).toBe(true)
     const r2 = await runAndFinalize(ent, { period_start: '2026-10-16', period_end: '2026-10-31', pay_date: '2026-11-05' })
     expect(line(r2.id, emp.id, adv.id).label).toBe('Cash advance (Oct 5, 2026) — fully paid')
     expect(adv.balance).toBe(0)
@@ -123,6 +123,44 @@ describe('cash advances in payroll', () => {
     expect(line(fp.id, emp.id, adv.id).label).toBe('Cash advance (Oct 5, 2026) — fully paid')
     expect(adv.balance).toBe(0)
     expect(deducted(adv.id)).toBe(9000)
+  })
+
+  it('a paused advance is not collected at separation, but that payroll says it is still owed', async () => {
+    const ent = addEntity()
+    const emp = addEmployee(ent, { separation_date: '2026-10-10', separation_reason: 'resignation' })
+    addAttendance(emp, '2026-10-01', '2026-10-10')
+    const paused = addAdvance(emp, { active: false })
+    const r = await runAndFinalize(ent, { period_start: '2026-10-01', period_end: '2026-10-15', pay_date: '2026-10-20' })
+    expect(line(r.id, emp.id, paused.id)).toBeUndefined()
+    expect(paused.balance).toBe(3000)
+    const w = slipsOf(r.id, emp.id)[0].computation_trace.warnings as string[]
+    expect(w.some((x) => x.includes('₱3,000.00 is still owed, but its deductions are paused'))).toBe(true)
+  })
+
+  it('a change while the draft is being computed keeps it from completing', async () => {
+    const ent = addEntity()
+    const emp = addEmployee(ent)
+    addAttendance(emp, '2026-10-01', '2026-10-15')
+    const adv = addAdvance(emp)
+    const r = addRun(ent, { period_start: '2026-10-01', period_end: '2026-10-15', pay_date: '2026-10-20' })
+    // another admin records a repayment while the inputs are read: the
+    // staleness triggers reset the draft's totals, as the database does
+    const read = fakeSupabase.from
+    let raced = false
+    fakeSupabase.from = (table: string) => {
+      if (table === 'recurring_deductions' && !raced) {
+        raced = true
+        adv.balance = 100
+        db.t.payroll_runs.find((x) => x.id === r.id)!.totals = {}
+      }
+      return read(table)
+    }
+    try {
+      await expect(computeRun(r as never, ent as never)).rejects.toThrow(/changed while this payroll was being computed/)
+    } finally {
+      fakeSupabase.from = read
+    }
+    expect(() => finalize(r.id)).toThrow()
   })
 
   it('paused advances and 13th-month pay are left alone', async () => {

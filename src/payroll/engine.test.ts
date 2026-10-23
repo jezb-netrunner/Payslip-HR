@@ -607,7 +607,7 @@ describe('payslip: cash advances', () => {
     expect(slip.netPay).toBe(0)
     expect(line.label).toBe(`Cash advance (Oct 20, 2026) — ${(20000 - base.netPay).toLocaleString('en-US', { minimumFractionDigits: 2 })} left`)
     expect(slip.trace.warnings).toEqual([
-      `Cash advance (Oct 20, 2026): ₱${(20000 - base.netPay).toLocaleString('en-US', { minimumFractionDigits: 2 })} of this payroll's installment could not be deducted (not enough net pay); it stays in the balance for the next payroll.`,
+      `Cash advance (Oct 20, 2026): ₱${(20000 - base.netPay).toLocaleString('en-US', { minimumFractionDigits: 2 })} of this payroll's installment could not be deducted (not enough net pay); it stays in the balance for later payrolls.`,
     ])
   })
 

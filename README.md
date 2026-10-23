@@ -65,9 +65,10 @@ are refused; the Generate button makes random ones.
   written authorization to deduct it (a printable agreement is built in;
   Labor Code Art. 113 and its IRR as amended by DOLE D.O. 195-2018). Advances
   are interest-free; each payroll deducts the agreed installment after tax,
-  never more than the net pay (what it can't take waits for the next payroll),
-  and the payroll that includes the employee's separation, or their final
-  pay, takes the remaining balance. Repayments made outside payroll, pausing
+  never more than the net pay (what it can't take stays in the balance), and
+  the payroll that includes the employee's separation, or their final pay,
+  takes the remaining balance (a paused advance is flagged in its review
+  warnings instead). Repayments made outside payroll, pausing
   deductions, and a per-advance ledger (release → payroll deductions →
   repayments → balance) are tracked; the database only lets the balance move
   through a finalized payroll or a recorded repayment

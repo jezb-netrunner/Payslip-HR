@@ -250,6 +250,24 @@ rows. Tests 173 → 187, SQL suite `13_cash_advance_tests.sql`; full browser
 QA on the local stack (request → approve → draft → finalize → ledger →
 repayment → separation settlement → reject/cancel, phone + desktop).
 
+### 2026-10-23 — Audit of this session's work (owner: "comprehensive audit")
+
+**Did:** two independent reviewers (cash advances; the merged test-round
+changes) plus a regression sweep: every route for HR / owner / employee at
+1440 and 390 px (no page errors, failed calls, error states or overflow),
+register CSV / bulk + single PDFs / payslip view / Pay-tab deep links, live
+logs since 09:00 (no 4xx/5xx, no Postgres errors), advisors, live data.
+Fixed (migration `20261023105459 cash_advance_hardening`, live): compute
+token written before inputs are read (a stale draft could be finalized),
+advance balance kept within 0…released even in finalize/reopen, repayments
+no longer flip `active` (deleting one un-paused an advance), release /
+authorization dates can't be cleared and the first deduction can't precede
+the release, paused advances flagged (not silently skipped) at separation,
+"filed" dates in Manila time, centavo-exact "spread over N payrolls", the
+agreement/warnings no longer promise a catch-up the engine doesn't do,
+installment stats relabeled "per payroll". Tests 187 → 189 + SQL
+regressions (each shown failing on the old code).
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -264,7 +282,10 @@ a "Cash advance" recurring deduction (the guard wants release and
 authorization dates — the new Cash Advances page records them).
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
-- **All 16 migrations applied.** The 16th, `20261023102637 cash_advances`
+- **All 17 migrations applied.** The 17th, `20261023105459
+  cash_advance_hardening` (CREATE OR REPLACE of the three advance trigger
+  functions), went through MCP; fingerprint re-matched (functions hash
+  changed on both sides identically). The 16th, `20261023102637 cash_advances`
   (2 tables, guards, RPC), went through MCP `apply_migration`; repo file
   renamed to that version; `fingerprint.sql` matched the local replica on
   every kind (23 tables, 355 columns, 137 constraints, 65 indexes, 52
@@ -681,7 +702,7 @@ breaks contribution months or files compensation in the wrong tax year.
 
 ### A draft is finalizable only if it is complete and current
 
-> `totals.employees` must equal the draft's payslip count; computeRun first writes a one-time `{computing: token}`, and DB triggers reset totals to `{}` whenever attendance, approved leave, adjustments, allowances, deductions, employee records, holidays or client settings change — so finalize rejects partial, interrupted or stale drafts.
+> `totals.employees` must equal the draft's payslip count; computeRun writes a one-time `{computing: token}` BEFORE reading any input, and DB triggers reset totals to `{}` whenever attendance, approved leave, adjustments, allowances, deductions, employee records, holidays or client settings change — so finalize rejects partial, interrupted or stale drafts.
 
 Plus `employees.payroll_seq` (bumped by every finalize/reopen touching the
 employee, copied onto each payslip as `employee_payroll_seq`): a draft
@@ -692,7 +713,10 @@ finalized non-13th runs) — computeRun leaves such employees out with a
 warning. Status changes only inside the RPCs (`payroll.lifecycle` GUC
 checked by the run guard trigger). Why it mattered: reviewers finalized a
 bonus that was added after computing (never paid, then locked) and paid a
-separated employee's last days twice.
+separated employee's last days twice. Until 2026-10-23 the token was
+written after the inputs were read, so a change landing in between was
+overwritten and a stale draft could be finalized (the audit found it via a
+repayment that took a cash advance below zero).
 
 ### supabase-js returns errors as plain objects, not Error instances
 
@@ -872,8 +896,12 @@ final pay rests on that written authorization (the agreement's term 3);
 commentators disagree on anything less, and some say deductions shouldn't
 push pay below minimum wage — not enforced, the installment is agreed. `guard_cash_advance` lets the balance
 move only inside finalize/reopen (`payroll.lifecycle`) or a repayment
-trigger (`payroll.advance_repayment`); before anything is repaid the amount
-can be corrected or the advance deleted. Repayments take the employee's
+trigger (`payroll.advance_repayment`), and even there keeps 0 ≤ balance ≤
+released (finalize of an over-deducting draft fails); before anything is
+repaid the amount can be corrected or the advance deleted. `active` is
+only the admin's pause switch: repayments never touch it (a zero balance
+already stops payroll), and a paused advance is not collected at
+separation — that payroll warns what is still owed instead. Repayments take the employee's
 payroll advisory lock first (same order as finalize). Why it mattered: a
 balance edited by hand loses where the money went — the owner asked for
 "accurately".

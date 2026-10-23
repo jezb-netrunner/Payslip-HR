@@ -4,6 +4,7 @@
 // shows where every peso went.
 
 import type { AdvanceRepayment, Payslip, RecurringDeduction } from './db'
+import { manilaDateStr } from './manila'
 import { round2 } from '../payroll/types'
 
 export type AdvanceStatus = 'active' | 'scheduled' | 'paused' | 'paid'
@@ -94,7 +95,7 @@ export function advanceLedger(
 
   let owed = round2(total)
   const entries: LedgerEntry[] = [
-    { date: advance.released_on ?? advance.created_at?.slice(0, 10) ?? '', kind: 'released', amount: owed, balance: owed },
+    { date: advance.released_on ?? (advance.created_at ? manilaDateStr(new Date(advance.created_at)) : ''), kind: 'released', amount: owed, balance: owed },
   ]
   for (const m of moves) {
     owed = round2(owed + m.amount)

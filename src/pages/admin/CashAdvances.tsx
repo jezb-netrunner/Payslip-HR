@@ -40,7 +40,7 @@ import { errorMessage } from '../../lib/errors'
 import { fetchAll } from '../../lib/fetchAll'
 import { fmtDate, fullName, money, personInitials, plural } from '../../lib/format'
 import { PAYMENT_METHOD_LABELS } from '../../lib/labels'
-import { todayManila } from '../../lib/manila'
+import { manilaDateStr, todayManila } from '../../lib/manila'
 import { notifyPendingChanged } from '../../lib/pending'
 import { useQuickAction } from '../../lib/quickAction'
 import { supabase } from '../../lib/supabase'
@@ -279,7 +279,7 @@ function Advances({ entity }: { entity: Entity }) {
                       </p>
                       {r.reason && <p className="mt-0.5 break-words text-xs text-slate-500">“{r.reason}”</p>}
                       <p className="mt-1 text-xs text-slate-500">
-                        Filed {fmtDate(r.created_at)} · {owes > 0 ? <span className="font-semibold text-amber-700">already owes {money(owes)}</span> : 'no other advance owed'}
+                        Filed {fmtDate(manilaDateStr(new Date(r.created_at)))} · {owes > 0 ? <span className="font-semibold text-amber-700">already owes {money(owes)}</span> : 'no other advance owed'}
                       </p>
                     </div>
                   </div>
@@ -310,7 +310,7 @@ function Advances({ entity }: { entity: Entity }) {
                     <span className="min-w-0">
                       <b className="text-ink-900">{fullName(r.employees)}</b>{' '}
                       <span className="text-slate-500">
-                        {money(Number(r.amount))} · filed {fmtDate(r.created_at)}
+                        {money(Number(r.amount))} · filed {fmtDate(manilaDateStr(new Date(r.created_at)))}
                         {r.review_notes ? ` · “${r.review_notes}”` : ''}
                       </span>
                     </span>
@@ -503,7 +503,7 @@ function RecordAdvanceModal({
     }
   }
 
-  const spread = (n: number) => setF({ ...f, perPayroll: amount > 0 ? String(Math.ceil((amount / n) * 100) / 100) : f.perPayroll })
+  const spread = (n: number) => setF({ ...f, perPayroll: amount > 0 ? String(Math.ceil(Math.round(amount * 100) / n) / 100) : f.perPayroll })
 
   return (
     <Modal open onClose={onClose} title={request ? 'Approve cash advance' : 'Record a cash advance'}>
@@ -742,7 +742,9 @@ function AdvanceDetailModal({
               onClick={() =>
                 write(
                   () => supabase.from('recurring_deductions').update({ active: !a.active }).eq('id', a.id),
-                  a.active ? 'Paused: payrolls skip this advance until you resume it.' : 'Resumed: the next payroll deducts it again.',
+                  a.active
+                    ? 'Paused: payrolls skip this advance until you resume it (a final payroll will warn that it is still owed).'
+                    : 'Resumed: the next payroll deducts it again.',
                 )
               }
             >

@@ -65,7 +65,7 @@ export function generateAdvanceForm(f: AdvanceFormData): void {
   y += 4
   const terms = [
     `I acknowledge receiving the amount above from ${f.employer.name} as an advance on my wages. It carries no interest, fee or other charge.`,
-    `I authorize ${f.employer.name} to deduct the installment above from my wages every payroll until the advance is fully repaid. A payroll deducts only as much as my net pay allows; any part it cannot deduct is deducted in the next payroll.`,
+    `I authorize ${f.employer.name} to deduct the installment above from my wages every payroll until the advance is fully repaid. A payroll deducts only as much as my net pay allows; any part it cannot deduct stays in the balance and is deducted from later payrolls.`,
     `If my employment ends before the advance is fully repaid, I authorize ${f.employer.name} to deduct the remaining balance from my last pay and final pay.`,
     'I may repay any part of the balance at any time. Every deduction and repayment is shown on my payslips and in my cash advance record.',
   ]

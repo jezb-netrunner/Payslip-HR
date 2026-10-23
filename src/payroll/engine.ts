@@ -630,7 +630,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       warnings.push(
         d.settlement
           ? `${d.label}: ₱${plainAmount(short)} of the balance could not be deducted (not enough net pay) and is still owed — collect it outside payroll.`
-          : `${d.label}: ₱${plainAmount(short)} of this payroll's installment could not be deducted (not enough net pay); it stays in the balance for the next payroll.`,
+          : `${d.label}: ₱${plainAmount(short)} of this payroll's installment could not be deducted (not enough net pay); it stays in the balance for later payrolls.`,
       )
     }
   }

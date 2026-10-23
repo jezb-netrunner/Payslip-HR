@@ -1,4 +1,4 @@
--- Tests for 20261023102637_cash_advances.sql: requests, approval, the
+-- Tests for 20261023102637_cash_advances.sql (+ the hardening migration after it): requests, approval, the
 -- balance guard, repayments, and payroll finalize/reopen moving the balance.
 -- Invariant checked throughout: released = deducted by finalized payrolls
 -- + repaid outside payroll + balance.
@@ -144,6 +144,11 @@ select pg_temp.expect_error($$insert into recurring_deductions (employee_id, lab
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 0, 1000, 1000, '2026-11-03', '2026-11-03')$$, '%per payroll%');
 insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, start_date, released_on, release_method, authorized_on)
 values ('7000000f-0000-0000-0000-000000000001', '20000000-0000-0000-0000-0000000000a1', 'Cash advance (Nov 3, 2026)', 'cash_advance', 250, 1000, 1000, '2026-11-03', '2026-11-03', 'e_wallet', '2026-11-03');
+-- the release and authorization record can't be cleared, and the first deduction can't precede the release
+select pg_temp.expect_error($$update recurring_deductions set authorized_on = null where id = '7000000f-0000-0000-0000-000000000001'$$, '%written authorization%');
+select pg_temp.expect_error($$update recurring_deductions set released_on = null where id = '7000000f-0000-0000-0000-000000000001'$$, '%date the cash advance was released%');
+select pg_temp.expect_error($$update recurring_deductions set start_date = '2026-11-02' where id = '7000000f-0000-0000-0000-000000000001'$$, '%can''t come before the release%');
+select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, start_date, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 250, 1000, 1000, '2026-11-01', '2026-11-03', '2026-11-03')$$, '%can''t come before the release%');
 -- other deductions can't be turned into advances (that would skip the checks above)
 insert into recurring_deductions (id, employee_id, label, category, amount_per_period)
 values ('7000000f-0000-0000-0000-000000000009', '20000000-0000-0000-0000-0000000000a1', 'Uniform', 'other', 100);
@@ -176,11 +181,17 @@ select pg_temp.expect_error($$insert into advance_repayments (advance_id, paid_o
 select pg_temp.expect_error($$update advance_repayments set amount = 100$$, '%can''t be edited%');
 select pg_temp.expect_error($$update recurring_deductions set total_amount = 900, balance = 900 where id = '7000000f-0000-0000-0000-000000000001'$$, '%changes only through payroll%');
 select pg_temp.expect_error($$delete from recurring_deductions where id = '7000000f-0000-0000-0000-000000000001'$$, '%can''t be deleted%');
--- paying it all stops the deduction; deleting that repayment brings it back
+-- paying it all leaves nothing for payroll to take (a zero balance is skipped), and
+-- repayments never touch the pause switch: removing one restores the balance only
 insert into advance_repayments (id, advance_id, paid_on, amount) values ('8000000f-0000-0000-0000-000000000002', '7000000f-0000-0000-0000-000000000001', '2026-11-06', 1000);
-select pg_temp.check((select balance = 0 and not active from recurring_deductions where id = '7000000f-0000-0000-0000-000000000001'), 'fully repaid: zero and inactive');
+select pg_temp.check((select balance = 0 and active from recurring_deductions where id = '7000000f-0000-0000-0000-000000000001'), 'fully repaid: zero, pause switch untouched');
 delete from advance_repayments where id = '8000000f-0000-0000-0000-000000000002';
-select pg_temp.check((select balance = 1000 and active from recurring_deductions where id = '7000000f-0000-0000-0000-000000000001'), 'deleted repayment restored balance and activity');
+select pg_temp.check((select balance = 1000 and active from recurring_deductions where id = '7000000f-0000-0000-0000-000000000001'), 'deleted repayment restored the balance');
+update recurring_deductions set active = false where id = '7000000f-0000-0000-0000-000000000001';
+insert into advance_repayments (id, advance_id, paid_on, amount) values ('8000000f-0000-0000-0000-000000000005', '7000000f-0000-0000-0000-000000000001', '2026-11-06', 1000);
+delete from advance_repayments where id = '8000000f-0000-0000-0000-000000000005';
+select pg_temp.check((select balance = 1000 and not active from recurring_deductions where id = '7000000f-0000-0000-0000-000000000001'), 'removing a repayment keeps a paused advance paused');
+update recurring_deductions set active = true where id = '7000000f-0000-0000-0000-000000000001';
 select pg_temp.check(pg_temp.ledger_ok('7000000f-0000-0000-0000-000000000001'), 'ledger ties out after repayments');
 commit;
 -- another client's admin can neither see nor repay it, and the balance is untouched
@@ -221,6 +232,13 @@ select pg_temp.computed('3000000f-0000-0000-0000-000000000001');
 insert into advance_repayments (id, advance_id, paid_on, amount) values ('8000000f-0000-0000-0000-000000000003', '7000000f-0000-0000-0000-000000000001', '2026-11-07', 100);
 select pg_temp.check((select totals from payroll_runs where id = '3000000f-0000-0000-0000-000000000001') = '{}'::jsonb, 'a repayment makes the draft stale');
 select pg_temp.expect_error($$select public.finalize_payroll_run('3000000f-0000-0000-0000-000000000001')$$, '%out of date%');
+-- the race the client's compute token closes: a repayment lands while the draft is being
+-- computed (balance 900 - 800 = 100, the line takes 300) and the draft is marked complete anyway
+insert into advance_repayments (id, advance_id, paid_on, amount) values ('8000000f-0000-0000-0000-000000000004', '7000000f-0000-0000-0000-000000000001', '2026-11-07', 800);
+select pg_temp.computed('3000000f-0000-0000-0000-000000000001');
+select pg_temp.expect_error($$select public.finalize_payroll_run('3000000f-0000-0000-0000-000000000001')$$, '%must stay between 0 and%');
+select pg_temp.check((select status from payroll_runs where id = '3000000f-0000-0000-0000-000000000001') = 'draft', 'the over-deducting draft was not finalized');
+delete from advance_repayments where id = '8000000f-0000-0000-0000-000000000004';
 delete from advance_repayments where id = '8000000f-0000-0000-0000-000000000003';
 select pg_temp.computed('3000000f-0000-0000-0000-000000000001');
 select public.finalize_payroll_run('3000000f-0000-0000-0000-000000000001');
@@ -246,6 +264,6 @@ commit;
 
 \echo '--- 13.8 requests and repayments are audited with the client'
 select pg_temp.check((select count(*) from audit_logs where table_name = 'advance_requests' and entity_id = '10000000-0000-0000-0000-0000000000f0') >= 3, 'requests audited');
-select pg_temp.check((select count(*) from audit_logs where table_name = 'advance_repayments' and entity_id = '10000000-0000-0000-0000-0000000000f0') = 5, 'repayments audited: 3 recorded, 2 deleted');
+select pg_temp.check((select count(*) from audit_logs where table_name = 'advance_repayments' and entity_id = '10000000-0000-0000-0000-0000000000f0') = 9, 'repayments audited: 5 recorded, 4 deleted');
 
 \echo 'ALL CASH-ADVANCE TESTS PASSED'

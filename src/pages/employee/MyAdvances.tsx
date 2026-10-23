@@ -17,7 +17,7 @@ import type { AdvanceRepayment, AdvanceRequest, Payslip, RecurringDeduction } fr
 import { errorMessage } from '../../lib/errors'
 import { fetchAll } from '../../lib/fetchAll'
 import { fmtDate, money, plural } from '../../lib/format'
-import { todayManila } from '../../lib/manila'
+import { manilaDateStr, todayManila } from '../../lib/manila'
 import { useQuickAction } from '../../lib/quickAction'
 import { supabase } from '../../lib/supabase'
 import { round2 } from '../../payroll/types'
@@ -230,7 +230,7 @@ export default function MyAdvances() {
                     {money(Number(r.amount))} <span className="font-normal text-slate-500">· {money(Number(r.per_payroll))} per payroll</span>
                   </p>
                   <p className="break-words text-xs text-slate-500">
-                    Filed {fmtDate(r.created_at)}
+                    Filed {fmtDate(manilaDateStr(new Date(r.created_at)))}
                     {r.reason ? ` · “${r.reason}”` : ''}
                     {r.review_notes ? ` · HR: “${r.review_notes}”` : ''}
                   </p>
@@ -278,7 +278,7 @@ export default function MyAdvances() {
                 key={n}
                 type="button"
                 disabled={amount <= 0}
-                onClick={() => setForm({ ...form, perPayroll: String(Math.ceil((amount / n) * 100) / 100) })}
+                onClick={() => setForm({ ...form, perPayroll: String(Math.ceil(Math.round(amount * 100) / n) / 100) })}
                 className="rounded-md border border-slate-200 px-2 py-1 font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
               >
                 {plural(n, 'payroll')}
@@ -288,7 +288,7 @@ export default function MyAdvances() {
           {lastNet !== undefined && (
             <p className="text-xs text-slate-500">
               Your last take-home pay was {money(Number(lastNet))}. A payroll never deducts more than your take-home pay; what it can't
-              deduct waits for the next one.
+              deduct stays in your balance for later payrolls.
             </p>
           )}
           <Field label="Reason (optional)">
