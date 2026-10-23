@@ -160,15 +160,56 @@ merge to `main` yet.
   leave/entitlement double-submit guards; login codes also refuse all
   letters and the employee's own names (`admin-users` v5).
 
+### 2026-10-23 — UI revamp to the owner's reference video
+
+**Asked:** make the app look like a screen recording of a "tiimi" HR/payroll
+concept (dark top bar with section pills, white icon rail, lavender canvas,
+flat white cards, dark-green primary, lemon-yellow accent, stepper-style
+"Run Payroll" flow, attendance timeline bars); transitions not needed.
+
+**Did (front end only, no schema/RPC change):** new tokens in
+`src/index.css` (Figtree; `brand` = teal green, `accent` = lemon, `ink`,
+`canvas`, `leaf`, timeline colours; Tailwind's `slate` overridden to the
+design's lavender greys); `ui.tsx` primitives restyled plus `Avatar`,
+`StatGroup`, `StatusCounts`, `Segmented`, `IconButton`, `Donut`, `Logo`;
+dark toast; new `Shell` (top bar: section title + section pills with red
+pending counts, client switcher, yellow quick-add menu, account menu; icon
+rail; phone drawer). Pages: employee card grid/list, employee header with
+prev/next and icon tabs + new read-only **Attendance** tab (timeline),
+payroll runs table, pay-run page as a "Run payroll" workspace (stepper,
+hours & pay rows with per-employee adjustment shortcuts, hour summary and
+employer-cost donut, sticky Compute/Finalize bar), dashboards, split-screen
+login, My Attendance timeline. Quick-add links open create forms through
+`?new=<key>` (`src/lib/quickAction.ts`). Timeline geometry in
+`src/lib/timeline.ts` (+5 tests, 152 total).
+
+### 2026-10-23 — Revamp bug hunt (owner: "check for errors from the revamp, fix them all")
+
+**Did:** two independent code reviews (shell/components, pages) and a browser
+QA pass over every route × 3 roles × 1440/1024/768/390 px on the local stack;
+every verified finding fixed and re-checked in the browser. Worst: employee
+prev/next kept the previous employee's forms mounted — Save wrote one
+person's pay/profile onto the next and a fresh login code showed (and
+printed) under the next name (see lesson). Others: pay-run rows unreadable
+at 768–1279 px (now container-query layouts), warnings below the payslips on
+smaller screens, per-employee deductions dropped from pay-run rows, timeline
+late/overtime/hours disagreeing with payroll, toasts and the archived note
+covering top-bar controls, hidden section pills / rail items, stale pending
+counts, record pages not following the client switcher, contrast (secondary
+grey, "Active" badge, focus ring, disabled buttons), focus handling in
+dialogs/drawer/menus, 13th-month runs shown with hours. Older bugs fixed on
+the way: the timesheet's unsaved-change highlight never showed; a cleared
+month field on My Attendance sent invalid queries. Tests 153 → 156.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**Backend is multi-client since 2026-10-20; the Pages site is not yet.**
-The live site (`main`) still serves the old single-company front end,
-which does NOT work against the new schema — merging
-`claude/trusting-dirac-fqodu6` into `main` (owner's go-ahead pending) makes
-the live app usable again. Nothing else is outstanding for the backend.
+**Backend and Pages site are both multi-client since 2026-10-20.** The
+owner merged PR #1 (`claude/trusting-dirac-fqodu6`) into `main` at 04:28 UTC
+and the Pages deploy (run 4) succeeded. The UI revamp of 2026-10-23 is on
+branch `claude/kind-hawking-40tjt9` (front end only; no backend change) and
+reaches the live site only when merged into `main`.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-20:
 - **All 14 migrations applied.** The two multi-client ones were run by the
@@ -609,6 +650,13 @@ Why it mattered: the walkthrough found what unit tests and SQL tests
 couldn't — wrong-date saves, mislabeled controls, phone overflow, a
 double-click that duplicated loans.
 
+Rebuilt 2026-10-23 (scripts were in a session scratchpad, now gone):
+the edge function also runs in-process in the Node gateway behind a tiny
+Deno stand-in; payroll for seeding ran through the app's own
+`computeRun`/`finalizeRun` loaded via Vite's server-side module loader;
+since the new shell scrolls inside `<main>`, Playwright full-page shots
+capture one screen — grow the viewport height instead.
+
 ### Audit actor for service-role writes comes from x-actor-id — service role only
 
 > The admin-users function writes with the service role, so `auth.uid()` is null in the audit trigger; it now sends `x-actor-id: <calling admin>` and `audit_trigger()` honours that header only when the JWT role is `service_role` (a signed-in user's header is ignored, a malformed one yields no actor).
@@ -623,9 +671,12 @@ action — were logged with no actor. Tested in `11_audit_fixes_tests.sql`.
 Why it mattered: an admin clicking "Employees (required)" silently
 selected someone for a final-pay run.
 
-### Two Tailwind width classes on one element: stylesheet order wins
+### Two Tailwind classes for one property: stylesheet order wins, not class order
 
-> `Input`/`Select` always added `w-full`; a caller's `w-44` lost or won depending on CSS order, not class order — controls rendered full-width. `controlClass()` adds `w-full` only when the caller gave no `w-*`.
+> A caller's class can't reliably override a component's base class for the same property (`w-44` vs `w-full`, `px-3` vs `px-4`, `size-8` vs `size-9`, `border-accent-400` vs `border-slate-200`). Components take variants as props (`Button size`, `IconButton size`) and `controlClass()` drops its default width / border colour / background when the caller sets one.
+
+Why it mattered: controls rendered full-width, small buttons rendered large,
+and the timesheet's unsaved-change highlight never showed — all silently.
 
 ### Monthly contributions: never deduct beyond what the month still owes
 
@@ -652,3 +703,41 @@ Entry module before relying on the CSV column positions.
 Verify against each agency's own issuance before showing exact dates again
 (same rule as statutory figures: data from official sources, never memory).
 
+
+### The look lives in theme tokens and ui.tsx primitives (confirmed approach)
+
+> The 2026-10-23 revamp re-skinned the app mostly through `@theme` tokens in `src/index.css` and the primitives in `src/components/ui.tsx`; new screens should compose those (Card `icon`, StatGroup/StatCard, StatusCounts, Badge tones, Segmented, IconButton, Th/Td/TableShell) instead of hand-written colour classes.
+
+Rules that came with it: `brand-*` is the teal green (primary buttons
+`brand-700`), headings and dark buttons use `ink-900` — not brand;
+`accent-*` is lemon yellow, so text on it is `ink-900`, never white;
+`slate-*` is overridden to the design's lavender greys, so existing
+`text-slate-*` classes follow the theme; cards are flat `rounded-xl` with a
+light border, no shadow. Why it mattered: the only page edits the re-skin
+needed were where pages had hand-written navy/orange classes.
+
+### Chart colours come from the dataviz validator, not the brand swatches
+
+> The brand green #335f5a fails the chroma floor and sits under 15 ΔE from the timeline blue, so charts use the validated order green #3a8a5c → blue #1d6fb1 → yellow #eda100 → violet #6250d6 → orange #d9661a (dashboard bars, pay-run donut, payslip ring).
+
+The attendance timeline palette was validated as the pairs that actually
+touch (late | work | break | work | overtime); leave days never sit next to
+another segment and carry a stripe texture plus a label. Re-run
+`validate_palette.js` (dataviz skill) before adding a series colour. Why it
+mattered: eyeballed brand colours gave pairs that colour-blind — and even
+full-vision — readers could not tell apart.
+
+### Same route, new id: the page stays mounted — key record pages by id
+
+> React Router keeps `/admin/employees/A` mounted when you go to `/admin/employees/B`; tabs that copy the record into form state keep A's values, and Save writes them onto B. `EmployeeDetail` renders `<EmployeeRecord key={id}>` (the open tab is lifted out so it survives prev/next).
+
+Why it mattered: the revamp's prev/next buttons made this reachable — QA
+reproduced A's ₱68,000 rate and bank account saved onto B, and a freshly
+issued login code shown and printed under the next employee's name.
+
+### Attendance visuals must use payroll's own day computation
+
+> The timeline's late, overtime and hours come from `computeAttendance` for the day (`src/lib/timeline.ts`): payroll waives lateness when the standard day is completed, counts overtime as net minutes beyond the standard day after the unpaid break, and charges no tardiness on non-working holidays — edge-based "arrived after 9:00 / left after 18:00" bars contradicted all three.
+
+Why it mattered: employees would have seen lateness they weren't docked and
+overtime they wouldn't be paid.

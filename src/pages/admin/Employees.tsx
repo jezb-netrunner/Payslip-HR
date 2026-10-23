@@ -1,13 +1,32 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { KeyRound, Plus, Search } from 'lucide-react'
-import { Badge, Button, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, TableShell, Td, Th, Toggle } from '../../components/ui'
+import { Building, ChevronRight, Hash, KeyRound, LayoutGrid, List, Repeat, Search, UserPlus, Wallet } from 'lucide-react'
+import {
+  Avatar,
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  Input,
+  LoadFailed,
+  Modal,
+  NoClient,
+  PageHeader,
+  Segmented,
+  Select,
+  Spinner,
+  StatusCounts,
+  TableShell,
+  Td,
+  Th,
+  Toggle,
+} from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { getEmployees, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import type { Employee, EmploymentStatus, Entity, PaymentMethod } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fullName, initials, money } from '../../lib/format'
+import { fmtDate, fullName, money, personInitials } from '../../lib/format'
 import {
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
@@ -18,6 +37,7 @@ import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
+import { useQuickAction } from '../../lib/quickAction'
 
 const statusTones: Record<string, string> = {
   regular: 'green',
@@ -36,6 +56,17 @@ export default function Employees() {
   return <EmployeeList key={entity.id} entity={entity} />
 }
 
+type View = 'grid' | 'list'
+const VIEW_KEY = 'phr_employee_view'
+
+function readView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'grid'
+  } catch {
+    return 'grid'
+  }
+}
+
 function EmployeeList({ entity }: { entity: Entity }) {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,8 +75,21 @@ function EmployeeList({ entity }: { entity: Entity }) {
   const [showSeparated, setShowSeparated] = useState(false)
   const [frequency, setFrequency] = useState('')
   const [adding, setAdding] = useState(false)
+  const [view, setView] = useState<View>(readView)
   const navigate = useNavigate()
   const today = todayManila()
+
+  // wait for the list: the suggested employee number counts the employees already on file
+  useQuickAction('employee', () => setAdding(true), !loading)
+
+  const changeView = (v: View) => {
+    setView(v)
+    try {
+      localStorage.setItem(VIEW_KEY, v)
+    } catch {
+      // private mode: the choice just isn't remembered
+    }
+  }
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -80,48 +124,88 @@ function EmployeeList({ entity }: { entity: Entity }) {
     <div>
       <PageHeader
         title="Employees"
-        subtitle={`${entity.name} · ${activeCount} active, ${employees.length - activeCount} separated`}
+        subtitle={
+          <StatusCounts
+            items={[
+              { label: 'Active', count: activeCount, dot: 'bg-leaf-400' },
+              { label: 'Separated', count: employees.length - activeCount, dot: 'bg-ink-900' },
+            ]}
+          />
+        }
         actions={
           <Button onClick={() => setAdding(true)}>
-            <Plus className="size-4" /> Add employee
+            <UserPlus className="size-4" /> Add employee
           </Button>
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="relative w-72">
-          <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
           <Input
+            aria-label="Search employees"
             placeholder="Search name, number, position…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="pl-9"
           />
         </div>
-        <Select value={frequency} onChange={(e) => setFrequency(e.target.value)} className="w-44">
-          <option value="">All pay frequencies</option>
-          {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </Select>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <label className="flex items-center gap-2 rounded-lg bg-slate-200/60 py-1 pl-3 pr-1 text-sm font-medium text-ink-900">
+          <Repeat className="size-4 text-slate-500" />
+          <span className="sr-only">Pay frequency</span>
+          <select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+            className="rounded-md border-0 bg-white py-1 pl-2 pr-7 text-sm font-medium text-ink-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-brand-200"
+          >
+            <option value="">All pay frequencies</option>
+            {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>{v}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 rounded-lg bg-slate-200/60 px-3 py-2 text-sm font-medium text-ink-900">
           <input
             type="checkbox"
             checked={showSeparated}
             onChange={(e) => setShowSeparated(e.target.checked)}
-            className="rounded border-slate-300"
+            className="size-4 rounded border-slate-300 accent-brand-700"
           />
           Show separated
         </label>
+        <div className="ml-auto">
+          <Segmented
+            label="Layout"
+            value={view}
+            onChange={changeView}
+            options={[
+              { key: 'grid', label: <><LayoutGrid /><span className="sr-only">Cards</span></> },
+              { key: 'list', label: <><List /><span className="sr-only">List</span></> },
+            ]}
+          />
+        </div>
       </div>
 
       {loadError ? (
         <LoadFailed message={loadError} onRetry={load} />
       ) : loading ? (
         <Spinner />
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl border border-slate-200/80 bg-white">
+          <EmptyState
+            title="No employees found"
+            sub={employees.length ? 'Try another search or filter.' : 'Add your first employee to start building their 201 file.'}
+          />
+        </div>
+      ) : view === 'grid' ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {filtered.map((e) => (
+            <EmployeeCard key={e.id} e={e} today={today} onOpen={() => navigate(`/admin/employees/${e.id}`)} />
+          ))}
+        </div>
       ) : (
         <TableShell>
-          <thead className="bg-slate-50">
+          <thead>
             <tr>
               <Th>Employee</Th>
               <Th>Position / Dept</Th>
@@ -131,26 +215,20 @@ function EmployeeList({ entity }: { entity: Entity }) {
               <Th>Login</Th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody>
             {filtered.map((e) => {
               const separated = !isActiveOn(e, today)
               return (
-                <tr
-                  key={e.id}
-                  className="cursor-pointer hover:bg-brand-50/40"
-                  onClick={() => navigate(`/admin/employees/${e.id}`)}
-                >
+                <tr key={e.id} className="cursor-pointer" onClick={() => navigate(`/admin/employees/${e.id}`)}>
                   <Td>
                     <div className="flex items-center gap-3">
-                      <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700">
-                        {initials(fullName(e))}
-                      </div>
+                      <Avatar name={fullName(e)} initials={personInitials(e)} size="sm" />
                       <div>
                         {/* a real link: keyboard and screen-reader users can open the record too */}
                         <Link
                           to={`/admin/employees/${e.id}`}
                           onClick={(ev) => ev.stopPropagation()}
-                          className="font-semibold text-slate-800 hover:text-brand-700 hover:underline"
+                          className="font-semibold text-ink-900 hover:text-brand-700 hover:underline"
                         >
                           {fullName(e)}
                         </Link>
@@ -181,18 +259,14 @@ function EmployeeList({ entity }: { entity: Entity }) {
                     )}
                   </Td>
                   <Td className="text-xs">
-                    <p className="text-sm">
-                      {e.pay_type === 'monthly'
-                        ? `${money(Number(e.monthly_rate))}/mo`
-                        : `${money(Number(e.daily_rate))}/day`}
-                    </p>
+                    <p className="text-sm">{rateLabel(e)}</p>
                     <p className="text-slate-400">
                       {FREQUENCY_LABELS[e.pay_frequency]} · {PAYMENT_METHOD_LABELS[e.payment_method]}
                     </p>
                   </Td>
                   <Td>
                     {e.login_code_hint ? (
-                      <span className="flex items-center gap-1 text-xs text-emerald-700">
+                      <span className="flex items-center gap-1 text-xs text-leaf-700">
                         <KeyRound className="size-3.5" /> ••••{e.login_code_hint}
                       </span>
                     ) : (
@@ -202,13 +276,6 @@ function EmployeeList({ entity }: { entity: Entity }) {
                 </tr>
               )
             })}
-            {filtered.length === 0 && (
-              <tr>
-                <Td className="py-8 text-center text-slate-400" colSpan={6}>
-                  No employees found
-                </Td>
-              </tr>
-            )}
           </tbody>
         </TableShell>
       )}
@@ -224,6 +291,79 @@ function EmployeeList({ entity }: { entity: Entity }) {
         }}
         nextNumber={`${entity.code}-${String(employees.length + 1).padStart(4, '0')}`}
       />
+    </div>
+  )
+}
+
+function rateLabel(e: Employee) {
+  return e.pay_type === 'monthly' ? `${money(Number(e.monthly_rate))}/mo` : `${money(Number(e.daily_rate))}/day`
+}
+
+function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen: () => void }) {
+  const separated = !isActiveOn(e, today)
+  const leaving = !separated && !!e.separation_date
+  return (
+    <div
+      onClick={onOpen}
+      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-slate-200/80 bg-white p-5 transition-shadow hover:shadow-md ${separated ? 'opacity-80' : ''}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        {separated ? (
+          <Badge tone="slate">Separated {fmtDate(e.separation_date)}</Badge>
+        ) : leaving ? (
+          <Badge tone="amber">Leaving {fmtDate(e.separation_date)}</Badge>
+        ) : (
+          <Badge tone="solid">Active</Badge>
+        )}
+        {e.is_minimum_wage_earner && <Badge tone="orange" dot={false}>MWE</Badge>}
+      </div>
+      <div className="mt-3 flex flex-col items-center text-center">
+        <Avatar name={fullName(e)} initials={personInitials(e)} size="xl" />
+        <p className="mt-3 font-bold text-ink-900">{fullName(e)}</p>
+        <p className="text-sm text-slate-500">{e.position || 'No position yet'}</p>
+      </div>
+      <div className="mt-4 space-y-2 rounded-lg border border-slate-200/80 bg-slate-50/60 p-3 text-sm text-ink-900">
+        <p className="flex items-center gap-2">
+          <Hash className="size-4 shrink-0 text-slate-400" /> {e.employee_no}
+        </p>
+        <p className="flex min-w-0 items-center gap-2">
+          <Building className="size-4 shrink-0 text-slate-400" />
+          <span className="truncate">{e.department || 'No department'}</span>
+          <span className="text-slate-300">·</span>
+          <span className="truncate">{EMPLOYMENT_STATUS_LABELS[e.employment_status]}</span>
+        </p>
+        <p className="flex min-w-0 items-center gap-2">
+          <Wallet className="size-4 shrink-0 text-slate-400" />
+          <span className="truncate">
+            {rateLabel(e)} · {FREQUENCY_LABELS[e.pay_frequency]} · {PAYMENT_METHOD_LABELS[e.payment_method]}
+          </span>
+        </p>
+        <p className="flex items-center gap-2">
+          <KeyRound className="size-4 shrink-0 text-slate-400" />
+          {e.login_code_hint ? (
+            <span className="rounded-full border border-sky-100 bg-sky-50 px-2 py-0.5 text-xs font-medium text-work">
+              Login code ••••{e.login_code_hint}
+            </span>
+          ) : (
+            <span className="text-xs text-slate-400">No login code yet</span>
+          )}
+        </p>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-2 text-sm">
+        <span className="text-slate-500">
+          Joined <span className="text-ink-900">{fmtDate(e.hire_date)}</span>
+        </span>
+        {/* a real link: keyboard and screen-reader users can open the record too */}
+        <Link
+          to={`/admin/employees/${e.id}`}
+          onClick={(ev) => ev.stopPropagation()}
+          aria-label={`View details of ${fullName(e)}`}
+          className="flex items-center gap-0.5 font-semibold text-ink-900 underline decoration-slate-300 underline-offset-4 hover:decoration-ink-900"
+        >
+          View details <ChevronRight className="size-4" />
+        </Link>
+      </div>
+      <span className={`absolute inset-x-0 bottom-0 h-1 ${separated ? 'bg-slate-300' : leaving ? 'bg-amber-400' : 'bg-leaf-400'}`} />
     </div>
   )
 }

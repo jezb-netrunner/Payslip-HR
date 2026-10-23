@@ -1,19 +1,61 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, Banknote, Calculator, Download, Eye, Lock, Plus, Trash2, Unlock } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  Banknote,
+  Calculator,
+  Check,
+  CheckCircle2,
+  Clock,
+  Download,
+  Eye,
+  Lock,
+  PieChart,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+  Unlock,
+} from 'lucide-react'
 import PayslipView, { runLabel } from '../../components/PayslipView'
-import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, PageHeader, Select, Spinner, StatCard, TableShell, Td, Th } from '../../components/ui'
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  Donut,
+  EmptyState,
+  Field,
+  IconButton,
+  Input,
+  LoadFailed,
+  Modal,
+  Select,
+  Spinner,
+  StatCard,
+  StatGroup,
+  TableShell,
+  Td,
+  Th,
+} from '../../components/ui'
 import { fetchAll } from '../../lib/fetchAll'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees } from '../../lib/api'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
 import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtMonth, fullName, money, plural } from '../../lib/format'
+import { useRecordClient } from '../../lib/recordClient'
+import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
 import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+
+// Categorical chart colours in fixed order (validated: lightness, chroma,
+// colour-blind and normal-vision separation; yellow sits below 3:1, so every
+// segment carries a printed value in its legend).
+const SERIES = { green: '#3a8a5c', blue: '#1d6fb1', yellow: '#eda100', violet: '#6250d6', orange: '#d9661a' }
 
 const EARNING_CATEGORIES = [
   'basic', 'overtime', 'holiday', 'night_diff', 'hazard', 'other_benefits', 'de_minimis',
@@ -35,7 +77,7 @@ export default function PayrollRunDetail() {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<RunComputationResult | null>(null)
   const [viewing, setViewing] = useState<Payslip | null>(null)
-  const [addingAdj, setAddingAdj] = useState(false)
+  const [addingAdj, setAddingAdj] = useState<{ employeeId?: string; kind: 'earning' | 'deduction' } | null>(null)
   const [showCash, setShowCash] = useState(false)
 
   const load = useCallback(async () => {
@@ -73,6 +115,7 @@ export default function PayrollRunDetail() {
   }, [load])
 
   const entity = entities.find((e) => e.id === run?.entity_id) ?? null
+  useRecordClient(run?.entity_id, '/admin/payroll')
   const covered = useMemo(() => (run ? employeesForRun(run, employees) : []), [run, employees])
 
   if (loading) return <Spinner />
@@ -192,199 +235,436 @@ export default function PayrollRunDetail() {
     return e ? fullName(e) : '—'
   }
 
+  const computed = slips.length > 0
+  const stale = isDraft && computed && !upToDate && !computing
+  const extraEarnings = adjustments.filter((a) => a.kind === 'earning').reduce((sum, a) => sum + Number(a.amount), 0)
+  const totalHours = slips.reduce((sum, x) => sum + Number(x.hours_worked), 0)
+  const otHours = slips.reduce((sum, x) => sum + Number(x.overtime_hours), 0)
+  const absentDays = slips.reduce((sum, x) => sum + Number(x.absent_days), 0)
+  const regularHours = Math.max(0, totalHours - otHours)
+  const eeContrib = (t.sss_ee ?? 0) + (t.philhealth_ee ?? 0) + (t.pagibig_ee ?? 0)
+  const erContrib = (t.sss_er ?? 0) + (t.philhealth_er ?? 0) + (t.pagibig_er ?? 0)
+  // employer cost = gross + employer shares + rounding = net + tax + employee shares + other deductions + employer shares
+  const otherDeductions = Math.max(0, (t.gross ?? 0) + (t.rounding ?? 0) - (t.net ?? 0) - (t.withholding_tax ?? 0) - eeContrib)
+  const spend = [
+    { label: 'Net pay', value: t.net ?? 0, color: SERIES.green },
+    // a year-end refund run withholds a negative amount: listed, not drawn
+    { label: (t.withholding_tax ?? 0) < 0 ? 'Tax refunded (year-end)' : 'Withholding tax', value: t.withholding_tax ?? 0, color: SERIES.blue },
+    { label: 'Employee contributions', value: eeContrib, color: SERIES.yellow },
+    { label: 'Employer contributions', value: erContrib, color: SERIES.violet },
+    { label: 'Other deductions', value: otherDeductions, color: SERIES.orange },
+  ]
+  const isThirteenth = run.run_type === 'thirteenth_month'
+  const steps: Step[] = [
+    { label: 'Compute', sub: isThirteenth ? 'From basic pay earned this year' : 'Hours & pay from time in/out', state: !isDraft || (computed && upToDate) ? 'done' : 'current' },
+    { label: 'Review', sub: isThirteenth ? 'Warnings and payslips' : 'Warnings, adjustments, payslips', state: !isDraft ? 'done' : computed && upToDate ? 'current' : 'todo' },
+    { label: 'Finalize', sub: 'Lock and publish payslips', state: !isDraft ? 'done' : 'todo' },
+  ]
+  const tip = !isDraft
+    ? {
+        title: 'Notes',
+        body: 'Payslips are locked and visible to employees, and attendance in this period is locked. Reopen the run to change anything — reopening is audit-logged.',
+      }
+    : isThirteenth
+      ? {
+          title: computed ? 'Double-check 13th month pay' : 'Compute the 13th month',
+          body: '13th month pay is one-twelfth of the basic salary each employee earned in the calendar year (PD 851), due by December 24. Check each amount before finalizing.',
+        }
+      : !computed
+        ? { title: 'Compute the draft', body: 'Payslips are computed from time in/out, approved leave, rates, allowances and the statutory tables in force for this period.' }
+        : {
+            title: 'Double-check hours & pay',
+            body: 'Check pay rates, overtime, holiday premiums and night differential against the timesheets. Add one-time adjustments, then recompute before finalizing.',
+          }
+  const canAdjust = isDraft && run.run_type !== 'thirteenth_month'
+  // a stale draft can hold payslips for people the run no longer covers: no shortcut for them
+  const coveredIds = new Set(covered.map((e) => e.id))
+  const hasWarnings = warnings.length > 0 || (result?.warnings.length ?? 0) > 0
+  const notices =
+    stale || hasWarnings ? (
+      <>
+        {stale && (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            Attendance, adjustments, leave or pay settings changed since this draft was computed (or the last
+            computation did not finish). Recompute the draft before finalizing.
+          </p>
+        )}
+        {hasWarnings && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-bold text-amber-800">
+              <AlertTriangle className="size-4" /> Review warnings
+            </p>
+            {/* run-level notes and employees left out of the run (they have no payslip to carry them) */}
+            {result?.warnings.map((w, i) => (
+              <p key={`r${i}`} className="text-xs text-amber-700">
+                • {w.employee === 'This run' ? '' : `${w.employee}: `}{w.warnings.join('; ')}
+              </p>
+            ))}
+            {warnings.map((w, i) => (
+              <p key={i} className="text-xs text-amber-700">• {w.name}: {w.warning}</p>
+            ))}
+          </div>
+        )}
+      </>
+    ) : null
+
   return (
     <div>
-      <Link to="/admin/payroll" className="mb-3 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-800">
-        <ArrowLeft className="size-3.5" /> All runs
-      </Link>
-      <PageHeader
-        title={`Payroll ${runLabel(run)}`}
-        subtitle={
-          <>
-            {entity.name} · Pay date {fmtDate(run.pay_date)} · {fmtMonth(run.period_month)}
-            {run.pay_frequency && ` · ${FREQUENCY_LABELS[run.pay_frequency]} payroll ${run.period_index} of ${run.periods_in_month}`}{' '}
-            <Badge tone={isDraft ? 'amber' : 'green'}>{run.status}</Badge>{' '}
-            {run.annualize && <Badge tone="violet">annualized withholding</Badge>}
-          </>
-        }
-        actions={
-          <>
-            {isDraft ? (
-              <>
-                <Button onClick={compute} disabled={computing}>
-                  <Calculator className="size-4" />
-                  {computing ? 'Computing…' : slips.length ? 'Recompute draft' : 'Compute draft'}
-                </Button>
-                <Button variant="accent" onClick={doFinalize} disabled={busy || computing || !upToDate}>
-                  <Lock className="size-4" /> Finalize
-                </Button>
-                <Button variant="ghost" onClick={deleteDraft} title="Delete draft run" aria-label="Delete draft run">
-                  <Trash2 className="size-4" />
-                </Button>
-              </>
-            ) : (
-              <Button variant="secondary" onClick={doReopen} disabled={busy}>
-                <Unlock className="size-4" /> Reopen as draft
-              </Button>
-            )}
-            <Button variant="secondary" onClick={exportRegister} disabled={slips.length === 0}>
-              <Download className="size-4" /> Register CSV
-            </Button>
-          </>
-        }
-      />
-      {isDraft && slips.length > 0 && !upToDate && !computing && (
-        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Attendance, adjustments, leave or pay settings changed since this draft was computed (or the last computation
-          did not finish). Recompute the draft before finalizing.
-        </p>
-      )}
-
-      {(warnings.length > 0 || (result?.warnings.length ?? 0) > 0) && (
-        <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-          <p className="mb-1 flex items-center gap-1.5 text-sm font-bold text-amber-800">
-            <AlertTriangle className="size-4" /> Review warnings
-          </p>
-          {/* run-level notes and employees left out of the run (they have no payslip to carry them) */}
-          {result?.warnings.map((w, i) => (
-            <p key={`r${i}`} className="text-xs text-amber-700">
-              • {w.employee === 'This run' ? '' : `${w.employee}: `}{w.warnings.join('; ')}
-            </p>
-          ))}
-          {warnings.map((w, i) => (
-            <p key={i} className="text-xs text-amber-700">• {w.name}: {w.warning}</p>
-          ))}
+      <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+        <IconButton round label="All pay runs" onClick={() => navigate('/admin/payroll')}>
+          <ArrowLeft className="size-4" />
+        </IconButton>
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-slate-500">Run payroll · {entity.name}</p>
+          <h1 className="text-xl font-bold tracking-tight text-ink-900 sm:text-2xl">{runLabel(run)}</h1>
         </div>
-      )}
-
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Employees" value={t.employees ?? slips.length} sub={isDraft ? `${covered.length} covered by this run` : undefined} />
-        <StatCard label="Gross payroll" value={money(t.gross ?? 0)} />
-        <StatCard label="Net payout" value={money(t.net ?? 0)} tone="accent" sub={t.cash_employees ? `${money(t.cash_net)} in cash to ${t.cash_employees}` : undefined} />
-        <StatCard label="Total employer cost" value={money(t.employer_cost ?? 0)} sub="Gross + employer SSS/EC/MPF, PhilHealth, Pag-IBIG + rounding" />
-      </div>
-
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Withholding tax" value={money(t.withholding_tax ?? 0)} sub="Remit via BIR 1601-C" />
-        <StatCard label="SSS (EE+ER)" value={money((t.sss_ee ?? 0) + (t.sss_er ?? 0))} />
-        <StatCard label="PhilHealth (EE+ER)" value={money((t.philhealth_ee ?? 0) + (t.philhealth_er ?? 0))} />
-        <StatCard label="Pag-IBIG (EE+ER)" value={money((t.pagibig_ee ?? 0) + (t.pagibig_er ?? 0))} />
-      </div>
-
-      {(isDraft || adjustments.length > 0) && run.run_type !== 'thirteenth_month' && (
-        <Card
-          className="mb-6"
-          title={`One-time adjustments (${adjustments.length})`}
-          actions={
-            isDraft && (
-              <Button variant="secondary" onClick={() => setAddingAdj(true)}>
-                <Plus className="size-4" /> Add adjustment
-              </Button>
-            )
-          }
-        >
-          {adjustments.length === 0 ? (
-            <p className="text-sm text-slate-400">
-              Bonuses, corrections of earlier payrolls, final-pay extras or one-off deductions for this run only.
-              Recompute after changes.
-            </p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {adjustments.map((a) => (
-                <div key={a.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <div>
-                    <span className="font-semibold text-slate-700">{empName(a.employee_id)}</span>
-                    <span className="text-slate-500"> · {a.label}</span>{' '}
-                    <Badge tone={a.kind === 'earning' ? 'green' : 'red'}>{a.kind}</Badge>{' '}
-                    <span className="text-xs text-slate-400">
-                      {a.kind === 'earning' ? BIR_BUCKET_LABELS[a.category as keyof typeof BIR_BUCKET_LABELS] : a.category.replaceAll('_', ' ')}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`font-semibold ${a.kind === 'earning' ? 'text-slate-800' : 'text-rose-600'}`}>
-                      {a.kind === 'deduction' ? '−' : ''}{money(Number(a.amount))}
-                    </span>
-                    {isDraft && (
-                      <button type="button" onClick={() => removeAdjustment(a.id)} className="text-slate-300 hover:text-rose-500" title="Remove" aria-label={`Remove ${a.label}`}>
-                        <Trash2 className="size-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
-
-      <Card
-        title={`Payslips (${slips.length})`}
-        actions={
-          cashSlips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          <Badge tone={isDraft ? 'amber' : run.status === 'paid' ? 'blue' : 'green'}>{isDraft ? 'Draft' : run.status === 'paid' ? 'Paid' : 'Finalized'}</Badge>
+          {run.pay_frequency && <Badge tone="slate" dot={false}>{FREQUENCY_LABELS[run.pay_frequency]}</Badge>}
+          {run.annualize && <Badge tone="violet" dot={false}>annualized withholding</Badge>}
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {cashSlips.length > 0 && (
             <Button variant="secondary" onClick={() => setShowCash(true)}>
               <Banknote className="size-4" /> Cash payout ({cashSlips.length})
             </Button>
-          )
-        }
-      >
-        {slips.length === 0 ? (
-          <EmptyState
-            title="No payslips yet"
-            sub='Click "Compute draft" to generate payslips from time in/out, rates and the statutory tables.'
-          />
-        ) : (
-          <TableShell>
-            <thead className="bg-slate-50">
-              <tr>
-                <Th>Employee</Th>
-                <Th className="text-right">Days</Th>
-                <Th className="text-right">Gross</Th>
-                <Th className="text-right">Statutory EE</Th>
-                <Th className="text-right">W/Tax</Th>
-                <Th className="text-right">Net Pay</Th>
-                <Th></Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {slips.map((s) => {
-                const snap = s.employee_snapshot as Record<string, string>
-                const statEe = Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.philhealth_ee) + Number(s.pagibig_ee)
-                return (
-                  <tr key={s.id} className="hover:bg-slate-50">
-                    <Td>
-                      <p className="font-semibold">{snap.name}</p>
-                      <p className="text-xs text-slate-400">
-                        {snap.employee_no} · {s.payment_method ? PAYMENT_METHOD_LABELS[s.payment_method] : '—'}
-                        {s.is_minimum_wage_earner && ' · MWE'}
-                      </p>
-                    </Td>
-                    <Td className="text-right">{Number(s.days_worked)}</Td>
-                    <Td className="text-right">{money(Number(s.gross_pay))}</Td>
-                    <Td className="text-right">{money(statEe)}</Td>
-                    <Td className="text-right">{money(Number(s.withholding_tax))}</Td>
-                    <Td className="text-right font-bold text-brand-900">
-                      {money(Number(s.net_pay))}
-                      {Number(s.rounding_adjustment) !== 0 && (
-                        <p className="text-[10px] font-normal text-slate-400">
-                          rounding {Number(s.rounding_adjustment) > 0 ? '+' : ''}{money(Number(s.rounding_adjustment))}
-                        </p>
-                      )}
-                    </Td>
-                    <Td>
-                      <button
-                        onClick={() => setViewing(s)}
-                        className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-800"
+          )}
+          <Button variant="secondary" onClick={exportRegister} disabled={slips.length === 0}>
+            <Download className="size-4" /> Register CSV
+          </Button>
+          {isDraft && (
+            <IconButton label="Delete draft run" onClick={deleteDraft} className="text-rose-600">
+              <Trash2 className="size-4" />
+            </IconButton>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[150px_minmax(0,1fr)] xl:grid-cols-[150px_minmax(0,1fr)_260px]">
+        <Stepper steps={steps} />
+
+        <div className="min-w-0 space-y-6">
+          {/* below xl the aside drops under the payslips: keep what blocks finalizing in view */}
+          {notices && <div className="space-y-4 xl:hidden">{notices}</div>}
+          <section className="rounded-xl border border-slate-200/80 bg-white">
+            <div className="p-5">
+              <h2 className="flex items-center gap-2 text-base font-bold text-ink-900">
+                {!isDraft && <CheckCircle2 className="size-5 text-leaf-500" />}
+                {!isDraft ? 'Payroll finalized' : isThirteenth ? 'Double-check 13th month pay' : 'Double-check hours & pay'}
+              </h2>
+              {!isDraft && run.finalized_at && (
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Finalized {fmtDateTime(run.finalized_at)} · employees can see their payslips
+                </p>
+              )}
+              <div className="mt-4 flex flex-wrap gap-x-10 gap-y-4">
+                <Fact big label="Net payout" value={money(t.net ?? 0)} />
+                <Fact label="Gross pay" value={money(t.gross ?? 0)} />
+                {isThirteenth ? (
+                  <Fact label="Employees" value={String(slips.length)} />
+                ) : (
+                  <>
+                    <Fact label="Hours worked" value={`${hrs(totalHours)} hrs`} />
+                    <Fact label="Additional earnings" value={money(extraEarnings)} />
+                  </>
+                )}
+              </div>
+            </div>
+            {slips.length === 0 ? (
+              <div className="border-t border-slate-100 pb-6">
+                <EmptyState
+                  title="No payslips yet"
+                  sub={isDraft ? `${plural(covered.length, 'employee')} covered by this run. Compute the draft to generate their payslips.` : 'This run has no payslips.'}
+                />
+                {isDraft && (
+                  <div className="flex justify-center">
+                    <Button onClick={compute} disabled={computing}>
+                      <Calculator className="size-4" /> {computing ? 'Computing…' : 'Compute draft'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* rows follow the card's own width: full columns only where the name keeps room */}
+                <div className="@container">
+                <div className="hidden grid-cols-[minmax(0,1fr)_88px_minmax(0,140px)_136px_112px_32px] gap-3 border-y border-slate-100 bg-slate-100 px-5 py-2.5 text-xs font-semibold text-slate-600 @3xl:grid">
+                  <span>{plural(slips.length, 'employee')}</span>
+                  <span>{isThirteenth ? '' : 'Hours worked'}</span>
+                  <span>{isThirteenth ? '' : 'Additional earnings'}</span>
+                  <span className="text-right">Gross · deductions</span>
+                  <span className="text-right">Net pay</span>
+                  <span />
+                </div>
+                <ul className="divide-y divide-slate-100 border-t border-slate-100 @3xl:border-t-0">
+                  {slips.map((s) => {
+                    const snap = s.employee_snapshot as Record<string, string>
+                    const mine = adjustments.filter((a) => a.employee_id === s.employee_id)
+                    const statEe = Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.philhealth_ee) + Number(s.pagibig_ee)
+                    const tax = `${Number(s.withholding_tax) < 0 ? 'Tax refund' : 'W/tax'} ${money(Math.abs(Number(s.withholding_tax)))}`
+                    const shortcuts = canAdjust && coveredIds.has(s.employee_id)
+                    const adjusts = (
+                      <>
+                        {mine.map((a) => (
+                          <p key={a.id} className={`truncate ${a.kind === 'earning' ? 'text-ink-900' : 'text-rose-600'}`} title={a.label}>
+                            {a.kind === 'earning' ? '+' : '−'} {money(Number(a.amount))} {a.label}
+                          </p>
+                        ))}
+                        {shortcuts && (
+                          <div className="flex gap-3 text-slate-500">
+                            <button
+                              type="button"
+                              aria-label={`Add an earning for ${snap.name}`}
+                              onClick={() => setAddingAdj({ employeeId: s.employee_id, kind: 'earning' })}
+                              className="flex items-center gap-0.5 font-medium hover:text-ink-900"
+                            >
+                              <Plus className="size-3.5" /> Earning
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Add a deduction for ${snap.name}`}
+                              onClick={() => setAddingAdj({ employeeId: s.employee_id, kind: 'deduction' })}
+                              className="flex items-center gap-0.5 font-medium hover:text-ink-900"
+                            >
+                              <Plus className="size-3.5" /> Deduction
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )
+                    return (
+                      <li
+                        key={s.id}
+                        className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-3 px-5 py-3.5 @3xl:grid-cols-[minmax(0,1fr)_88px_minmax(0,140px)_136px_112px_32px] @3xl:items-center"
                       >
-                        <Eye className="size-3.5" /> View
-                      </button>
-                    </Td>
-                  </tr>
+                        <div className="flex min-w-0 items-start gap-3 @3xl:items-center">
+                          <Avatar name={snap.name ?? '?'} />
+                          <div className="min-w-0">
+                            <p className="line-clamp-2 break-words font-semibold leading-snug text-ink-900">{snap.name}</p>
+                            <p className="truncate text-xs text-slate-400">
+                              {snap.employee_no} · {s.payment_method ? PAYMENT_METHOD_LABELS[s.payment_method] : '—'}
+                              {s.is_minimum_wage_earner && ' · MWE'}
+                            </p>
+                            {/* narrow card: the figures of the wide columns, under the name */}
+                            <div className="mt-1.5 space-y-0.5 text-xs text-slate-500 @3xl:hidden">
+                              {!isThirteenth && (
+                                <p>
+                                  {hrs(Number(s.hours_worked))} hrs · {Number(s.days_worked)} days
+                                  {Number(s.overtime_hours) > 0 && ` · ${hrs(Number(s.overtime_hours))} OT`}
+                                </p>
+                              )}
+                              <p>
+                                Gross {money(Number(s.gross_pay))} · SSS/PH/PI {money(statEe)} · {tax}
+                              </p>
+                              {(mine.length > 0 || shortcuts) && <div className="space-y-0.5 pt-0.5">{adjusts}</div>}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="hidden text-sm @3xl:block">
+                          {isThirteenth ? (
+                            <span className="text-slate-300">—</span>
+                          ) : (
+                            <>
+                              <p className="font-semibold text-ink-900">
+                                <span className="sr-only">Hours worked: </span>
+                                {hrs(Number(s.hours_worked))} hrs
+                              </p>
+                              <p className="text-xs text-slate-400">
+                                {Number(s.days_worked)} days
+                                {Number(s.overtime_hours) > 0 && ` · ${hrs(Number(s.overtime_hours))} OT`}
+                              </p>
+                            </>
+                          )}
+                        </div>
+                        <div className="hidden min-w-0 text-xs @3xl:block">
+                          {mine.length > 0 || shortcuts ? adjusts : <span className="text-slate-300">—</span>}
+                        </div>
+                        <div className="hidden text-right @3xl:block">
+                          <p className="text-sm">
+                            <span className="sr-only">Gross pay: </span>
+                            {money(Number(s.gross_pay))}
+                          </p>
+                          {/* the review figures the old register table showed per employee */}
+                          <p className="text-[11px] text-slate-400">SSS/PH/PI {money(statEe)}</p>
+                          <p className="text-[11px] text-slate-400">{tax}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-ink-900">
+                            <span className="sr-only">Net pay: </span>
+                            {money(Number(s.net_pay))}
+                          </p>
+                          {Number(s.rounding_adjustment) !== 0 && (
+                            <p className="text-[10px] text-slate-400">
+                              rounding {Number(s.rounding_adjustment) > 0 ? '+' : ''}
+                              {money(Number(s.rounding_adjustment))}
+                            </p>
+                          )}
+                        </div>
+                        <IconButton size="sm" label={`View ${snap.name}'s payslip`} onClick={() => setViewing(s)}>
+                          <Eye className="size-4" />
+                        </IconButton>
+                      </li>
+                    )
+                  })}
+                </ul>
+                </div>
+              </>
+            )}
+          </section>
+
+          {(canAdjust || adjustments.length > 0) && (
+            <Card
+              title={`One-time adjustments (${adjustments.length})`}
+              icon={<SlidersHorizontal />}
+              actions={
+                canAdjust && (
+                  <Button variant="secondary" onClick={() => setAddingAdj({ kind: 'earning' })}>
+                    <Plus className="size-4" /> Add adjustment
+                  </Button>
                 )
-              })}
-            </tbody>
-          </TableShell>
-        )}
-      </Card>
+              }
+            >
+              {adjustments.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Bonuses, corrections of earlier payrolls, final-pay extras or one-off deductions for this run only.
+                  Recompute after changes.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {adjustments.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                      <div className="min-w-0">
+                        <span className="font-semibold text-ink-900">{empName(a.employee_id)}</span>
+                        <span className="text-slate-500"> · {a.label}</span>{' '}
+                        <Badge tone={a.kind === 'earning' ? 'green' : 'red'}>{a.kind}</Badge>{' '}
+                        <span className="text-xs text-slate-400">
+                          {a.kind === 'earning' ? BIR_BUCKET_LABELS[a.category as keyof typeof BIR_BUCKET_LABELS] : a.category.replaceAll('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`font-semibold ${a.kind === 'earning' ? 'text-ink-900' : 'text-rose-600'}`}>
+                          {a.kind === 'deduction' ? '−' : ''}{money(Number(a.amount))}
+                        </span>
+                        {isDraft && (
+                          <button type="button" onClick={() => removeAdjustment(a.id)} className="text-slate-300 hover:text-rose-500" title="Remove" aria-label={`Remove ${a.label}`}>
+                            <Trash2 className="size-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
+
+          {computed && (
+            <div className="grid gap-6 2xl:grid-cols-2">
+              {!isThirteenth && (
+              <Card title="Working hour summary" icon={<Clock />}>
+                <div className="grid grid-cols-3">
+                  <HourFact value={`${hrs(regularHours)}hr`} label="Regular hours" />
+                  <HourFact value={`${hrs(otHours)}hr`} label="Overtime" />
+                  <HourFact value={`${hrs(absentDays)}`} label={absentDays === 1 ? 'Day absent' : 'Days absent'} />
+                </div>
+                <div className="mt-6 flex h-3 gap-0.5 overflow-hidden rounded-full bg-slate-100">
+                  {totalHours > 0 && (
+                    <>
+                      <span style={{ width: `${(regularHours / totalHours) * 100}%`, background: SERIES.green }} />
+                      <span style={{ width: `${(otHours / totalHours) * 100}%`, background: SERIES.blue }} />
+                    </>
+                  )}
+                </div>
+                <div className="mt-2 flex gap-4 text-xs text-slate-500">
+                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: SERIES.green }} /> Regular</span>
+                  <span className="flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: SERIES.blue }} /> Overtime</span>
+                </div>
+              </Card>
+              )}
+              <Card title={isDraft ? 'What the company will pay' : 'What the company paid'} icon={<PieChart />}>
+                <div className="flex flex-col items-center gap-6 sm:flex-row">
+                  <Donut
+                    segments={spend}
+                    center={
+                      <>
+                        <p className="text-lg font-bold text-ink-900">{money(t.employer_cost ?? 0)}</p>
+                        <p className="text-xs text-slate-500">Total employer cost</p>
+                      </>
+                    }
+                  />
+                  <ul className="grid w-full flex-1 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-1">
+                    {spend.map((x) => (
+                      <li key={x.label} className="flex items-start gap-2">
+                        <span className="mt-1.5 size-2 shrink-0 rounded-full" style={{ background: x.color }} />
+                        <span>
+                          <span className="block text-sm font-bold text-ink-900">{money(x.value)}</span>
+                          <span className="block text-xs text-slate-500">{x.label}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          <StatGroup>
+            <StatCard label="Withholding tax" value={money(t.withholding_tax ?? 0)} sub="Remit via BIR 1601-C" />
+            <StatCard label="SSS (EE+ER)" value={money((t.sss_ee ?? 0) + (t.sss_er ?? 0))} />
+            <StatCard label="PhilHealth (EE+ER)" value={money((t.philhealth_ee ?? 0) + (t.philhealth_er ?? 0))} />
+            <StatCard label="Pag-IBIG (EE+ER)" value={money((t.pagibig_ee ?? 0) + (t.pagibig_er ?? 0))} />
+          </StatGroup>
+        </div>
+
+        <aside className="space-y-4 lg:col-start-2 xl:col-start-auto">
+          <div className="rounded-xl bg-slate-200/50 p-4">
+            <p className="text-sm font-semibold text-ink-900">{tip.title}</p>
+            <p className="mt-1 text-sm text-slate-600">{tip.body}</p>
+          </div>
+          {notices && <div className="hidden space-y-4 xl:block">{notices}</div>}
+          <dl className="space-y-3 rounded-xl border border-slate-200/80 bg-white p-4 text-sm">
+            <RunFact label="Pay period" value={fmtPeriod(run.period_start, run.period_end)} />
+            <RunFact label="Pay date" value={fmtDate(run.pay_date)} />
+            <RunFact
+              label="Payroll month"
+              value={
+                <>
+                  <span className="whitespace-nowrap">{fmtMonth(run.period_month)}</span>
+                  {run.periods_in_month > 1 && (
+                    <span className="whitespace-nowrap"> · {run.period_index} of {run.periods_in_month}</span>
+                  )}
+                </>
+              }
+            />
+            <RunFact label="Employees" value={`${t.employees ?? slips.length}${isDraft ? ` of ${covered.length} covered` : ''}`} />
+            <RunFact label="Employer cost" value={money(t.employer_cost ?? 0)} />
+            {!!t.cash_employees && <RunFact label="Cash payout" value={`${money(t.cash_net)} to ${t.cash_employees}`} />}
+          </dl>
+        </aside>
+      </div>
+
+      <div className="sticky bottom-0 z-10 -mx-4 -mb-4 mt-8 flex items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:-mb-6 sm:px-6 lg:-mx-8 lg:-mb-8 lg:px-8">
+        <Link to="/admin/payroll" className="hidden text-sm font-semibold text-ink-900 hover:underline sm:inline">
+          Back to payroll
+        </Link>
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
+          {isDraft ? (
+            <>
+              <Button variant={computed && upToDate ? 'secondary' : 'primary'} onClick={compute} disabled={computing}>
+                <Calculator className="size-4" />
+                {computing ? 'Computing…' : computed ? 'Recompute draft' : 'Compute draft'}
+              </Button>
+              <Button onClick={doFinalize} disabled={busy || computing || !upToDate} variant={computed && upToDate ? 'primary' : 'secondary'}>
+                <Lock className="size-4" /> Finalize <ArrowRight className="size-4" />
+              </Button>
+            </>
+          ) : (
+            <Button variant="secondary" onClick={doReopen} disabled={busy}>
+              <Unlock className="size-4" /> Reopen as draft
+            </Button>
+          )}
+        </div>
+      </div>
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>
         {viewing && <PayslipView slip={viewing} run={run} company={entity} showTrace />}
@@ -398,7 +678,7 @@ export default function PayrollRunDetail() {
             </p>
           )}
           <TableShell>
-            <thead className="bg-slate-50">
+            <thead>
               <tr>
                 <Th>Employee</Th>
                 <Th className="text-right">Net</Th>
@@ -407,7 +687,7 @@ export default function PayrollRunDetail() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {cashRows.map(({ slip, b }) => (
                 <tr key={slip.id}>
                   <Td className="text-xs font-semibold">{(slip.employee_snapshot as Record<string, string>).name}</Td>
@@ -419,7 +699,7 @@ export default function PayrollRunDetail() {
               ))}
               <tr className="bg-slate-50 font-bold">
                 <Td className="text-xs">TOTAL</Td>
-                <Td className="text-right text-xs">{money(cashRows.reduce((s, r) => s + Number(r.slip.net_pay), 0))}</Td>
+                <Td className="text-right text-xs">{money(cashRows.reduce((sum, r) => sum + Number(r.slip.net_pay), 0))}</Td>
                 {PESO_DENOMINATIONS.map((d) => (
                   <Td key={d} className="text-right text-xs">{cashTotal.counts[d]}</Td>
                 ))}
@@ -436,9 +716,11 @@ export default function PayrollRunDetail() {
         <AdjustmentModal
           runId={run.id}
           employees={covered}
-          onClose={() => setAddingAdj(false)}
+          initialEmployeeId={addingAdj.employeeId}
+          initialKind={addingAdj.kind}
+          onClose={() => setAddingAdj(null)}
           onSaved={async () => {
-            setAddingAdj(false)
+            setAddingAdj(null)
             await load()
           }}
         />
@@ -447,23 +729,94 @@ export default function PayrollRunDetail() {
   )
 }
 
+type Step = { label: string; sub: string; state: 'done' | 'current' | 'todo' }
+
+function Stepper({ steps }: { steps: Step[] }) {
+  return (
+    <ol className="flex flex-wrap gap-x-6 gap-y-3 lg:sticky lg:top-0 lg:flex-col lg:gap-5 lg:self-start">
+      {steps.map((s, i) => (
+        <li key={s.label} className="flex items-start gap-3" aria-current={s.state === 'current' ? 'step' : undefined}>
+          {s.state === 'done' ? (
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-leaf-500 text-white">
+              <Check className="size-3.5" strokeWidth={3} />
+            </span>
+          ) : s.state === 'current' ? (
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full border-2 border-ink-900 border-r-slate-300 text-[11px] font-bold text-ink-900">
+              {i + 1}
+            </span>
+          ) : (
+            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-slate-200 text-[11px] font-bold text-slate-500">
+              {i + 1}
+            </span>
+          )}
+          <span>
+            <span className={`block text-sm font-semibold ${s.state === 'todo' ? 'text-slate-500' : 'text-ink-900'}`}>{s.label}</span>
+            <span className="hidden text-xs text-slate-400 lg:block">{s.sub}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+function Fact({ label, value, big = false }: { label: string; value: string; big?: boolean }) {
+  return (
+    <div>
+      <p className={`font-bold tracking-tight text-ink-900 ${big ? 'text-2xl' : 'text-lg'}`}>{value}</p>
+      <p className="text-xs text-slate-500">{label}</p>
+    </div>
+  )
+}
+
+function HourFact({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="border-l border-dashed border-slate-300 pl-3">
+      <p className="text-xl font-bold text-ink-900">{value}</p>
+      <p className="text-xs text-slate-500">{label}</p>
+    </div>
+  )
+}
+
+function RunFact({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="shrink-0 text-slate-500">{label}</dt>
+      <dd className="text-right font-semibold text-ink-900">{value}</dd>
+    </div>
+  )
+}
+
+function hrs(n: number) {
+  return n.toLocaleString('en-PH', { maximumFractionDigits: 2 })
+}
+
 function AdjustmentModal({
   runId,
   employees,
+  initialEmployeeId,
+  initialKind = 'earning',
   onClose,
   onSaved,
 }: {
   runId: string
   employees: Employee[]
+  initialEmployeeId?: string
+  initialKind?: 'earning' | 'deduction'
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
   const toast = useToast()
-  const [f, setF] = useState({ employee_id: employees[0]?.id ?? '', kind: 'earning', label: '', amount: '', category: 'other_taxable' })
+  const [f, setF] = useState({
+    employee_id: initialEmployeeId && employees.some((e) => e.id === initialEmployeeId) ? initialEmployeeId : (employees[0]?.id ?? ''),
+    kind: initialKind as string,
+    label: '',
+    amount: '',
+    category: initialKind === 'earning' ? 'other_taxable' : 'other',
+  })
   const [busy, setBusy] = useState(false)
 
   async function save() {
-    if (!f.employee_id || !f.label.trim() || !(Number(f.amount) > 0)) {
+    if (!employees.some((e) => e.id === f.employee_id) || !f.label.trim() || !(Number(f.amount) > 0)) {
       toast('error', 'Employee, label and a positive amount are required.')
       return
     }

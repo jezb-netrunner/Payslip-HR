@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Calculator, ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react'
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Spinner, TableShell, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
@@ -79,7 +79,7 @@ export default function Statutory() {
         <Spinner />
       ) : (
         <div className="space-y-6">
-          <Card title="Quick check — contributions for a sample salary">
+          <Card title="Quick check — contributions for a sample salary" icon={<Calculator />}>
             <div className="flex flex-wrap items-end gap-4">
               <Field label="Monthly basic salary (PHP)">
                 <Input type="number" value={sample} onChange={(e) => setSample(e.target.value)} className="w-44" />

@@ -1,8 +1,8 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import {
-  Building2,
   Briefcase,
   CalendarDays,
+  ChevronDown,
   ClipboardList,
   Clock,
   FileBarChart,
@@ -13,6 +13,7 @@ import {
   Megaphone,
   Menu,
   Palmtree,
+  Plus,
   Scale,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -20,60 +21,149 @@ import {
   UserCog,
   Users,
   Wallet,
+  X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
+import { useFocusTrap } from '../lib/focus'
 import { useEntity } from '../lib/entity'
-import { fullName, initials } from '../lib/format'
+import { fullName, initials, personInitials } from '../lib/format'
 import { ROLE_LABELS } from '../lib/labels'
+import { onPendingChanged } from '../lib/pending'
 import { supabase } from '../lib/supabase'
 import ChangePassword from './ChangePassword'
-import { Modal } from './ui'
+import { Avatar, Logo, Modal } from './ui'
+
+type Counter = 'corrections' | 'leaves'
 
 interface NavItem {
   to: string
   label: string
-  icon: React.ReactNode
+  icon: ReactNode
   end?: boolean
   companyOnly?: boolean
+  /** Pending requests waiting on an admin, shown as a red count. */
+  counter?: Counter
 }
 
-const ic = 'size-4.5'
+interface NavGroup {
+  title: string
+  items: NavItem[]
+}
 
-const adminNav: NavItem[] = [
-  { to: '/admin', label: 'Dashboard', icon: <LayoutDashboard className={ic} />, end: true },
-  { to: '/admin/clients', label: 'Clients', icon: <Briefcase className={ic} />, companyOnly: true },
-  { to: '/admin/users', label: 'Admin Users', icon: <UserCog className={ic} />, companyOnly: true },
-  { to: '/admin/employees', label: 'Employees', icon: <Users className={ic} /> },
-  { to: '/admin/timesheets', label: 'Time In / Out', icon: <Clock className={ic} /> },
-  { to: '/admin/leaves', label: 'Leaves', icon: <Palmtree className={ic} /> },
-  { to: '/admin/payroll', label: 'Payroll', icon: <Wallet className={ic} /> },
-  { to: '/admin/announcements', label: 'Announcements', icon: <Megaphone className={ic} /> },
-  { to: '/admin/reports', label: 'BIR & Reports', icon: <FileBarChart className={ic} /> },
-  { to: '/admin/holidays', label: 'Holidays', icon: <CalendarDays className={ic} /> },
-  { to: '/admin/statutory', label: 'Statutory Tables', icon: <Scale className={ic} /> },
-  { to: '/admin/settings', label: 'Client Settings', icon: <SettingsIcon className={ic} /> },
-  { to: '/admin/audit', label: 'Audit Log', icon: <ShieldCheck className={ic} /> },
+const ic = 'size-5'
+
+const adminGroups: NavGroup[] = [
+  { title: 'Overview', items: [{ to: '/admin', label: 'Dashboard', icon: <LayoutDashboard className={ic} />, end: true }] },
+  {
+    title: 'People',
+    items: [
+      { to: '/admin/employees', label: 'Employees', icon: <Users className={ic} /> },
+      { to: '/admin/timesheets', label: 'Time In / Out', icon: <Clock className={ic} />, counter: 'corrections' },
+      { to: '/admin/leaves', label: 'Leaves', icon: <Palmtree className={ic} />, counter: 'leaves' },
+      { to: '/admin/announcements', label: 'Announcements', icon: <Megaphone className={ic} /> },
+    ],
+  },
+  {
+    title: 'Payroll',
+    items: [
+      { to: '/admin/payroll', label: 'Pay Runs', icon: <Wallet className={ic} /> },
+      { to: '/admin/reports', label: 'BIR & Reports', icon: <FileBarChart className={ic} /> },
+    ],
+  },
+  {
+    title: 'Setup',
+    items: [
+      { to: '/admin/clients', label: 'Clients', icon: <Briefcase className={ic} />, companyOnly: true },
+      { to: '/admin/users', label: 'Admin Users', icon: <UserCog className={ic} />, companyOnly: true },
+      { to: '/admin/settings', label: 'Client Settings', icon: <SettingsIcon className={ic} /> },
+      { to: '/admin/holidays', label: 'Holidays', icon: <CalendarDays className={ic} /> },
+      { to: '/admin/statutory', label: 'Statutory Tables', icon: <Scale className={ic} /> },
+      { to: '/admin/audit', label: 'Audit Log', icon: <ShieldCheck className={ic} /> },
+    ],
+  },
 ]
 
-const employeeNav: NavItem[] = [
-  { to: '/me', label: 'Dashboard', icon: <LayoutDashboard className={ic} />, end: true },
-  { to: '/me/payslips', label: 'My Payslips', icon: <FileText className={ic} /> },
-  { to: '/me/attendance', label: 'My Attendance', icon: <ClipboardList className={ic} /> },
-  { to: '/me/leaves', label: 'My Leaves', icon: <Palmtree className={ic} /> },
-  { to: '/me/announcements', label: 'Announcements', icon: <Megaphone className={ic} /> },
-  { to: '/me/profile', label: 'My Profile', icon: <User className={ic} /> },
+const employeeGroups: NavGroup[] = [
+  {
+    title: 'Home',
+    items: [
+      { to: '/me', label: 'Dashboard', icon: <LayoutDashboard className={ic} />, end: true },
+      { to: '/me/announcements', label: 'Announcements', icon: <Megaphone className={ic} /> },
+    ],
+  },
+  { title: 'Pay', items: [{ to: '/me/payslips', label: 'Payslips', icon: <FileText className={ic} /> }] },
+  {
+    title: 'Time & Leave',
+    items: [
+      { to: '/me/attendance', label: 'Attendance', icon: <ClipboardList className={ic} /> },
+      { to: '/me/leaves', label: 'Leaves', icon: <Palmtree className={ic} /> },
+    ],
+  },
+  { title: 'Profile', items: [{ to: '/me/profile', label: 'My Profile', icon: <User className={ic} /> }] },
 ]
 
-function EntitySwitcher() {
+const quickActions = {
+  admin: [
+    { to: '/admin/employees?new=employee', label: 'Add employee', icon: <Users className="size-4" /> },
+    { to: '/admin/payroll?new=run', label: 'New pay run', icon: <Wallet className="size-4" /> },
+    { to: '/admin/leaves?new=leave', label: 'File leave for an employee', icon: <Palmtree className="size-4" /> },
+    { to: '/admin/announcements?new=announcement', label: 'Post announcement', icon: <Megaphone className="size-4" /> },
+  ],
+  employee: [
+    { to: '/me/leaves?new=leave', label: 'File a leave', icon: <Palmtree className="size-4" /> },
+    { to: '/me/attendance?new=correction', label: 'Report a missing time entry', icon: <ClipboardList className="size-4" /> },
+  ],
+}
+
+function isActive(item: NavItem, pathname: string) {
+  return matchPath({ path: item.to, end: !!item.end }, pathname) !== null
+}
+
+/** Closes a popover on an outside click or Escape. */
+/**
+ * Closes a popover on an outside click, on Escape (focus goes back to its
+ * button) and when keyboard focus moves on past it.
+ */
+function useDismiss(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const box = ref.current
+    if (!open || !box) return
+    const onDown = (e: MouseEvent) => {
+      if (!box.contains(e.target as Node)) close()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      close()
+      box.querySelector<HTMLElement>('button')?.focus()
+    }
+    // a click on plain text inside moves focus nowhere (relatedTarget null): stay open
+    const onFocusOut = (e: FocusEvent) => {
+      if (e.relatedTarget instanceof Node && !box.contains(e.relatedTarget)) close()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    box.addEventListener('focusout', onFocusOut)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+      box.removeEventListener('focusout', onFocusOut)
+    }
+  }, [open, close])
+  return ref
+}
+
+function EntitySwitcher({ variant }: { variant: 'bar' | 'drawer' }) {
   const { entities, entity, setEntityId, error } = useEntity()
   const { isCompanyAdmin } = useAuth()
   const active = entities.filter((e) => e.is_active)
   const archived = isCompanyAdmin ? entities.filter((e) => !e.is_active) : []
-  if (error) return <p className="px-3 text-[11px] text-rose-300">Clients could not be loaded.</p>
+  const bar = variant === 'bar'
+  if (error) return <p className={`text-xs ${bar ? 'text-rose-300' : 'text-rose-600'}`}>Clients could not be loaded.</p>
   if (active.length === 0 && !entity) {
     return (
-      <p className="px-3 text-[11px] text-brand-300">
+      <p className={`text-xs ${bar ? 'text-white/60' : 'text-slate-500'}`}>
         {isCompanyAdmin ? 'No clients yet — add one under Clients.' : 'No client assigned to you yet.'}
       </p>
     )
@@ -81,45 +171,95 @@ function EntitySwitcher() {
   // code first: a long registered name gets cut off by the select, the code must not
   const label = (e: (typeof entities)[number]) => `${e.code} · ${e.name}`
   return (
-    <label className="block px-3">
-      <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-brand-300">
+    <label className={bar ? 'flex min-w-0 items-center gap-2' : 'block'}>
+      <span
+        className={
+          bar
+            ? 'sr-only'
+            : 'mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-slate-400'
+        }
+      >
         Working on client
       </span>
-      <select
-        value={entity?.id ?? ''}
-        title={entity ? `${entity.name} (${entity.code})` : undefined}
-        onChange={(e) => setEntityId(e.target.value)}
-        className="w-full truncate rounded-lg border border-brand-700 bg-brand-800 px-2.5 py-1.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-accent-500"
-      >
-        {active.map((e) => (
-          <option key={e.id} value={e.id}>
-            {label(e)}
-          </option>
+      <span className="relative block min-w-0">
+        <Briefcase
+          className={`pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 ${bar ? 'text-accent-400' : 'text-slate-400'}`}
+        />
+        <select
+          value={entity?.id ?? ''}
+          title={entity ? `Working on ${entity.name} (${entity.code})` : undefined}
+          onChange={(e) => setEntityId(e.target.value)}
+          className={`w-full appearance-none truncate rounded-xl py-2 pl-9 pr-8 text-sm font-semibold focus:outline-none focus:ring-2 ${
+            bar
+              ? 'max-w-[13rem] bg-ink-800 text-white hover:bg-ink-700 focus:ring-accent-400 [&_optgroup]:bg-white [&_optgroup]:text-ink-900 [&_option]:bg-white [&_option]:text-ink-900'
+              : 'border border-slate-200 bg-white text-ink-900 focus:ring-brand-200'
+          }`}
+        >
+          {active.map((e) => (
+            <option key={e.id} value={e.id}>
+              {label(e)}
+            </option>
+          ))}
+          {archived.length > 0 && (
+            <optgroup label="Archived">
+              {archived.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {label(e)}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+        <ChevronDown
+          className={`pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 ${bar ? 'text-white/60' : 'text-slate-400'}`}
+        />
+      </span>
+      {entity &&
+        !entity.is_active &&
+        (bar ? (
+          // short in the bar: the full sentence pushed Quick add and Account off narrower screens
+          <span
+            title="Archived client — its entity admins are locked out"
+            className="shrink-0 rounded-md bg-amber-400/15 px-2 py-1 text-[11px] font-semibold text-amber-300"
+          >
+            Archived
+          </span>
+        ) : (
+          <span className="mt-1 block text-[11px] font-semibold text-amber-600">Archived — its entity admins are locked out</span>
         ))}
-        {archived.length > 0 && (
-          <optgroup label="Archived">
-            {archived.map((e) => (
-              <option key={e.id} value={e.id}>
-                {label(e)}
-              </option>
-            ))}
-          </optgroup>
-        )}
-      </select>
-      {entity && !entity.is_active && (
-        <span className="mt-1 block text-[11px] font-semibold text-amber-300">Archived client — its entity admins are locked out</span>
-      )}
     </label>
   )
 }
 
 export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   const { profile, employee, isCompanyAdmin, signOut } = useAuth()
+  const { entity } = useEntity()
   const navigate = useNavigate()
-  const [open, setOpen] = useState(false)
+  const { pathname } = useLocation()
+  const [drawer, setDrawer] = useState(false)
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [accountOpen, setAccountOpen] = useState(false)
   const [changingPw, setChangingPw] = useState(false)
   const [employerName, setEmployerName] = useState('')
-  const nav = (mode === 'admin' ? adminNav : employeeNav).filter((n) => !n.companyOnly || isCompanyAdmin)
+  const [counts, setCounts] = useState<{ entityId: string; corrections: number; leaves: number } | null>(null)
+  const [countsTick, setCountsTick] = useState(0)
+  const quickRef = useDismiss(quickOpen, () => setQuickOpen(false))
+  const drawerRef = useRef<HTMLElement>(null)
+  useFocusTrap(drawer, drawerRef)
+  useEffect(() => {
+    if (!drawer) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawer(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [drawer])
+  const accountRef = useDismiss(accountOpen, () => setAccountOpen(false))
+
+  const groups = (mode === 'admin' ? adminGroups : employeeGroups)
+    .map((g) => ({ ...g, items: g.items.filter((n) => !n.companyOnly || isCompanyAdmin) }))
+    .filter((g) => g.items.length > 0)
+  const current = groups.find((g) => g.items.some((n) => isActive(n, pathname))) ?? groups[0]
 
   useEffect(() => {
     if (mode !== 'employee' || !employee) return
@@ -131,106 +271,317 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
       .then(({ data }) => setEmployerName((data?.name as string) ?? ''))
   }, [mode, employee])
 
+  // requests waiting on an admin in the selected client: refreshed on every
+  // navigation and whenever a page approves, rejects or files one
+  const entityId = mode === 'admin' ? entity?.id : undefined
+  useEffect(() => onPendingChanged(() => setCountsTick((n) => n + 1)), [])
+  useEffect(() => {
+    if (!entityId) return
+    let stale = false
+    Promise.all([
+      supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entityId).eq('status', 'pending'),
+      supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entityId).eq('status', 'pending'),
+    ]).then(([corr, leaves]) => {
+      if (!stale) setCounts({ entityId, corrections: corr.count ?? 0, leaves: leaves.count ?? 0 })
+    })
+    return () => {
+      stale = true
+    }
+  }, [entityId, pathname, countsTick])
+
   const displayName =
     mode === 'employee' && employee ? fullName(employee) : profile?.full_name || profile?.email || '?'
+  const avatarInitials = mode === 'employee' && employee ? personInitials(employee) : undefined
+  const roleLabel =
+    mode === 'admin' ? ROLE_LABELS[profile?.role ?? 'employee'] : employerName || 'Employee'
+  const count = (n: NavItem) => (n.counter && counts && counts.entityId === entityId ? counts[n.counter] : 0)
+  const orgBadge = mode === 'admin' ? (entity?.code ?? '—').slice(0, 3) : initials(employerName || 'PH')
+  const orgTitle = mode === 'admin' ? (entity ? `${entity.name} (${entity.code})` : 'No client selected') : employerName
 
-  const sidebar = (
-    <div className="flex h-full flex-col bg-brand-900">
-      <div className="flex items-center gap-2.5 px-5 py-5">
-        <div className="flex size-9 items-center justify-center rounded-xl bg-white/10">
-          <Building2 className="size-5 text-accent-400" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-extrabold tracking-tight text-white">Payslip HR</p>
-          <p className="truncate text-[10px] font-medium uppercase tracking-wider text-brand-300">
-            {mode === 'admin' ? (isCompanyAdmin ? 'Company Admin' : 'Entity Admin') : employerName || 'Employee Portal'}
-          </p>
-        </div>
-      </div>
-      {mode === 'admin' && (
-        <div className="pb-3">
-          <EntitySwitcher />
-        </div>
-      )}
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-        {nav.map((item) => (
+  const doSignOut = async () => {
+    await signOut()
+    navigate('/')
+  }
+
+  const pills = (
+    <>
+      {current.items.map((n) => {
+        const c = count(n)
+        return (
           <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={() => setOpen(false)}
-            className={({ isActive }) =>
-              `flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-accent-500 text-white shadow-sm'
-                  : 'text-brand-200 hover:bg-brand-800 hover:text-white'
+            key={n.to}
+            to={n.to}
+            end={n.end}
+            className={({ isActive: on }) =>
+              `flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                on ? 'bg-ink-800 text-white' : 'text-white/55 hover:text-white'
               }`
             }
           >
-            {item.icon}
-            {item.label}
+            {n.label}
+            {c > 0 && <span className="rounded-md bg-rose-600 px-1.5 py-px text-[11px] font-bold text-white">{c}</span>}
           </NavLink>
-        ))}
-      </nav>
-      <div className="border-t border-brand-800 p-3">
-        <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent-500 text-xs font-bold text-white">
-            {initials(displayName)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold text-white">{displayName}</p>
-            <p className="text-[10px] text-brand-300">{ROLE_LABELS[profile?.role ?? 'employee']}</p>
-          </div>
-          {mode === 'admin' && (
-            <button
-              type="button"
-              title="Change password"
-              aria-label="Change password"
-              onClick={() => setChangingPw(true)}
-              className="rounded-lg p-1.5 text-brand-300 hover:bg-brand-800 hover:text-white"
-            >
-              <KeyRound className="size-4" />
-            </button>
-          )}
-          <button
-            type="button"
-            title="Sign out"
-            aria-label="Sign out"
-            onClick={async () => {
-              await signOut()
-              navigate('/')
-            }}
-            className="rounded-lg p-1.5 text-brand-300 hover:bg-brand-800 hover:text-white"
-          >
-            <LogOut className="size-4" />
-          </button>
-        </div>
-      </div>
-    </div>
+        )
+      })}
+    </>
   )
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <aside className="hidden w-64 shrink-0 lg:block">{sidebar}</aside>
-      {open && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-brand-950/60" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-72">{sidebar}</aside>
-        </div>
-      )}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 lg:hidden">
-          <button type="button" aria-label="Open menu" onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100">
+    <div className="flex h-screen flex-col overflow-hidden">
+      {/* top bar */}
+      <header className="shrink-0 bg-ink-900 text-white">
+        <div className="flex h-16 items-center gap-3 px-3 sm:px-5">
+          <button
+            type="button"
+            aria-label="Open menu"
+            onClick={() => setDrawer(true)}
+            className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white lg:hidden"
+          >
             <Menu className="size-5" />
           </button>
-          <p className="text-sm font-bold text-brand-900">Payslip HR</p>
-        </header>
-        <main className="scroll-thin flex-1 overflow-y-auto p-4 lg:p-8">
-          <div className="mx-auto max-w-7xl">
+          <Link to={mode === 'admin' ? '/admin' : '/me'} aria-label="Payslip HR home" className="shrink-0">
+            <Logo compact />
+          </Link>
+          {mode === 'admin' && (
+            // phones have no room for the client switcher: always show which client is open
+            <button
+              type="button"
+              onClick={() => setDrawer(true)}
+              title={entity ? `Working on ${entity.name} (${entity.code}) — tap to switch` : 'No client selected'}
+              className="max-w-[7rem] shrink-0 truncate rounded-lg bg-ink-800 px-2.5 py-1.5 text-xs font-bold text-accent-400 sm:hidden"
+            >
+              {entity?.code ?? 'No client'}
+            </button>
+          )}
+          <span className="hidden h-6 w-px shrink-0 bg-white/15 sm:block" />
+          <h2 className="hidden shrink-0 text-lg font-bold sm:block">{current.title}</h2>
+          {current.items.length > 1 && (
+            // inline only where every section's pills fit; narrower screens get their own row below
+            <nav aria-label={current.title} className="no-scrollbar ml-4 hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto xl:flex">
+              {pills}
+            </nav>
+          )}
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {mode === 'admin' && (
+              <div className="hidden sm:block">
+                <EntitySwitcher variant="bar" />
+              </div>
+            )}
+            <div ref={quickRef} className="relative">
+              <button
+                type="button"
+                aria-label="Quick add"
+                aria-expanded={quickOpen}
+                title="Quick add"
+                onClick={() => setQuickOpen((o) => !o)}
+                className="flex size-10 items-center justify-center rounded-xl bg-accent-400 text-ink-900 transition-colors hover:bg-accent-300"
+              >
+                <Plus className="size-5" strokeWidth={2.5} />
+              </button>
+              {quickOpen && (
+                <div className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-slate-200 bg-white p-1.5 text-ink-900 shadow-xl">
+                  {quickActions[mode].map((q) => (
+                    <Link
+                      key={q.to}
+                      to={q.to}
+                      onClick={() => setQuickOpen(false)}
+                      className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-100"
+                    >
+                      <span className="text-slate-400">{q.icon}</span>
+                      {q.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+            <span className="mx-1 hidden h-6 w-px bg-white/15 sm:block" />
+            <div ref={accountRef} className="relative">
+              <button
+                type="button"
+                aria-label="Account"
+                aria-expanded={accountOpen}
+                onClick={() => setAccountOpen((o) => !o)}
+                className="flex items-center rounded-full ring-2 ring-white/15 transition hover:ring-white/40"
+              >
+                <Avatar name={displayName} initials={avatarInitials} size="md" />
+              </button>
+              {accountOpen && (
+                <div className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-slate-200 bg-white p-1.5 text-ink-900 shadow-xl">
+                  <div className="flex items-center gap-3 px-3 py-2.5">
+                    <Avatar name={displayName} initials={avatarInitials} size="sm" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{displayName}</p>
+                      <p className="truncate text-xs text-slate-500">{roleLabel}</p>
+                    </div>
+                  </div>
+                  <div className="my-1 h-px bg-slate-100" />
+                  {mode === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccountOpen(false)
+                        setChangingPw(true)
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium hover:bg-slate-100"
+                    >
+                      <KeyRound className="size-4 text-slate-400" /> Change password
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={doSignOut}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"
+                  >
+                    <LogOut className="size-4" /> Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {current.items.length > 1 && (
+          <nav aria-label={`${current.title} pages`} className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 sm:px-5 xl:hidden">
+            {pills}
+          </nav>
+        )}
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        {/* icon rail: one column, compact on short screens, with a visible thin scrollbar when it still overflows */}
+        <aside className="scroll-thin hidden w-[76px] shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden border-r border-slate-200/70 bg-white py-3 lg:flex">
+          <div
+            title={orgTitle}
+            className="mb-2 flex size-11 shrink-0 items-center justify-center rounded-xl bg-ink-900 text-sm font-extrabold uppercase tracking-tight text-accent-400 shadow-sm [@media(max-height:820px)]:size-10"
+          >
+            {orgBadge}
+          </div>
+          {groups.map((g, gi) => (
+            <div key={g.title} className="flex flex-col items-center gap-0.5 [@media(max-height:820px)]:gap-0">
+              {gi > 0 && <span className="my-1.5 h-px w-8 bg-slate-200 [@media(max-height:820px)]:my-1" />}
+              {g.items.map((n) => (
+                <NavLink
+                  key={n.to}
+                  to={n.to}
+                  end={n.end}
+                  title={n.label}
+                  aria-label={n.label}
+                  className={({ isActive: on }) =>
+                    `relative flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors [@media(max-height:820px)]:size-9 ${
+                      on ? 'bg-slate-100 text-ink-900' : 'text-slate-500 hover:bg-slate-50 hover:text-ink-900'
+                    }`
+                  }
+                >
+                  {n.icon}
+                  {count(n) > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-rose-500 ring-2 ring-white" />}
+                </NavLink>
+              ))}
+            </div>
+          ))}
+          <div className="mt-auto flex shrink-0 flex-col items-center pt-3">
+            <span className="mb-2 h-px w-8 bg-slate-200" />
+            <button
+              type="button"
+              title="Sign out"
+              aria-label="Sign out"
+              onClick={doSignOut}
+              className="flex size-10 items-center justify-center rounded-full bg-ink-900 text-white hover:bg-ink-800 [@media(max-height:820px)]:size-9"
+            >
+              <LogOut className="size-4.5" />
+            </button>
+          </div>
+        </aside>
+
+        <main className="scroll-thin min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8">
             <Outlet />
           </div>
         </main>
       </div>
+
+      {/* phone / tablet drawer */}
+      {drawer && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-ink-900/50" onClick={() => setDrawer(false)} />
+          <aside
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu"
+            className="absolute inset-y-0 left-0 flex w-[19rem] max-w-[85vw] flex-col bg-white shadow-2xl"
+          >
+            <div className="flex h-16 shrink-0 items-center justify-between bg-ink-900 px-4">
+              <Logo />
+              <button
+                type="button"
+                aria-label="Close menu"
+                onClick={() => setDrawer(false)}
+                className="rounded-lg p-2 text-white/70 hover:bg-white/10 hover:text-white"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            {mode === 'admin' && (
+              <div className="border-b border-slate-100 p-4">
+                <EntitySwitcher variant="drawer" />
+              </div>
+            )}
+            <nav className="scroll-thin flex-1 overflow-y-auto p-3">
+              {groups.map((g) => (
+                <div key={g.title} className="mb-3">
+                  <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{g.title}</p>
+                  {g.items.map((n) => (
+                    <NavLink
+                      key={n.to}
+                      to={n.to}
+                      end={n.end}
+                      onClick={() => setDrawer(false)}
+                      className={({ isActive: on }) =>
+                        `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                          on ? 'bg-slate-100 text-ink-900' : 'text-slate-600 hover:bg-slate-50 hover:text-ink-900'
+                        }`
+                      }
+                    >
+                      <span className="text-slate-400">{n.icon}</span>
+                      <span className="flex-1">{n.label}</span>
+                      {count(n) > 0 && (
+                        <span className="rounded-md bg-rose-600 px-1.5 py-px text-[11px] font-bold text-white">{count(n)}</span>
+                      )}
+                    </NavLink>
+                  ))}
+                </div>
+              ))}
+            </nav>
+            <div className="flex items-center gap-3 border-t border-slate-100 p-4">
+              <Avatar name={displayName} initials={avatarInitials} size="sm" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-ink-900">{displayName}</p>
+                <p className="truncate text-xs text-slate-500">{roleLabel}</p>
+              </div>
+              {mode === 'admin' && (
+                <button
+                  type="button"
+                  title="Change password"
+                  aria-label="Change password"
+                  onClick={() => setChangingPw(true)}
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-ink-900"
+                >
+                  <KeyRound className="size-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                title="Sign out"
+                aria-label="Sign out"
+                onClick={doSignOut}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-ink-900"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
       <Modal open={changingPw} onClose={() => setChangingPw(false)} title="Change password">
         <ChangePassword onDone={() => setChangingPw(false)} />
       </Modal>

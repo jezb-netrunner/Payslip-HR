@@ -1,9 +1,50 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Copy, KeyRound, Plus, Printer, RefreshCw, UserCheck, UserX } from 'lucide-react'
-import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle } from '../../components/ui'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  ArrowLeft,
+  Building2,
+  BriefcaseBusiness,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Copy,
+  DoorOpen,
+  Gift,
+  History,
+  KeyRound,
+  Landmark,
+  Plus,
+  Printer,
+  Receipt,
+  RefreshCw,
+  StickyNote,
+  UserCheck,
+  UserRound,
+  UserX,
+  Wallet,
+} from 'lucide-react'
+import AttendanceTimeline, { type TimelineLeave } from '../../components/AttendanceTimeline'
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  Field,
+  IconButton,
+  Input,
+  LoadFailed,
+  Modal,
+  Select,
+  Spinner,
+  StatCard,
+  StatGroup,
+  Tabs,
+  Textarea,
+  Toggle,
+} from '../../components/ui'
 import { useToast } from '../../components/toast'
-import { callAdminUsers } from '../../lib/api'
+import { callAdminUsers, getHolidaysBetween, isActiveOn } from '../../lib/api'
+import { fetchAll } from '../../lib/fetchAll'
 import type {
   CareerEvent,
   Employee,
@@ -11,13 +52,16 @@ import type {
   EmployeeTaxYear,
   EmploymentStatus,
   Entity,
+  Holiday,
   PaymentMethod,
   Profile,
   RecurringDeduction,
   SeparationReason,
+  TimeEntry,
 } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtDateTime, fullName, money } from '../../lib/format'
+import { useRecordClient } from '../../lib/recordClient'
+import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
 import {
   ALLOWANCE_BASIS_LABELS,
   ALLOWANCE_CATEGORY_LABELS,
@@ -26,9 +70,11 @@ import {
   PAYMENT_METHOD_LABELS,
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
+import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
-import { todayManila } from '../../lib/manila'
+import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { dayTimeline } from '../../lib/timeline'
 import type { AllowanceBasis, AllowanceCategory, PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
 
@@ -44,7 +90,19 @@ const eventLabels: Record<string, string> = {
   other: 'Note',
 }
 
+/**
+ * Prev/next only change the URL, so each employee gets a fresh, keyed record:
+ * otherwise the tabs' forms (and a freshly issued login code) would carry one
+ * person's data over to the next, and saving would write it there. The open
+ * tab is kept across prev/next.
+ */
 export default function EmployeeDetail() {
+  const { id } = useParams()
+  const [tab, setTab] = useState('profile')
+  return <EmployeeRecord key={id} tab={tab} onTab={setTab} />
+}
+
+function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: string) => void }) {
   const { id } = useParams()
   const { entities } = useEntity()
   const [employee, setEmployee] = useState<Employee | null>(null)
@@ -52,8 +110,9 @@ export default function EmployeeDetail() {
   const [allowances, setAllowances] = useState<EmployeeAllowance[]>([])
   const [deductions, setDeductions] = useState<RecurringDeduction[]>([])
   const [account, setAccount] = useState<Profile | null>(null)
-  const [tab, setTab] = useState('profile')
   const [loading, setLoading] = useState(true)
+  const [siblings, setSiblings] = useState<string[]>([])
+  const navigate = useNavigate()
 
   const load = useCallback(async () => {
     if (!id) return
@@ -76,51 +135,242 @@ export default function EmployeeDetail() {
     load()
   }, [load])
 
+  // prev / next walk the employees the list shows by default (its order, the
+  // separated left out) — plus this one if separated, so it keeps its place
+  const entityId = employee?.entity_id
+  useEffect(() => {
+    if (!entityId) return
+    const today = todayManila()
+    fetchAll<{ id: string; separation_date: string | null }>((from, to) =>
+      supabase.from('employees').select('id, separation_date').eq('entity_id', entityId).order('last_name').order('id').range(from, to),
+    )
+      .then((rows) => setSiblings(rows.filter((r) => r.id === id || isActiveOn(r, today)).map((r) => r.id)))
+      .catch(() => setSiblings([]))
+  }, [entityId, id])
+
+  useRecordClient(employee?.entity_id, '/admin/employees')
+
   if (loading) return <Spinner />
   if (!employee) return <p className="text-sm text-slate-500">Employee not found.</p>
   const entity = entities.find((e) => e.id === employee.entity_id)
   if (!entity) return <p className="text-sm text-slate-500">This employee's client is not available to you.</p>
 
+  const name = fullName(employee)
+  const separated = !!employee.separation_date && employee.separation_date < todayManila()
+  const pos = siblings.indexOf(employee.id)
+  const prev = pos > 0 ? siblings[pos - 1] : null
+  const next = pos >= 0 && pos < siblings.length - 1 ? siblings[pos + 1] : null
+
   return (
     <div>
-      <Link to="/admin/employees" className="mb-3 inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-800">
-        <ArrowLeft className="size-3.5" /> All employees
-      </Link>
-      <PageHeader
-        title={fullName(employee)}
-        subtitle={
-          <>
-            {employee.employee_no} · {employee.position || 'No position'} · {entity.name}
-            {employee.separation_date && (
-              <>
-                {' '}
-                <Badge tone="red">
-                  separated {fmtDate(employee.separation_date)}
-                  {employee.separation_reason ? ` — ${SEPARATION_REASON_LABELS[employee.separation_reason]}` : ''}
-                </Badge>
-              </>
-            )}
-          </>
-        }
-      />
+      <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-4">
+        <div className="flex min-w-0 items-center gap-4">
+          <IconButton round label="All employees" onClick={() => navigate('/admin/employees')}>
+            <ArrowLeft className="size-4" />
+          </IconButton>
+          <Avatar name={name} initials={personInitials(employee)} size="lg" />
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-bold text-ink-900">{name}</h1>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {separated ? (
+                <Badge tone="slate">Separated</Badge>
+              ) : employee.separation_date ? (
+                <Badge tone="amber">Leaving</Badge>
+              ) : (
+                <Badge tone="solid">Active</Badge>
+              )}
+              {employee.is_minimum_wage_earner && <Badge tone="orange" dot={false}>MWE</Badge>}
+            </div>
+          </div>
+        </div>
+        <span className="hidden h-12 w-px bg-slate-200 xl:block" />
+        <dl className="flex flex-wrap gap-x-8 gap-y-3">
+          <HeaderFact label="Client" value={entity.name} />
+          <HeaderFact label="Employee ID" value={employee.employee_no} />
+          <HeaderFact label="Position" value={employee.position || '—'} />
+          <HeaderFact label="Date started" value={fmtDate(employee.hire_date)} />
+          {employee.separation_date && (
+            <HeaderFact
+              label={separated ? 'Last day' : 'Leaving on'}
+              value={`${fmtDate(employee.separation_date)}${employee.separation_reason ? ` · ${SEPARATION_REASON_LABELS[employee.separation_reason]}` : ''}`}
+            />
+          )}
+        </dl>
+        {siblings.length > 1 && pos >= 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            <IconButton round label="Previous employee" disabled={!prev} onClick={() => prev && navigate(`/admin/employees/${prev}`)}>
+              <ChevronLeft className="size-4" />
+            </IconButton>
+            <IconButton round label="Next employee" disabled={!next} onClick={() => next && navigate(`/admin/employees/${next}`)}>
+              <ChevronRight className="size-4" />
+            </IconButton>
+            <span className="whitespace-nowrap text-sm text-slate-500">
+              {pos + 1} of {siblings.length}
+            </span>
+          </div>
+        )}
+      </div>
       <Tabs
         tabs={[
-          { key: 'profile', label: 'Profile & Employment' },
-          { key: 'pay', label: 'Pay & Policy' },
-          { key: 'career', label: 'Career History' },
-          { key: 'login', label: 'Login Code' },
-          { key: 'bir', label: 'BIR / Tax Year' },
+          { key: 'profile', label: 'Profile & Employment', icon: <UserRound /> },
+          { key: 'time', label: 'Attendance', icon: <Clock /> },
+          { key: 'pay', label: 'Pay & Policy', icon: <Wallet /> },
+          { key: 'career', label: 'Career History', icon: <History /> },
+          { key: 'login', label: 'Login Code', icon: <KeyRound /> },
+          { key: 'bir', label: 'BIR / Tax Year', icon: <Landmark /> },
         ]}
         active={tab}
         onChange={setTab}
       />
       {tab === 'profile' && <ProfileTab employee={employee} onSaved={load} />}
+      {tab === 'time' && <AttendanceTab employee={employee} entity={entity} />}
       {tab === 'pay' && (
         <PayTab employee={employee} entity={entity} allowances={allowances} deductions={deductions} onChanged={load} />
       )}
       {tab === 'career' && <CareerTab employee={employee} events={events} onChanged={load} />}
       {tab === 'login' && <LoginTab employee={employee} entity={entity} account={account} onChanged={load} />}
       {tab === 'bir' && <BirTab employee={employee} />}
+    </div>
+  )
+}
+
+function HeaderFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 max-w-[16rem]">
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd title={value} className="mt-0.5 truncate text-sm font-semibold text-ink-900">{value}</dd>
+    </div>
+  )
+}
+
+function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entity }) {
+  const today = todayManila()
+  const graceMinutes = Number(entity.grace_period_minutes) || 0
+  const standardHoursPerDay = Number(entity.standard_hours_per_day) || 8
+  const [month, setMonth] = useState(today.slice(0, 7))
+  const [entries, setEntries] = useState<TimeEntry[]>([])
+  const [leaves, setLeaves] = useState<TimelineLeave[]>([])
+  const [holidays, setHolidays] = useState<Holiday[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const seq = useRef(0)
+  const start = `${month}-01`
+  const end = endOfMonth(start)
+
+  const load = useCallback(async () => {
+    // quick month clicks: only the latest request may fill the page
+    const my = ++seq.current
+    setLoading(true)
+    setLoadError('')
+    const [ent, lv, hol] = await Promise.all([
+      supabase
+        .from('time_entries')
+        .select('*')
+        .eq('employee_id', employee.id)
+        .gte('work_date', start)
+        .lte('work_date', end)
+        .order('clock_in'),
+      supabase
+        .from('leave_requests')
+        .select('start_date, end_date, leave_types(name)')
+        .eq('employee_id', employee.id)
+        .eq('status', 'approved')
+        .lte('start_date', end)
+        .gte('end_date', start),
+      getHolidaysBetween(employee.entity_id, start, end).then(
+        (data) => ({ data, error: null }),
+        (error: unknown) => ({ data: [] as Holiday[], error }),
+      ),
+    ])
+    if (my !== seq.current) return
+    if (ent.error || lv.error || hol.error) setLoadError(errorMessage(ent.error ?? lv.error ?? hol.error, 'Could not load attendance'))
+    setEntries((ent.data ?? []) as TimeEntry[])
+    setHolidays(hol.data)
+    setLeaves(
+      ((lv.data ?? []) as unknown as { start_date: string; end_date: string; leave_types: { name: string } | null }[]).map((l) => ({
+        start_date: l.start_date,
+        end_date: l.end_date,
+        label: l.leave_types?.name ?? 'Leave',
+      })),
+    )
+    setLoading(false)
+  }, [employee.id, employee.entity_id, start, end])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const shift = (n: number) => {
+    const [y, m] = month.split('-').map(Number)
+    const t = y * 12 + (m - 1) + n
+    setMonth(`${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`)
+  }
+  const days = [...new Set(entries.map((e) => e.work_date))]
+  const worked = days.map((d) =>
+    dayTimeline(
+      d,
+      entries.filter((e) => e.work_date === d),
+      employee.work_schedule,
+      { graceMinutes, standardHoursPerDay, holidays },
+    ),
+  )
+  // charged leave days, as leave is counted elsewhere: scheduled workdays, not holidays
+  const leaveDays = new Set(
+    leaves.flatMap((l) =>
+      eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date).filter(
+        (d) => leaveWorkdays(d, d, employee.work_schedule.days, holidays) > 0,
+      ),
+    ),
+  ).size
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white">
+      <div className="flex flex-wrap items-center gap-3 bg-slate-100 px-4 py-3">
+        <p className="text-sm font-semibold text-ink-900">Attendance</p>
+        <div className="mx-auto flex items-center gap-2">
+          <IconButton label="Previous month" onClick={() => shift(-1)}>
+            <ChevronLeft className="size-4" />
+          </IconButton>
+          <Input type="month" aria-label="Month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="w-40" />
+          <IconButton label="Next month" onClick={() => shift(1)}>
+            <ChevronRight className="size-4" />
+          </IconButton>
+        </div>
+        {/* opens this employee's sheet for the month shown (up to today) */}
+        <Link
+          to={`/admin/timesheets?employee=${employee.id}&from=${start}&to=${end < today || start > today ? end : today}`}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-ink-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-ink-800">
+          <Clock className="size-4" /> Edit time in / out
+        </Link>
+      </div>
+      <StatGroup bare className="border-b border-slate-200/80">
+        <StatCard label="Days recorded" value={days.length} />
+        <StatCard label="Hours worked" value={fmtHours(worked.reduce((sum, d) => sum + d.workedMinutes, 0))} sub="net of unpaid breaks" />
+        <StatCard label="Late time in" value={worked.filter((d) => d.late).length} tone={worked.some((d) => d.late) ? 'warn' : 'default'} />
+        <StatCard label="No time out" value={worked.filter((d) => d.open).length} tone={worked.some((d) => d.open) ? 'warn' : 'default'} />
+        <StatCard label="Leave days" value={leaveDays} sub="approved" />
+      </StatGroup>
+      <div className="space-y-4 bg-canvas/60 p-4">
+        {loadError ? (
+          <LoadFailed message={loadError} onRetry={load} />
+        ) : loading ? (
+          <Spinner />
+        ) : (
+          <AttendanceTimeline
+            entries={entries}
+            schedule={employee.work_schedule}
+            graceMinutes={graceMinutes}
+            standardHoursPerDay={standardHoursPerDay}
+            holidays={holidays}
+            leaves={leaves}
+            from={start}
+            to={end}
+            today={today}
+            emptyTitle="No time entries this month"
+            emptySub="Time in / out entered for this employee shows here day by day."
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -185,7 +435,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <Card title="Personal information">
+      <Card title="Personal information" icon={<UserRound />}>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="First name"><Input value={f.first_name} onChange={(e) => set('first_name', e.target.value)} /></Field>
           <Field label="Middle name"><Input value={f.middle_name ?? ''} onChange={(e) => set('middle_name', e.target.value)} /></Field>
@@ -233,7 +483,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
       </Card>
 
       <div className="space-y-6">
-        <Card title="Employment">
+        <Card title="Employment" icon={<BriefcaseBusiness />}>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Employee no."><Input value={f.employee_no} onChange={(e) => set('employee_no', e.target.value)} /></Field>
             <Field label="Employment status" hint="BIR codes R / P / C / CP / S / AL">
@@ -282,7 +532,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
           </Field>
         </Card>
 
-        <Card title="Separation (resignation, termination, retirement…)">
+        <Card title="Separation (resignation, termination, retirement…)" icon={<DoorOpen />}>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Last day of employment">
               <Input type="date" value={f.separation_date ?? ''} onChange={(e) => set('separation_date', e.target.value)} />
@@ -308,7 +558,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
           </p>
         </Card>
 
-        <Card title="Notes">
+        <Card title="Notes" icon={<StickyNote />}>
           <Textarea rows={2} value={f.notes ?? ''} onChange={(e) => set('notes', e.target.value)} />
         </Card>
 
@@ -457,7 +707,7 @@ function PayTab({
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-      <Card title="Pay and payroll policy">
+      <Card title="Pay and payroll policy" icon={<Wallet />}>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Rate basis">
             <Select value={f.pay_type} onChange={(e) => setF({ ...f, pay_type: e.target.value as 'monthly' | 'daily' })}>
@@ -526,6 +776,7 @@ function PayTab({
 
       <Card
         title="Allowances and benefits"
+        icon={<Gift />}
         actions={
           <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly' })}>
             <Plus className="size-4" /> Add
@@ -577,6 +828,7 @@ function PayTab({
 
       <Card
         title="Recurring deductions (every payroll)"
+        icon={<Receipt />}
         className="lg:col-span-2"
         actions={
           <Button variant="secondary" onClick={() => setEditingDed({ label: '', category: 'other', amount: '', balance: '', start: '', end: '' })}>
@@ -816,6 +1068,7 @@ function CareerTab({
   return (
     <Card
       title="Career history with the company"
+      icon={<History />}
       actions={
         <Button variant="secondary" onClick={() => setAdding(true)}>
           <Plus className="size-4" /> Record event
@@ -959,7 +1212,7 @@ function LoginTab({
   }
 
   return (
-    <Card title="Employee login code">
+    <Card title="Employee login code" icon={<KeyRound />}>
       <div className="space-y-5">
         <div className="flex flex-wrap items-center gap-3">
           {account ? (
@@ -985,7 +1238,7 @@ function LoginTab({
         {issued && (
           <div className="rounded-xl border-2 border-dashed border-accent-300 bg-accent-50 p-4">
             <p className="text-xs font-semibold text-accent-800">Give this code to the employee — it is shown only now:</p>
-            <p className="my-1 font-mono text-2xl font-extrabold tracking-wider text-brand-900">{issued}</p>
+            <p className="my-1 font-mono text-2xl font-extrabold tracking-wider text-ink-900">{issued}</p>
             <div className="flex gap-2">
               <Button variant="secondary" onClick={() => navigator.clipboard?.writeText(issued)}>
                 <Copy className="size-4" /> Copy
@@ -1135,6 +1388,7 @@ function BirTab({ employee }: { employee: Employee }) {
     <div className="grid gap-6 lg:grid-cols-2">
       <Card
         title="Previous employer this year (from their BIR Form 2316)"
+        icon={<Building2 />}
         actions={
           <Select value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-28">
             {[year - 1, year, year + 1].map((y) => (
@@ -1185,7 +1439,7 @@ function BirTab({ employee }: { employee: Employee }) {
           </div>
         )}
       </Card>
-      <Card title={`Year-end details for ${year}`}>
+      <Card title={`Year-end details for ${year}`} icon={<Landmark />}>
         <div className="space-y-3">
           <Field label="Substituted filing" hint="Auto = qualifies when the employee had only this employer all year and taxes withheld equal tax due">
             <Select value={row.substituted_filing ?? 'auto'} onChange={(e) => set('substituted_filing', e.target.value)}>

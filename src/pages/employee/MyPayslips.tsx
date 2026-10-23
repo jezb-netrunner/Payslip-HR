@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FileText } from 'lucide-react'
+import { ChevronRight, FileText } from 'lucide-react'
 import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView'
 import { Badge, Card, EmptyState, Modal, PageHeader, Select, Spinner } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
@@ -59,19 +59,19 @@ export default function MyPayslips() {
           <EmptyState title="No payslips yet" sub="Payslips appear here once a payroll run that includes you is finalized." />
         </Card>
       ) : (
-        <div className="grid gap-3">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200/80 bg-white">
           {shown.map((s) => (
             <button
               key={s.id}
               onClick={() => setViewing(s)}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-shadow hover:shadow-md"
+              className="flex w-full flex-wrap items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-50"
             >
               <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-brand-50">
-                  <FileText className="size-5 text-brand-600" />
+                <div className="flex size-10 items-center justify-center rounded-xl bg-slate-100">
+                  <FileText className="size-5 text-slate-500" />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-slate-800">{runLabel(runFromSlip(s))}</p>
+                  <p className="text-sm font-bold text-ink-900">{runLabel(runFromSlip(s))}</p>
                   <p className="text-xs text-slate-500">Paid {fmtDate(s.pay_date)}</p>
                 </div>
               </div>
@@ -79,8 +79,9 @@ export default function MyPayslips() {
                 {s.run_type === 'thirteenth_month' && <Badge tone="orange">13th month</Badge>}
                 <div className="text-right">
                   <p className="text-xs text-slate-400">Net pay</p>
-                  <p className="text-lg font-extrabold text-brand-900">{money(Number(s.net_pay))}</p>
+                  <p className="text-lg font-bold text-ink-900">{money(Number(s.net_pay))}</p>
                 </div>
+                <ChevronRight className="size-4 text-slate-300" />
               </div>
             </button>
           ))}

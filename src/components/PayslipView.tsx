@@ -3,7 +3,7 @@ import type { Entity, Payslip, PayrollRun } from '../lib/db'
 import { fmtDate, fmtPeriod, money } from '../lib/format'
 import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
 import { generatePayslipPdf } from '../pdf/payslipPdf'
-import { Badge, Button } from './ui'
+import { Avatar, Badge, Button } from './ui'
 import { employerFor, roundingLines } from '../lib/payslip'
 
 export type PayslipCompany = Pick<Entity, 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'payslip_footer_note'>
@@ -52,8 +52,10 @@ export default function PayslipView({
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-lg font-extrabold text-brand-900">{snap.name}</p>
+        <div className="flex min-w-0 items-start gap-3">
+          <Avatar name={snap.name ?? '?'} size="md" className="mt-0.5" />
+          <div className="min-w-0">
+          <p className="text-lg font-bold text-ink-900">{snap.name}</p>
           <p className="text-xs text-slate-500">
             {snap.employee_no} • {snap.position || '—'} {snap.department ? `• ${snap.department}` : ''}
           </p>
@@ -62,6 +64,7 @@ export default function PayslipView({
             {slip.pay_frequency ? ` • ${FREQUENCY_LABELS[slip.pay_frequency]}` : ''}
             {slip.payment_method ? ` • ${PAYMENT_METHOD_LABELS[slip.payment_method]}` : ''}
           </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {run.status !== 'draft' ? <Badge tone="green">Finalized</Badge> : <Badge tone="amber">Draft</Badge>}
@@ -88,7 +91,7 @@ export default function PayslipView({
                 </span>
               </div>
             ))}
-            <div className="flex items-center justify-between py-2.5 text-sm font-bold text-brand-900">
+            <div className="flex items-center justify-between py-2.5 text-sm font-bold text-ink-900">
               <span>Gross Pay</span>
               <span>{money(Number(slip.gross_pay))}</span>
             </div>
@@ -111,7 +114,7 @@ export default function PayslipView({
                 </span>
               </div>
             ))}
-            <div className="flex items-center justify-between py-2.5 text-sm font-bold text-brand-900">
+            <div className="flex items-center justify-between py-2.5 text-sm font-bold text-ink-900">
               <span>Total Deductions</span>
               <span>{money(Number(slip.total_deductions))}</span>
             </div>
@@ -134,9 +137,11 @@ export default function PayslipView({
         </div>
       )}
 
-      <div className="flex items-center justify-between rounded-xl bg-gradient-to-r from-accent-500 to-accent-600 px-5 py-4 text-white shadow-sm">
-        <span className="text-sm font-bold uppercase tracking-wide">Net Pay</span>
-        <span className="text-2xl font-extrabold tracking-tight">{money(Number(slip.net_pay))}</span>
+      <div className="flex items-center justify-between rounded-xl bg-brand-700 px-5 py-4 text-white">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <span className="size-2 rounded-full bg-accent-400" /> Net pay
+        </span>
+        <span className="text-2xl font-bold tracking-tight">{money(Number(slip.net_pay))}</span>
       </div>
 
       {employerTotal > 0 && (

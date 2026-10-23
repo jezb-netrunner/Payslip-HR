@@ -29,9 +29,9 @@ import MyProfile from './pages/employee/MyProfile'
 
 function Centered({ title, body, children }: { title: string; body: string; children?: React.ReactNode }) {
   return (
-    <div className="flex h-screen items-center justify-center bg-slate-100 p-4">
+    <div className="flex h-screen items-center justify-center bg-canvas p-4">
       <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <h1 className="text-lg font-bold text-brand-900">{title}</h1>
+        <h1 className="text-lg font-bold text-ink-900">{title}</h1>
         <p className="mt-2 text-sm text-slate-500">{body}</p>
         {children && <div className="mt-5 flex justify-center gap-4">{children}</div>}
       </div>
@@ -47,7 +47,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-100">
+      <div className="flex h-screen items-center justify-center bg-canvas">
         <Spinner />
       </div>
     )
@@ -63,9 +63,9 @@ export default function App() {
 
   if (recovering) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-100 p-4">
+      <div className="flex h-screen items-center justify-center bg-canvas p-4">
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
-          <h1 className="mb-4 text-lg font-bold text-brand-900">Choose a new password</h1>
+          <h1 className="mb-4 text-lg font-bold text-ink-900">Choose a new password</h1>
           <ChangePassword />
           <button
             onClick={async () => {
@@ -99,7 +99,7 @@ export default function App() {
 
   if (!profile.is_active) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-slate-100 p-4">
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-canvas p-4">
         <Centered title="Access disabled" body="This account has been deactivated. Contact your administrator." />
         <button onClick={signOut} className="text-sm font-semibold text-brand-600">Sign out</button>
       </div>
@@ -108,7 +108,7 @@ export default function App() {
 
   if (!isAdmin && !isEmployee) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-slate-100 p-4">
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-canvas p-4">
         <Centered
           title="No access yet"
           body="This account is not linked to an employee record or an admin role. Ask your administrator."

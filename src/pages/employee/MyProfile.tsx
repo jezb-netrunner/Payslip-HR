@@ -84,7 +84,7 @@ export default function MyProfile() {
     <div>
       <PageHeader title="My Profile" subtitle={fullName(employee)} />
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title={<span className="flex items-center gap-2"><Briefcase className="size-4" /> Employment record</span>}>
+        <Card title="Employment record" icon={<Briefcase />}>
           <dl className="divide-y divide-slate-100">
             {rows.map(([k, v]) => (
               <div key={k} className="flex items-center justify-between gap-4 py-2">
@@ -98,7 +98,7 @@ export default function MyProfile() {
           </p>
         </Card>
 
-        <Card title={<span className="flex items-center gap-2"><TrendingUp className="size-4" /> Career history</span>}>
+        <Card title="Career history" icon={<TrendingUp />}>
           {events.length === 0 ? (
             <p className="text-sm text-slate-400">No recorded events yet.</p>
           ) : (

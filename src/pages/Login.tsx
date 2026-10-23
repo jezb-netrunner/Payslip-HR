@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import { Building2, KeyRound, Lock, Mail, User } from 'lucide-react'
+import { Check, KeyRound, Lock, Mail, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { employeeLoginEmail, isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
-import { Button, Input } from '../components/ui'
+import { Button, Input, Logo } from '../components/ui'
 import { errorMessage } from '../lib/errors'
 
 type Mode = 'employee' | 'admin' | 'reset' | 'bootstrap'
@@ -80,29 +80,63 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-950 via-brand-900 to-brand-800 p-4">
-      <div className="w-full max-w-md">
-        <div className="mb-6 flex items-center justify-center gap-3">
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-white/10">
-            <Building2 className="size-6 text-accent-400" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-white">Payslip HR</h1>
-            <p className="text-xs font-medium uppercase tracking-widest text-brand-300">
-              HR &amp; Payroll for PH employers
-            </p>
+    <div className="flex min-h-screen bg-canvas">
+      <aside className="relative hidden w-[44%] max-w-[640px] flex-col justify-between overflow-hidden bg-ink-900 p-10 text-white lg:flex">
+        <Logo />
+        <div className="relative z-10">
+          <p className="mb-5 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-accent-400">
+            <span className="size-1.5 rounded-full bg-accent-400" /> HR &amp; payroll for PH employers
+          </p>
+          <h1 className="text-4xl font-bold leading-tight tracking-tight">
+            Time, leave and payroll
+            <br />
+            in one place.
+          </h1>
+          <p className="mt-4 max-w-md text-base text-white/60">
+            Admins enter time in/out and run payroll with SSS, PhilHealth, Pag-IBIG and BIR withholding. Employees
+            sign in with a code to see their payslips and file leave.
+          </p>
+          <div aria-hidden="true" className="mt-10 max-w-sm rounded-2xl bg-white/[0.06] p-5 ring-1 ring-white/10">
+            <div className="flex items-center gap-3">
+              <span className="flex size-9 items-center justify-center rounded-full bg-leaf-400 text-ink-900">
+                <Check className="size-5" strokeWidth={3} />
+              </span>
+              <div>
+                <p className="text-sm font-semibold">Payroll finalized</p>
+                <p className="text-xs text-white/50">Payslips are ready for every employee</p>
+              </div>
+            </div>
+            <div className="mt-5 flex h-2.5 gap-0.5 overflow-hidden rounded-full">
+              <span className="w-[62%] bg-brand-400" />
+              <span className="w-[24%] bg-work" />
+              <span className="w-[14%] bg-accent-400" />
+            </div>
+            <div className="mt-2 flex gap-4 text-[11px] text-white/50">
+              <span>Regular</span>
+              <span>Overtime</span>
+              <span>Holiday</span>
+            </div>
           </div>
         </div>
-        <div className="rounded-2xl bg-white p-7 shadow-2xl">
+        <p className="text-xs text-white/40">Asia/Manila · Philippine labor and tax rules</p>
+        <span aria-hidden="true" className="absolute -right-24 -top-24 size-72 rounded-full bg-accent-400/10" />
+        <span aria-hidden="true" className="absolute -bottom-32 -right-10 size-96 rounded-full bg-brand-500/15" />
+      </aside>
+      <main className="flex flex-1 items-center justify-center p-4 sm:p-8">
+        <div className="w-full max-w-md">
+          <div className="mb-8 flex justify-center lg:hidden">
+            <Logo dark />
+          </div>
+          <div className="rounded-2xl border border-slate-200/80 bg-white p-7 shadow-sm sm:p-8">
           {(mode === 'employee' || mode === 'admin') && (
-            <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+            <div className="mb-6 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
               {(['employee', 'admin'] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => switchTo(m)}
-                  className={`rounded-lg py-1.5 text-sm font-semibold ${
-                    mode === m ? 'bg-white text-brand-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                  className={`rounded-lg py-2 text-sm font-semibold transition-colors ${
+                    mode === m ? 'bg-ink-900 text-white shadow-sm' : 'text-slate-500 hover:text-ink-900'
                   }`}
                 >
                   {m === 'employee' ? 'Employee' : 'Admin'}
@@ -110,13 +144,13 @@ export default function Login() {
               ))}
             </div>
           )}
-          <h2 className="text-lg font-bold text-brand-900">
+          <h2 className="text-xl font-bold text-ink-900">
             {mode === 'employee' && 'Sign in with your code'}
             {mode === 'admin' && 'Admin sign in'}
             {mode === 'reset' && 'Reset your password'}
             {mode === 'bootstrap' && 'Set up a new deployment'}
           </h2>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-sm text-slate-500">
             {mode === 'employee' && 'Use the login code given to you by your HR or payroll officer.'}
             {mode === 'admin' && 'For company admins and client payroll/HR staff.'}
             {mode === 'reset' && 'Admins only — employees get a new code from their payroll officer.'}
@@ -215,8 +249,9 @@ export default function Login() {
               </button>
             )}
           </div>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

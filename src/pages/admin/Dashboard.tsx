@@ -13,7 +13,7 @@ import {
   Wallet,
 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Badge, Card, LoadFailed, NoClient, PageHeader, Spinner, StatCard } from '../../components/ui'
+import { Badge, Card, LoadFailed, NoClient, PageHeader, Spinner, StatCard, StatGroup } from '../../components/ui'
 import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
 import { fetchAll } from '../../lib/fetchAll'
 import { useAuth } from '../../lib/auth'
@@ -26,8 +26,8 @@ import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 
 // Categorical palette — validated (dataviz six checks, light surface):
-// navy → orange → teal → violet, fixed assignment order.
-const C = { net: '#2c5292', ee: '#0d9488', er: '#e06614' }
+// green → blue → orange, fixed assignment order.
+const C = { net: '#3a8a5c', ee: '#1d6fb1', er: '#d9661a' }
 
 export default function Dashboard() {
   const { entity, entities, setEntityId } = useEntity()
@@ -207,7 +207,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
     <div>
       <PageHeader title={entity.name} subtitle={`Workforce and payroll · ${fmtDate(today)}`} />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <StatGroup className="mb-6">
         <StatCard
           label="Active headcount"
           value={derived.active.length}
@@ -234,10 +234,10 @@ function ClientDashboard({ entity }: { entity: Entity }) {
           icon={<ClipboardCheck className="size-5" />}
           tone={derived.actions.length > 0 ? 'warn' : 'good'}
         />
-      </div>
+      </StatGroup>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
-        <Card title="Action center" className="lg:col-span-1">
+        <Card title="Action center" icon={<ClipboardCheck />} className="lg:col-span-1">
           {derived.actions.length === 0 ? (
             <p className="text-sm text-slate-400">All clear — nothing needs your attention.</p>
           ) : (
@@ -262,28 +262,28 @@ function ClientDashboard({ entity }: { entity: Entity }) {
           )}
         </Card>
 
-        <Card title="Payroll cost by month" className="lg:col-span-2" actions={<span className="text-xs text-slate-400">finalized runs · PHP</span>}>
+        <Card title="Payroll cost by month" icon={<TrendingUp />} className="lg:col-span-2" actions={<span className="text-xs text-slate-400">finalized runs · PHP</span>}>
           {derived.costByMonth.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">Finalize a payroll run to see cost trends.</p>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={derived.costByMonth} barCategoryGap="28%">
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6e6ed" />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#767888' }} axisLine={false} tickLine={false} />
                 <YAxis
-                  tick={{ fontSize: 11, fill: '#64748b' }}
+                  tick={{ fontSize: 11, fill: '#767888' }}
                   axisLine={false}
                   tickLine={false}
                   tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))}
                 />
                 <Tooltip
                   formatter={(v, name) => [money(Number(v ?? 0)), String(name)]}
-                  contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
+                  contentStyle={{ borderRadius: 12, border: '1px solid #e6e6ed', fontSize: 12 }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Net pay" stackId="a" fill={C.net} stroke="#ffffff" strokeWidth={2} />
-                <Bar dataKey="Employee deductions" stackId="a" fill={C.ee} stroke="#ffffff" strokeWidth={2} />
-                <Bar dataKey="Employer contributions" stackId="a" fill={C.er} stroke="#ffffff" strokeWidth={2} radius={[4, 4, 0, 0]} />
+                <Legend wrapperStyle={{ fontSize: 12 }} formatter={(value) => <span style={{ color: '#41434f' }}>{value}</span>} />
+                <Bar dataKey="Net pay" stackId="a" fill={C.net} stroke="#ffffff" strokeWidth={2} maxBarSize={64} />
+                <Bar dataKey="Employee deductions" stackId="a" fill={C.ee} stroke="#ffffff" strokeWidth={2} maxBarSize={64} />
+                <Bar dataKey="Employer contributions" stackId="a" fill={C.er} stroke="#ffffff" strokeWidth={2} radius={[4, 4, 0, 0]} maxBarSize={64} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -291,20 +291,20 @@ function ClientDashboard({ entity }: { entity: Entity }) {
       </div>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-3">
-        <Card title="Attendance — last 10 workdays" className="lg:col-span-2">
+        <Card title="Attendance — last 10 workdays" icon={<Clock />} className="lg:col-span-2">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={derived.attendanceTrend} barCategoryGap="35%">
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v}%`} />
-              <Tooltip formatter={(v) => [`${Number(v ?? 0)}%`, 'With time entries']} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e6e6ed" />
+              <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#767888' }} axisLine={false} tickLine={false} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: '#767888' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v}%`} />
+              <Tooltip formatter={(v) => [`${Number(v ?? 0)}%`, 'With time entries']} contentStyle={{ borderRadius: 12, border: '1px solid #e6e6ed', fontSize: 12 }} />
               <Bar dataKey="rate" name="With time entries" fill={C.net} radius={[4, 4, 0, 0]} maxBarSize={26} />
             </BarChart>
           </ResponsiveContainer>
           <p className="text-[11px] text-slate-400">Share of scheduled employees with time in/out entered for the day.</p>
         </Card>
 
-        <Card title="Upcoming holidays">
+        <Card title="Upcoming holidays" icon={<CalendarClock />}>
           {data.holidays.filter((h) => h.holiday_date >= today).length === 0 ? (
             <p className="text-sm text-slate-400">None in the next 45 days.</p>
           ) : (
@@ -325,7 +325,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         </Card>
       </div>
 
-      <Card title={`Statutory obligations${derived.lastMonthLabel ? ` — ${derived.lastMonthLabel} payroll` : ''}`}>
+      <Card title={`Statutory obligations${derived.lastMonthLabel ? ` — ${derived.lastMonthLabel} payroll` : ''}`} icon={<Landmark />}>
         {derived.lastMonthLabel ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <ObligationTile
@@ -353,7 +353,7 @@ function ObligationTile({ label, amount, due }: { label: string; amount: number;
   return (
     <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-3.5">
       <p className="text-xs font-semibold text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-extrabold text-brand-900">{money(amount)}</p>
+      <p className="mt-1 text-lg font-bold text-ink-900">{money(amount)}</p>
       <p className="mt-0.5 text-[11px] text-slate-400">{due}</p>
     </div>
   )
