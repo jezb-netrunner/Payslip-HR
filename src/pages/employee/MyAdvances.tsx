@@ -157,7 +157,7 @@ export default function MyAdvances() {
 
       <StatGroup>
         <StatCard label="You owe" value={money(owed)} sub={outstanding.length ? plural(outstanding.length, 'advance') : 'nothing owed'} icon={<Wallet />} />
-        <StatCard label="Next payroll deducts" value={money(next)} sub="from your take-home pay" icon={<HandCoins />} />
+        <StatCard label="Deducted per payroll" value={money(next)} sub="from your take-home pay" icon={<HandCoins />} />
         <StatCard label="Requests waiting" value={pending.length} sub={pending.length ? 'HR is reviewing' : 'none'} icon={<Hourglass />} />
       </StatGroup>
 

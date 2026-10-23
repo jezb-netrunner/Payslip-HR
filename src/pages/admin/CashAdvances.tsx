@@ -215,7 +215,7 @@ function Advances({ entity }: { entity: Entity }) {
 
       <StatGroup className="mb-6">
         <StatCard label="Outstanding" value={money(totalOwed)} sub={`${plural(owing, 'employee')} repaying`} icon={<Wallet />} />
-        <StatCard label="Next payroll deducts" value={money(nextDeduction)} sub="installments due, capped at each balance" icon={<HandCoins />} />
+        <StatCard label="Collected per payroll" value={money(nextDeduction)} sub="current installments, capped at each balance" icon={<HandCoins />} />
         <StatCard label="Requests waiting" value={pending.length} sub={pending.length ? 'review under Requests' : 'none'} icon={<Hourglass />} tone={pending.length ? 'warn' : 'default'} />
       </StatGroup>
 

@@ -71,6 +71,7 @@ import {
   PAYMENT_METHOD_LABELS,
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
+import { nextInstallment } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
@@ -912,8 +913,7 @@ function PayTab({
             {openAdvances.length > 0 ? (
               <>
                 Owes <b className="text-ink-900">{money(owedOnAdvances)}</b> on {plural(openAdvances.length, 'advance')} ·{' '}
-                {money(openAdvances.filter((d) => d.active).reduce((s, d) => s + Math.min(Number(d.amount_per_period), Number(d.balance)), 0))}{' '}
-                comes off each payroll
+                {money(nextInstallment(openAdvances.filter((d) => !d.start_date || d.start_date <= todayManila())))} per payroll
               </>
             ) : advances.length > 0 ? (
               `No balance owed (${plural(advances.length, 'advance')} fully paid).`

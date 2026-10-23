@@ -185,7 +185,7 @@ export default function MyDashboard() {
             value={money(advances.reduce((t, a) => t + Number(a.balance), 0))}
             sub={
               <Link to="/me/advances" className="font-semibold text-brand-600">
-                {money(nextInstallment(advances.filter((a) => !a.start_date || a.start_date <= today)))} next payroll · details
+                {money(nextInstallment(advances.filter((a) => !a.start_date || a.start_date <= today)))} per payroll · details
               </Link>
             }
             icon={<HandCoins className="size-5" />}
