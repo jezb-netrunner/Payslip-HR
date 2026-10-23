@@ -1,6 +1,12 @@
 import { fetchAll } from './fetchAll'
 import { toCsv } from './csv'
-import { isAuthRetryableFetchError } from '@supabase/supabase-js'
+import {
+  isAuthApiError,
+  isAuthRefreshDiscardedError,
+  isAuthRetryableFetchError,
+  isAuthSessionMissingError,
+  type AuthError,
+} from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
 import type {
@@ -96,6 +102,20 @@ export const SESSION_ENDED =
 
 const OFFLINE = 'Could not reach the server — check your connection and try again.'
 
+const AUTH_BUSY = "Couldn't confirm your sign-in just now — please try again in a moment."
+
+// Supabase Auth's answers that mean the session itself is over (signed out
+// elsewhere, code replaced, token reused). Anything else — a 5xx, rate limit,
+// another tab refreshing at the same moment — is not a reason to sign out.
+const ENDED_CODES = new Set(['refresh_token_not_found', 'refresh_token_already_used', 'session_not_found', 'session_expired', 'user_banned', 'user_not_found'])
+function sessionEnded(e: AuthError): boolean {
+  if (isAuthSessionMissingError(e)) return true
+  return isAuthApiError(e) && (ENDED_CODES.has(e.code ?? '') || e.status === 400 || e.status === 401 || e.status === 403)
+}
+function authProblem(e: AuthError): string {
+  return isAuthRetryableFetchError(e) ? OFFLINE : sessionEnded(e) ? SESSION_ENDED : AUTH_BUSY
+}
+
 type AdminUsersResult = { ok?: boolean; error?: string; user_id?: string; code?: string }
 
 /**
@@ -110,16 +130,25 @@ type AdminUsersResult = { ok?: boolean; error?: string; user_id?: string; code?:
 export async function callAdminUsers(body: Record<string, unknown>): Promise<AdminUsersResult> {
   const { data: sess, error: sessErr } = await supabase.auth.getSession()
   // an expired token whose refresh couldn't reach the server is a connection problem, not a sign-out
-  if (!sess.session) return { error: sessErr && isAuthRetryableFetchError(sessErr) ? OFFLINE : SESSION_ENDED }
+  if (!sess.session) return { error: sessErr ? authProblem(sessErr) : SESSION_ENDED }
   let res = await postAdminUsers(sess.session.access_token, body)
   if (res.status === 401) {
-    const { data: fresh, error } = await supabase.auth.refreshSession()
-    if (error && isAuthRetryableFetchError(error)) return { error: OFFLINE }
-    if (error || !fresh.session) {
+    const refreshed = await supabase.auth.refreshSession()
+    // (auth-js answers a discarded refresh with data: null, whatever its types say)
+    let token = refreshed.data?.session?.access_token
+    let error = refreshed.error
+    // another tab refreshed the same session at the same moment: use what it stored
+    if (error && isAuthRefreshDiscardedError(error)) {
+      const again = await supabase.auth.getSession()
+      token = again.data.session?.access_token
+      error = again.error
+    }
+    if (error && !sessionEnded(error)) return { error: authProblem(error) }
+    if (!token) {
       await supabase.auth.signOut({ scope: 'local' })
       return { error: SESSION_ENDED }
     }
-    res = await postAdminUsers(fresh.session.access_token, body)
+    res = await postAdminUsers(token, body)
   }
   let payload: AdminUsersResult & { message?: string; msg?: string } = {}
   try {

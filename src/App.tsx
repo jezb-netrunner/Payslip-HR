@@ -14,6 +14,7 @@ import Timesheets from './pages/admin/Timesheets'
 import LeavesAdmin from './pages/admin/LeavesAdmin'
 import Payroll from './pages/admin/Payroll'
 import PayrollRunDetail from './pages/admin/PayrollRunDetail'
+import CashAdvances from './pages/admin/CashAdvances'
 import Announcements from './pages/admin/Announcements'
 import Reports from './pages/admin/Reports'
 import Statutory from './pages/admin/Statutory'
@@ -24,6 +25,7 @@ import MyDashboard from './pages/employee/MyDashboard'
 import MyAttendance from './pages/employee/MyAttendance'
 import MyPayslips from './pages/employee/MyPayslips'
 import MyLeaves from './pages/employee/MyLeaves'
+import MyAdvances from './pages/employee/MyAdvances'
 import MyAnnouncements from './pages/employee/MyAnnouncements'
 import MyProfile from './pages/employee/MyProfile'
 
@@ -138,6 +140,7 @@ export default function App() {
           <Route path="leaves" element={<LeavesAdmin />} />
           <Route path="payroll" element={<Payroll />} />
           <Route path="payroll/:id" element={<PayrollRunDetail />} />
+          <Route path="advances" element={<CashAdvances />} />
           <Route path="announcements" element={<Announcements />} />
           <Route path="reports" element={<Reports />} />
           <Route path="statutory" element={<Statutory />} />
@@ -152,6 +155,7 @@ export default function App() {
           <Route path="payslips" element={<MyPayslips />} />
           <Route path="attendance" element={<MyAttendance />} />
           <Route path="leaves" element={<MyLeaves />} />
+          <Route path="advances" element={<MyAdvances />} />
           <Route path="announcements" element={<MyAnnouncements />} />
           <Route path="profile" element={<MyProfile />} />
         </Route>

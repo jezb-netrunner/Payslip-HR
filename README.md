@@ -60,6 +60,18 @@ are refused; the Generate button makes random ones.
   ZIP of single PDFs); **cash payout sheet** with bill/coin breakdown per
   employee and per run. Computing warns, per employee, about scheduled
   workdays with no time in/out or leave (charged as absences)
+- **Cash Advances** ("bale"): record an advance when it is released, or
+  approve an employee's request, with the date the employee signed the
+  written authorization to deduct it (a printable agreement is built in;
+  Labor Code Art. 113 and its IRR as amended by DOLE D.O. 195-2018). Advances
+  are interest-free; each payroll deducts the agreed installment after tax,
+  never more than the net pay (what it can't take stays in the balance), and
+  the payroll that includes the employee's separation, or their final pay,
+  takes the remaining balance (a paused advance is flagged in its review
+  warnings instead). Repayments made outside payroll, pausing
+  deductions, and a per-advance ledger (release → payroll deductions →
+  repayments → balance) are tracked; the database only lets the balance move
+  through a finalized payroll or a recorded repayment
 - **Announcements** (pinned / expiring) shown on the employee portal
 - **BIR & Reports**: 1604-C alphalist Schedule 1 and Schedule 2 (MWEs), BIR
   2316 working copies, 1604-C summary, 1601-C monthly remittance log,
@@ -71,7 +83,8 @@ are refused; the Generate button makes random ones.
   Pag-IBIG, tax, other deductions, cash rounding), year-to-date totals, days
   and hours on record this month, leave balances, announcements
 - Payslips (finalized only) with PDF download, attendance records +
-  correction requests, leave requests, profile (the login code is their only
+  correction requests, leave requests, cash advance requests with each
+  advance's balance and repayment history, profile (the login code is their only
   credential — a lost code is replaced by the entity admin)
 
 ## Pay frequency and periods
@@ -253,7 +266,7 @@ src/
   components/     # UI kit, shell, payslip view
   lib/            # supabase client, auth, client context, login codes, pay periods,
                   # cash denominations, Manila-time utils, labels
-  pdf/            # payslip PDF generation
+  pdf/            # payslip PDFs, cash advance agreement
 supabase/         # migrations + edge functions (source of truth for schema)
 MEMORY.md         # running memory log: session history, deployed state, lessons
 ```

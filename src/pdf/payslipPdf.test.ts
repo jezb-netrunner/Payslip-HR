@@ -41,6 +41,9 @@ describe('bulk payslip PDFs', () => {
     expect(page(1)).toContain('DEDUCTIONS')
     for (let n = 2; n <= alone; n++) expect(page(n)).not.toContain('DEDUCTIONS')
     expect(page(alone + 1)).toContain('Ben Cruz')
+    // the gross pay total prints once, under the whole earnings list, not under page 1's part of it
+    const pagesWith = (text: string) => [...Array(alone).keys()].map((i) => i + 1).filter((n) => page(n).includes(text))
+    expect(pagesWith('(Gross Pay)')).toEqual(pagesWith('(Earning ').slice(-1))
   })
 
   it('zips one PDF per employee, named by employee number and period', async () => {

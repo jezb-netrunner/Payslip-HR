@@ -167,6 +167,41 @@ export interface RecurringDeduction {
   start_date: string | null
   end_date: string | null
   active: boolean
+  /** Cash advances: when and how it was released, and when the employee signed the authorization to deduct. */
+  released_on?: string | null
+  release_method?: PaymentMethod | null
+  authorized_on?: string | null
+  notes?: string
+  created_at?: string
+}
+
+/** An employee's request for a cash advance; approving it records the advance. */
+export interface AdvanceRequest {
+  id: string
+  entity_id: string
+  employee_id: string
+  amount: number
+  per_payroll: number
+  reason: string
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_notes: string | null
+  advance_id: string | null
+  created_at: string
+}
+
+/** A cash advance repaid outside payroll (cash handed back, a transfer). */
+export interface AdvanceRepayment {
+  id: string
+  advance_id: string
+  entity_id: string
+  employee_id: string
+  paid_on: string
+  amount: number
+  notes: string
+  recorded_by: string | null
+  created_at: string
 }
 
 export interface TimeEntry {

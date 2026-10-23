@@ -192,6 +192,19 @@ function roundingFor(entity: Entity, emp: Employee, run: PayrollRun): RoundingIn
 
 export async function computeRun(run: PayrollRun, selected: Entity): Promise<RunComputationResult> {
   if (run.entity_id !== selected.id) throw new Error('This run belongs to another client.')
+  // Mark the draft as being computed BEFORE reading any input: a change to
+  // the inputs from here on (database staleness triggers) wipes this token,
+  // and the totals update at the end then refuses to complete the draft. A
+  // change between reading and marking would otherwise be overwritten.
+  const token = crypto.randomUUID()
+  const { data: marked, error: tokErr } = await supabase
+    .from('payroll_runs')
+    .update({ totals: { computing: token } })
+    .eq('id', run.id)
+    .eq('status', 'draft')
+    .select('id')
+  if (tokErr) throw tokErr
+  if (!marked || marked.length === 0) throw new Error('This run is no longer a draft.')
   // Another admin may have changed the client's pay policy since this
   // console loaded it: compute from the current record.
   const entity = await getEntity(run.entity_id)
@@ -347,7 +360,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             .from('recurring_deductions')
             .select('*, employees!inner(entity_id)')
             .eq('employees.entity_id', entity.id)
-            .eq('active', true)
+            // paused cash advances too: a separation must not pass them silently
+            .or('active.eq.true,category.eq.cash_advance')
             .order('id')
             .range(from, to),
         ),
@@ -439,12 +453,23 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         })
 
     const empAdjustments = adjustmentsBy.get(emp.id) ?? []
+    const empDeductions = deductionsBy.get(emp.id) ?? []
+    const inPeriod = (d: RecurringDeduction) =>
+      (!d.start_date || d.start_date <= run.period_end) && (!d.end_date || d.end_date >= run.period_start)
     // a final pay after the last day carries one-time items only
     const recurring = extrasOnly(emp, run)
       ? []
-      : (deductionsBy.get(emp.id) ?? []).filter(
-          (d) => (!d.start_date || d.start_date <= run.period_end) && (!d.end_date || d.end_date >= run.period_start),
-        )
+      : empDeductions.filter((d) => d.active && d.category !== 'cash_advance' && inPeriod(d))
+    // Cash advances, oldest first: this payroll's installment, or the whole
+    // balance on the payroll that settles a separation (and on final pay).
+    const settles = separatedBy(emp, run)
+    const owed = empDeductions.filter((d) => d.category === 'cash_advance' && Number(d.balance ?? 0) > 0)
+    const advances = owed
+      .filter((d) => d.active && (settles || inPeriod(d)))
+      .sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? '') || a.id.localeCompare(b.id))
+    // a paused advance stays paused (the admin may collect it another way),
+    // but the payroll that settles a separation says what is still owed
+    const pausedOwed = settles ? owed.filter((d) => !d.active) : []
 
     const empYear = yearBy.get(emp.id) ?? []
     const empTax = taxBy.get(emp.id) ?? []
@@ -497,6 +522,15 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
               ...empAdjustments
                 .filter((a) => a.kind === 'deduction')
                 .map((a) => ({ id: a.id, label: a.label, category: a.category, amount: Number(a.amount), oneTime: true })),
+              ...advances.map((d) => ({
+                id: d.id,
+                label: d.label,
+                category: d.category,
+                amount: settles ? Number(d.balance) : Math.min(Number(d.amount_per_period), Number(d.balance)),
+                upToNet: true,
+                balance: Number(d.balance),
+                settlement: settles,
+              })),
             ],
         oneTimeEarnings: empAdjustments
           .filter((a) => a.kind === 'earning')
@@ -551,6 +585,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : undefined,
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
+    for (const d of pausedOwed) {
+      slip.trace.warnings.push(
+        `${d.label}: ₱${Number(d.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} is still owed, but its deductions are paused, so this payroll doesn't collect it. Resume it under Cash Advances to collect it here, or collect it outside payroll.`,
+      )
+    }
 
     results.push({ employee: emp, slip })
   }
@@ -576,19 +615,6 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       })
     }
   }
-
-  // Mark the draft as being computed. Any change to its inputs meanwhile
-  // (database staleness triggers) wipes this token, and the totals update
-  // at the end then refuses to complete the draft.
-  const token = crypto.randomUUID()
-  const { data: marked, error: tokErr } = await supabase
-    .from('payroll_runs')
-    .update({ totals: { computing: token } })
-    .eq('id', run.id)
-    .eq('status', 'draft')
-    .select('id')
-  if (tokErr) throw tokErr
-  if (!marked || marked.length === 0) throw new Error('This run is no longer a draft.')
 
   // Replace existing draft payslips for this run.
   const { error: delErr } = await supabase.from('payslips').delete().eq('payroll_run_id', run.id)

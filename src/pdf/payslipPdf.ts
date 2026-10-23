@@ -135,6 +135,8 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
     head: [['EARNINGS', 'AMOUNT']],
     body: earningsBody.length ? earningsBody : [['—', '']],
     foot: [['Gross Pay', php(slip.gross_pay)]],
+    // the total under the whole list only, not under each page's part of it
+    showFoot: 'lastPage',
     theme: 'plain',
     styles: { fontSize: 8.5, cellPadding: 1.8, textColor: [51, 65, 85] },
     headStyles: { fillColor: NAVY, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
@@ -151,6 +153,8 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
     head: [['DEDUCTIONS', 'AMOUNT']],
     body: deductionsBody.length ? deductionsBody : [['—', '']],
     foot: [['Total Deductions', php(slip.total_deductions)]],
+    // the total under the whole list only, not under each page's part of it
+    showFoot: 'lastPage',
     theme: 'plain',
     styles: { fontSize: 8.5, cellPadding: 1.8, textColor: [51, 65, 85] },
     headStyles: { fillColor: NAVY, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },

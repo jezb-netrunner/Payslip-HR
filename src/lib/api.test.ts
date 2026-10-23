@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AuthApiError, AuthRetryableFetchError } from '@supabase/supabase-js'
+import { AuthApiError, AuthRefreshDiscardedError, AuthRetryableFetchError } from '@supabase/supabase-js'
 
 const auth = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -57,6 +57,24 @@ describe('callAdminUsers', () => {
     fetchMock.mockResolvedValueOnce(reply(401, { error: 'Not authenticated' }))
     auth.refreshSession.mockResolvedValueOnce({ data: { session: null }, error: new AuthRetryableFetchError('Failed to fetch', 0) })
     expect((await callAdminUsers({ action: 'create_admin' })).error).toMatch(/connection/)
+    expect(auth.signOut).not.toHaveBeenCalled()
+  })
+
+  it('another tab refreshing at the same moment is not a sign-out: retry with its token', async () => {
+    fetchMock.mockResolvedValueOnce(reply(401, { error: 'Not authenticated' })).mockResolvedValueOnce(reply(200, { ok: true }))
+    auth.refreshSession.mockResolvedValueOnce({ data: null, error: new AuthRefreshDiscardedError() })
+    auth.getSession.mockResolvedValueOnce(session('old')).mockResolvedValueOnce(session('from-other-tab'))
+    expect(await callAdminUsers({ action: 'create_admin' })).toEqual({ ok: true })
+    expect(bearer(1).Authorization).toBe('Bearer from-other-tab')
+    expect(auth.signOut).not.toHaveBeenCalled()
+  })
+
+  it('a Supabase Auth hiccup (5xx, rate limit) asks to try again instead of signing out', async () => {
+    for (const status of [500, 429]) {
+      fetchMock.mockResolvedValueOnce(reply(401, { error: 'Not authenticated' }))
+      auth.refreshSession.mockResolvedValueOnce({ data: { session: null }, error: new AuthApiError('upstream', status, undefined) })
+      expect((await callAdminUsers({ action: 'create_admin' })).error).toMatch(/try again/)
+    }
     expect(auth.signOut).not.toHaveBeenCalled()
   })
 

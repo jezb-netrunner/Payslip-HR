@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   Clock,
   FileWarning,
+  HandCoins,
   KeyRound,
   Landmark,
   TrendingUp,
@@ -126,6 +127,7 @@ interface DashData {
   recentLeaves: { employee_id: string; start_date: string; end_date: string }[]
   pendingCorrections: number
   pendingLeaves: number
+  pendingAdvances: number
 }
 
 function ClientDashboard({ entity }: { entity: Entity }) {
@@ -139,7 +141,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
       const twoWeeksAgo = addDays(today, -13)
       // six payroll months for the cost chart, plus the current one
       const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
-      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves] = await Promise.all([
+      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances] = await Promise.all([
         getEmployees(entity.id),
         fetchAll<TimeEntry>((from, to) =>
           supabase
@@ -177,8 +179,9 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         ),
         supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
         supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
+        supabase.from('advance_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
       ])
-      const failed = runsRes.error ?? corr.error ?? leaves.error
+      const failed = runsRes.error ?? corr.error ?? leaves.error ?? advances.error
       if (failed) throw failed
       setData({
         employees: emps,
@@ -189,6 +192,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         recentLeaves,
         pendingCorrections: corr.count ?? 0,
         pendingLeaves: leaves.count ?? 0,
+        pendingAdvances: advances.count ?? 0,
       })
     } catch (err) {
       setLoadError(errorMessage(err, 'Could not load the dashboard'))
@@ -432,6 +436,14 @@ function derive(data: DashData, entity: Entity, today: string) {
       to: '/admin/leaves',
       tone: 'warn',
       icon: <CalendarClock className="size-4" />,
+    })
+  if (data.pendingAdvances > 0)
+    actions.push({
+      title: `${plural(data.pendingAdvances, 'cash advance request')} pending`,
+      sub: 'Approve with a signed authorization, or reject with a note',
+      to: '/admin/advances?tab=requests',
+      tone: 'warn',
+      icon: <HandCoins className="size-4" />,
     })
   const drafts = data.runs.filter((r) => r.status === 'draft')
   if (drafts.length > 0)

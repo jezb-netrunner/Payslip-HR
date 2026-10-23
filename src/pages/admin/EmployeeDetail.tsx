@@ -10,6 +10,7 @@ import {
   Copy,
   DoorOpen,
   Gift,
+  HandCoins,
   History,
   KeyRound,
   Landmark,
@@ -61,7 +62,7 @@ import type {
 } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { useRecordClient } from '../../lib/recordClient'
-import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
+import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials, plural } from '../../lib/format'
 import {
   ALLOWANCE_BASIS_LABELS,
   ALLOWANCE_CATEGORY_LABELS,
@@ -70,6 +71,7 @@ import {
   PAYMENT_METHOD_LABELS,
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
+import { nextInstallment } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
@@ -584,6 +586,11 @@ function PayTab({
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
+  // cash advances have their own page (agreement, ledger, repayments)
+  const advances = deductions.filter((d) => d.category === 'cash_advance')
+  const owedOnAdvances = advances.reduce((s, d) => s + Number(d.balance ?? 0), 0)
+  const openAdvances = advances.filter((d) => Number(d.balance ?? 0) > 0)
+  const recurring = deductions.filter((d) => d.category !== 'cash_advance')
   const [f, setF] = useState({
     pay_type: employee.pay_type,
     monthly_rate: String(employee.monthly_rate),
@@ -837,8 +844,8 @@ function PayTab({
         }
       >
         <div className="grid gap-2 sm:grid-cols-2">
-          {deductions.length === 0 && <p className="text-sm text-slate-400">None.</p>}
-          {deductions.map((d) => (
+          {recurring.length === 0 && <p className="text-sm text-slate-400">None.</p>}
+          {recurring.map((d) => (
             <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
               <div className="min-w-0">
                 <p className="break-words text-sm font-semibold text-slate-700">{d.label}</p>
@@ -889,6 +896,37 @@ function PayTab({
           start and end dates limit the payrolls they apply to. For one-off items use payroll adjustments on the run
           itself.
         </p>
+      </Card>
+
+      <Card
+        title="Cash advances"
+        icon={<HandCoins />}
+        className="lg:col-span-2"
+        actions={
+          <Link to={`/admin/advances?employee=${employee.id}&new=advance`} className="text-xs font-semibold text-brand-600">
+            Record advance
+          </Link>
+        }
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-600">
+            {openAdvances.length > 0 ? (
+              <>
+                Owes <b className="text-ink-900">{money(owedOnAdvances)}</b> on {plural(openAdvances.length, 'advance')} ·{' '}
+                {money(nextInstallment(openAdvances.filter((d) => !d.start_date || d.start_date <= todayManila())))} per payroll
+              </>
+            ) : advances.length > 0 ? (
+              `No balance owed (${plural(advances.length, 'advance')} fully paid).`
+            ) : (
+              'No cash advances.'
+            )}
+          </p>
+          {advances.length > 0 && (
+            <Link to={`/admin/advances?employee=${employee.id}`} className="text-xs font-semibold text-brand-600">
+              View history
+            </Link>
+          )}
+        </div>
       </Card>
 
       <Modal open={editingAlw !== null} onClose={() => setEditingAlw(null)} title={editingAlw?.id ? 'Edit allowance' : 'Add allowance'}>
@@ -988,7 +1026,6 @@ const DEDUCTION_CATEGORY_LABELS: Record<string, string> = {
   sss_loan: 'SSS loan',
   pagibig_loan: 'Pag-IBIG loan',
   company_loan: 'Company loan',
-  cash_advance: 'Cash advance',
   hmo: 'HMO',
   union_dues: 'Union dues (tax-exempt)',
   other: 'Other',
