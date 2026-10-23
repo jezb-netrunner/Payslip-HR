@@ -103,6 +103,8 @@ export default function MyDashboard() {
       total: ents[t.id] ?? Number(t.default_annual_days),
       // a leave that needs months of service (SIL) and doesn't open this year shows its opening date
       opens: usableOn(t, employee.hire_date, `${year}-12-31`, ents[t.id]) ? null : eligibleFrom(t, employee.hire_date),
+      // one that opens later this year shows the balance and when it can be used, as My Leaves does
+      usableFrom: usableOn(t, employee.hire_date, today, ents[t.id]) ? null : eligibleFrom(t, employee.hire_date),
     }))
     .slice(0, 4)
 
@@ -191,7 +193,7 @@ export default function MyDashboard() {
             icon={<HandCoins className="size-5" />}
           />
         )}
-        {balances.map(({ t, total, opens }) =>
+        {balances.map(({ t, total, opens, usableFrom }) =>
           opens ? (
             <StatCard key={t.id} label={t.name} value={fmtDate(opens)} sub={`available after ${t.min_service_months} months of service`} />
           ) : (
@@ -199,7 +201,13 @@ export default function MyDashboard() {
               key={t.id}
               label={t.name}
               value={`${total - (used[t.id] ?? 0)} / ${total}`}
-              sub={total - (used[t.id] ?? 0) < 0 ? 'days beyond your entitlement' : 'days left this year'}
+              sub={
+                usableFrom
+                  ? `usable from ${fmtDate(usableFrom)}`
+                  : total - (used[t.id] ?? 0) < 0
+                    ? 'days beyond your entitlement'
+                    : 'days left this year'
+              }
             />
           ),
         )}

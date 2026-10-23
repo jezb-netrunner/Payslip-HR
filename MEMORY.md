@@ -267,6 +267,16 @@ the release, paused advances flagged (not silently skipped) at separation,
 agreement/warnings no longer promise a catch-up the engine doesn't do,
 installment stats relabeled "per payroll". Tests 187 → 189 + SQL
 regressions (each shown failing on the old code).
+Second reviewer (merged test-round changes): nothing on pay, data or
+security; fixed its three minor finds — `callAdminUsers` signed out on
+refresh errors that don't end a session (see the sign-out lesson), the
+employee dashboard showed SIL as usable before its date this year (now
+"usable from …" like My Leaves), and Pay Runs hid net pay / status behind
+an in-table scroll at 1024–1279 px with the labeled sidebar (secondary
+columns hide below xl, status and type move into the first column; the
+sidebar stays expanded — the owner disliked the icon rail). Also fixed a
+pre-existing PDF quirk: a spilled table printed its total under page 1's
+partial list (`showFoot: 'lastPage'`). Tests 189 → 191.
 
 ---
 
@@ -859,8 +869,13 @@ overtime they wouldn't be paid.
 Found in the live auth logs on 2026-10-23: the owner signed out (testing the
 employee portal) at 07:37 UTC; the desktop tab's create-admin calls failed
 from 07:50 with `session_not_found`. Fix: `signOut({ scope: 'local' })`, and
-`callAdminUsers` refreshes once on 401 — a failed refresh means the session
-is gone, so it signs this device out with `SESSION_ENDED`. Note auth-js
+`callAdminUsers` refreshes once on 401 — a refresh refused with a
+session-ended answer (`refresh_token_not_found` / `_already_used`,
+`session_not_found`, 400/401/403) signs this device out with
+`SESSION_ENDED`; `AuthRefreshDiscardedError` (another tab rotated the token
+at the same moment) re-reads the session and retries; a 5xx / 429 says "try
+again" (audit 2026-10-23: the first version signed people out on those).
+Note auth-js
 2.112 keeps the stored session when a refresh fails while the access token
 is still valid, so the explicit local sign-out is required. Why it mattered:
 the app looked signed in but could not create admins or set login codes.

@@ -166,13 +166,13 @@ function RunList({ entity }: { entity: Entity }) {
           <thead>
             <tr>
               <Th><span className="flex items-center gap-1.5"><CalendarRange className="size-3.5" /> Pay run</span></Th>
-              <Th><span className="flex items-center gap-1.5"><Tags className="size-3.5" /> Payroll type</span></Th>
+              <Th className="hidden xl:table-cell"><span className="flex items-center gap-1.5"><Tags className="size-3.5" /> Payroll type</span></Th>
               <Th><span className="flex items-center gap-1.5"><CalendarCheck className="size-3.5" /> Pay date</span></Th>
-              <Th className="text-right">Employees</Th>
+              <Th className="hidden text-right xl:table-cell">Employees</Th>
               <Th className="text-right">Gross</Th>
-              <Th className="text-right">Tax withheld</Th>
+              <Th className="hidden text-right xl:table-cell">Tax withheld</Th>
               <Th className="text-right">Net pay</Th>
-              <Th>Status</Th>
+              <Th className="hidden xl:table-cell">Status</Th>
               <Th className="text-right">Action</Th>
             </tr>
           </thead>
@@ -188,8 +188,13 @@ function RunList({ entity }: { entity: Entity }) {
                       {fmtMonth(r.period_month)}
                       {r.periods_in_month > 1 ? ` · payroll ${r.period_index} of ${r.periods_in_month}` : ''}
                     </p>
+                    {/* below xl the type and status columns are hidden: show them here */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 xl:hidden">
+                      <Badge tone={STATUS_LOOK[r.status].tone}>{STATUS_LOOK[r.status].label}</Badge>
+                      <span className="text-xs text-slate-500">{RUN_TYPE_LABELS[r.run_type]}</span>
+                    </div>
                   </Td>
-                  <Td>
+                  <Td className="hidden xl:table-cell">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span>{RUN_TYPE_LABELS[r.run_type]}</span>
                       {r.pay_frequency && <Badge tone="slate" dot={false}>{FREQUENCY_LABELS[r.pay_frequency]}</Badge>}
@@ -197,13 +202,13 @@ function RunList({ entity }: { entity: Entity }) {
                     </div>
                   </Td>
                   <Td className="whitespace-nowrap">{fmtDate(r.pay_date)}</Td>
-                  <Td className="text-right">{computed ? r.totals.employees : '—'}</Td>
+                  <Td className="hidden text-right xl:table-cell">{computed ? r.totals.employees : '—'}</Td>
                   <Td className="whitespace-nowrap text-right">{computed ? money(r.totals.gross ?? 0) : '—'}</Td>
-                  <Td className="whitespace-nowrap text-right">{computed ? money(r.totals.withholding_tax ?? 0) : '—'}</Td>
+                  <Td className="hidden whitespace-nowrap text-right xl:table-cell">{computed ? money(r.totals.withholding_tax ?? 0) : '—'}</Td>
                   <Td className="whitespace-nowrap text-right font-bold text-ink-900">
                     {computed ? money(r.totals.net ?? 0) : <span className="text-xs font-medium text-slate-400">not computed</span>}
                   </Td>
-                  <Td>
+                  <Td className="hidden xl:table-cell">
                     <Badge tone={STATUS_LOOK[r.status].tone}>{STATUS_LOOK[r.status].label}</Badge>
                   </Td>
                   <Td className="text-right">
