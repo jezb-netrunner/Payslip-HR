@@ -632,6 +632,13 @@ Why it mattered: the walkthrough found what unit tests and SQL tests
 couldn't — wrong-date saves, mislabeled controls, phone overflow, a
 double-click that duplicated loans.
 
+Rebuilt 2026-10-23 (scripts were in a session scratchpad, now gone):
+the edge function also runs in-process in the Node gateway behind a tiny
+Deno stand-in; payroll for seeding ran through the app's own
+`computeRun`/`finalizeRun` loaded via Vite's server-side module loader;
+since the new shell scrolls inside `<main>`, Playwright full-page shots
+capture one screen — grow the viewport height instead.
+
 ### Audit actor for service-role writes comes from x-actor-id — service role only
 
 > The admin-users function writes with the service role, so `auth.uid()` is null in the audit trigger; it now sends `x-actor-id: <calling admin>` and `audit_trigger()` honours that header only when the JWT role is `service_role` (a signed-in user's header is ignored, a malformed one yields no actor).
