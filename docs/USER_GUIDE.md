@@ -15,7 +15,7 @@ Always pick the client first in the client selector at the top.
 
 1. **Employees** → add employees (201 file, government IDs, pay rate, pay frequency, schedule) and generate each one's **login code**.
 2. **Time In / Out** → key in attendance (daily sheet for the team, or per-employee for a period). **Fill** pre-loads scheduled days.
-3. **Leaves** → approve/reject leave and correction requests (counters show what's pending).
+3. **Leaves** → approve/reject leave requests; **Time In / Out → Correction requests** → review employees' missing-time reports (red counts show what's pending).
 4. **Pay Runs** → **New pay run** (frequency + period) → add adjustments if any → **Compute draft** → review → **Finalize**.
    Finalizing publishes payslips to employees and locks the period's attendance. **Reopen** if you need to fix something (audit-logged), then recompute and finalize again.
 5. Download the payroll register, payslip PDFs or cash payout sheet from the run.

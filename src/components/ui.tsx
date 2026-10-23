@@ -367,7 +367,8 @@ export function Field({
       {label}
     </span>
   )
-  const note = hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>
+  // slate-500: hints carry rules ("cannot be changed later"); slate-400 was 2.6:1 on white
+  const note = hint && <span className="mt-1 block text-xs text-slate-500">{hint}</span>
   if (group) {
     return (
       <div role="group" aria-labelledby={id} className={`block min-w-0 ${className}`}>
