@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Pencil, Plus, ShieldCheck } from 'lucide-react'
+import { Pencil, Plus, ShieldCheck, Users as UsersIcon } from 'lucide-react'
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Spinner, TableShell, Td, Th, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { callAdminUsers } from '../../lib/api'
@@ -104,7 +104,7 @@ export default function Users() {
           </tbody>
         </TableShell>
       )}
-      <Card className="mt-6" title="Employees">
+      <Card className="mt-6" title="Employees" icon={<UsersIcon />}>
         <p className="text-sm text-slate-600">
           Employees don't have email accounts. Their entity admin issues each one a personal login code
           (Employees → employee → Login Code), shaped like <span className="font-mono font-semibold">CLIENTCODE-XXXXXXXX</span>.

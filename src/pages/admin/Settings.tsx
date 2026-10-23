@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Banknote, Building2, Coins, FileText, Hash, SlidersHorizontal } from 'lucide-react'
 import { Button, Card, Field, Input, NoClient, PageHeader, Select, Textarea, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
@@ -106,7 +107,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
         }
       />
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Employer identity (BIR withholding agent)">
+        <Card title="Employer identity (BIR withholding agent)" icon={<Building2 />}>
           <div className="space-y-3">
             <Field label="Registered name">
               <Input value={s.name} onChange={(e) => set('name', e.target.value)} />
@@ -155,7 +156,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
         </Card>
 
         <div className="space-y-6">
-          <Card title="Employer numbers">
+          <Card title="Employer numbers" icon={<Hash />}>
             <div className="grid grid-cols-2 gap-3">
               <Field label="SSS employer no.">
                 <Input value={s.sss_employer_no} onChange={(e) => set('sss_employer_no', e.target.value)} />
@@ -168,7 +169,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
               </Field>
             </div>
           </Card>
-          <Card title="Minimum wage">
+          <Card title="Minimum wage" icon={<Coins />}>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Wage region">
                 <Select value={s.minimum_wage_region} onChange={(e) => set('minimum_wage_region', e.target.value)}>
@@ -193,7 +194,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           </Card>
         </div>
 
-        <Card title="Payroll policy">
+        <Card title="Payroll policy" icon={<SlidersHorizontal />}>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Default pay frequency" hint="For new employees; set per employee on their record">
               <Select
@@ -234,7 +235,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
         </Card>
 
         <div className="space-y-6">
-          <Card title="Cash payroll — whole-peso net pay">
+          <Card title="Cash payroll — whole-peso net pay" icon={<Banknote />}>
             <div className="space-y-3">
               <Field label="Net pay rounding">
                 <Select value={s.net_pay_rounding} onChange={(e) => set('net_pay_rounding', e.target.value as Entity['net_pay_rounding'])}>
@@ -256,7 +257,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
               </p>
             </div>
           </Card>
-          <Card title="Payslip">
+          <Card title="Payslip" icon={<FileText />}>
             <Field label="Footer note">
               <Textarea rows={2} value={s.payslip_footer_note} onChange={(e) => set('payslip_footer_note', e.target.value)} />
             </Field>

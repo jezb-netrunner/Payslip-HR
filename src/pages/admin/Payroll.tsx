@@ -1,8 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Wallet } from 'lucide-react'
+import { Activity, CalendarCheck, CalendarRange, Plus, Search, Tags } from 'lucide-react'
 import { runLabel } from '../../components/PayslipView'
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, NoClient, PageHeader, Select, Spinner, Toggle } from '../../components/ui'
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Modal,
+  NoClient,
+  PageHeader,
+  Select,
+  Spinner,
+  StatusCounts,
+  TableShell,
+  Td,
+  Th,
+  Toggle,
+} from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { getEmployees, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
@@ -15,6 +32,7 @@ import { slotFor, suggestPeriod } from '../../lib/payPeriods'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
+import { useQuickAction } from '../../lib/quickAction'
 
 export default function Payroll() {
   const { entity } = useEntity()
@@ -23,12 +41,23 @@ export default function Payroll() {
   return <RunList key={entity.id} entity={entity} />
 }
 
+const STATUS_LOOK: Record<PayrollRun['status'], { tone: string; label: string; dot: string }> = {
+  draft: { tone: 'amber', label: 'Draft', dot: 'bg-amber-400' },
+  finalized: { tone: 'green', label: 'Finalized', dot: 'bg-leaf-500' },
+  paid: { tone: 'blue', label: 'Paid', dot: 'bg-work' },
+}
+
 function RunList({ entity }: { entity: Entity }) {
   const [runs, setRuns] = useState<PayrollRun[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [frequency, setFrequency] = useState('')
+  const [status, setStatus] = useState('')
+  const [query, setQuery] = useState('')
   const navigate = useNavigate()
+
+  // wait for the runs: the new-run form suggests the period after the latest one
+  useQuickAction('run', () => setCreating(true), !loading)
 
   const load = useCallback(async () => {
     const { data } = await supabase
@@ -45,69 +74,126 @@ function RunList({ entity }: { entity: Entity }) {
     load()
   }, [load])
 
-  const shown = runs.filter((r) => !frequency || r.pay_frequency === frequency || (frequency === 'thirteenth' && r.run_type === 'thirteenth_month'))
+  const q = query.trim().toLowerCase()
+  const shown = runs.filter(
+    (r) =>
+      (!frequency || r.pay_frequency === frequency || (frequency === 'thirteenth' && r.run_type === 'thirteenth_month')) &&
+      (!status || r.status === status) &&
+      (!q || `${runLabel(r)} ${fmtDate(r.pay_date)} ${fmtMonth(r.period_month)}`.toLowerCase().includes(q)),
+  )
+  const counts = (Object.keys(STATUS_LOOK) as PayrollRun['status'][])
+    .map((k) => ({ label: STATUS_LOOK[k].label, dot: STATUS_LOOK[k].dot, count: runs.filter((r) => r.status === k).length }))
+    .filter((c) => c.count > 0)
 
   return (
     <div>
       <PageHeader
         title="Payroll"
-        subtitle={`${entity.name} · each run covers the employees of one pay frequency. Draft → review → finalize.`}
+        subtitle={
+          counts.length ? (
+            <StatusCounts items={counts} />
+          ) : (
+            'Each run covers the employees of one pay frequency. Draft → review → finalize.'
+          )
+        }
         actions={
-          <>
-            <Select value={frequency} onChange={(e) => setFrequency(e.target.value)} className="w-44">
-              <option value="">All runs</option>
-              {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-              <option value="thirteenth">13th month</option>
-            </Select>
-            <Button onClick={() => setCreating(true)}>
-              <Plus className="size-4" /> New payroll run
-            </Button>
-          </>
+          <Button onClick={() => setCreating(true)}>
+            <Plus className="size-4" /> New pay run
+          </Button>
         }
       />
+
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:w-64">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+          <Input aria-label="Search pay runs" placeholder="Search pay runs" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-9" />
+        </div>
+        <FilterPill icon={<CalendarRange className="size-4" />} label="Pay frequency" value={frequency} onChange={setFrequency}>
+          <option value="">All frequencies</option>
+          {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+          <option value="thirteenth">13th month</option>
+        </FilterPill>
+        <FilterPill icon={<Activity className="size-4" />} label="Status" value={status} onChange={setStatus}>
+          <option value="">Any status</option>
+          {Object.entries(STATUS_LOOK).map(([k, v]) => (
+            <option key={k} value={k}>{v.label}</option>
+          ))}
+        </FilterPill>
+      </div>
+
       {loading ? (
         <Spinner />
       ) : shown.length === 0 ? (
         <Card>
-          <EmptyState title="No payroll runs yet" sub="Create a run to compute payslips from time in/out, rates and the statutory tables." />
+          <EmptyState
+            title={runs.length ? 'No pay runs match' : 'No payroll runs yet'}
+            sub={runs.length ? 'Try another search or filter.' : 'Create a run to compute payslips from time in/out, rates and the statutory tables.'}
+          />
         </Card>
       ) : (
-        <div className="grid gap-3">
-          {shown.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => navigate(`/admin/payroll/${r.id}`)}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-shadow hover:shadow-md"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex size-10 items-center justify-center rounded-xl bg-brand-50">
-                  <Wallet className="size-5 text-brand-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-slate-800">
-                    {runLabel(r)}{' '}
-                    {r.pay_frequency && <Badge tone="blue">{FREQUENCY_LABELS[r.pay_frequency]}</Badge>}{' '}
-                    {r.annualize && <Badge tone="violet">annualized</Badge>}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Pay date {fmtDate(r.pay_date)} · {fmtMonth(r.period_month)}
-                    {r.periods_in_month > 1 ? ` payroll ${r.period_index} of ${r.periods_in_month}` : ''} ·{' '}
-                    {plural(r.totals?.employees ?? 0, 'employee')}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="text-right">
-                  <p className="text-xs text-slate-400">Net total</p>
-                  <p className="text-base font-extrabold text-brand-900">{money(r.totals?.net ?? 0)}</p>
-                </div>
-                <Badge tone={r.status === 'draft' ? 'amber' : r.status === 'finalized' ? 'green' : 'blue'}>{r.status}</Badge>
-              </div>
-            </button>
-          ))}
-        </div>
+        <TableShell>
+          <thead>
+            <tr>
+              <Th><span className="flex items-center gap-1.5"><CalendarRange className="size-3.5" /> Pay run</span></Th>
+              <Th><span className="flex items-center gap-1.5"><Tags className="size-3.5" /> Payroll type</span></Th>
+              <Th><span className="flex items-center gap-1.5"><CalendarCheck className="size-3.5" /> Pay date</span></Th>
+              <Th className="text-right">Employees</Th>
+              <Th className="text-right">Gross</Th>
+              <Th className="text-right">Tax withheld</Th>
+              <Th className="text-right">Net pay</Th>
+              <Th>Status</Th>
+              <Th className="text-right">Action</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((r) => {
+              const computed = typeof r.totals?.employees === 'number'
+              const open = () => navigate(`/admin/payroll/${r.id}`)
+              return (
+                <tr key={r.id} className="cursor-pointer" onClick={open}>
+                  <Td>
+                    <p className="font-semibold text-ink-900">{runLabel(r)}</p>
+                    <p className="text-xs text-slate-400">
+                      {fmtMonth(r.period_month)}
+                      {r.periods_in_month > 1 ? ` · payroll ${r.period_index} of ${r.periods_in_month}` : ''}
+                    </p>
+                  </Td>
+                  <Td>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span>{RUN_TYPE_LABELS[r.run_type]}</span>
+                      {r.pay_frequency && <Badge tone="slate" dot={false}>{FREQUENCY_LABELS[r.pay_frequency]}</Badge>}
+                      {r.annualize && <Badge tone="violet" dot={false}>annualized</Badge>}
+                    </div>
+                  </Td>
+                  <Td className="whitespace-nowrap">{fmtDate(r.pay_date)}</Td>
+                  <Td className="text-right">{computed ? r.totals.employees : '—'}</Td>
+                  <Td className="whitespace-nowrap text-right">{computed ? money(r.totals.gross ?? 0) : '—'}</Td>
+                  <Td className="whitespace-nowrap text-right">{computed ? money(r.totals.withholding_tax ?? 0) : '—'}</Td>
+                  <Td className="whitespace-nowrap text-right font-bold text-ink-900">
+                    {computed ? money(r.totals.net ?? 0) : <span className="text-xs font-medium text-slate-400">not computed</span>}
+                  </Td>
+                  <Td>
+                    <Badge tone={STATUS_LOOK[r.status].tone}>{STATUS_LOOK[r.status].label}</Badge>
+                  </Td>
+                  <Td className="text-right">
+                    <Button
+                      variant={r.status === 'draft' ? 'dark' : 'secondary'}
+                      className="px-3 py-1.5 text-xs"
+                      onClick={(ev) => {
+                        ev.stopPropagation()
+                        open()
+                      }}
+                    >
+                      {r.status === 'draft' ? 'Run payroll' : 'View'}
+                    </Button>
+                  </Td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </TableShell>
       )}
 
       {creating && (
@@ -119,6 +205,35 @@ function RunList({ entity }: { entity: Entity }) {
         />
       )}
     </div>
+  )
+}
+
+/** A compact grey filter control: icon, caption for screen readers, native select. */
+function FilterPill({
+  icon,
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string
+  onChange: (v: string) => void
+  children: React.ReactNode
+}) {
+  return (
+    <label className="flex items-center gap-2 rounded-lg bg-slate-200/60 py-1 pl-3 pr-1 text-sm font-medium text-ink-900">
+      <span className="text-slate-500">{icon}</span>
+      <span className="sr-only">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border-0 bg-white py-1 pl-2 pr-7 text-sm font-medium text-ink-900 shadow-xs focus:outline-none focus:ring-2 focus:ring-brand-200"
+      >
+        {children}
+      </select>
+    </label>
   )
 }
 

@@ -7,7 +7,7 @@
 // locked by the database.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, Lock, Save, Wand2, XCircle } from 'lucide-react'
+import { CalendarDays, Check, FilePen, Lock, Save, UserRound, Wand2, X } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, NoClient, PageHeader, Select, Spinner, TableShell, Tabs, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
@@ -44,9 +44,9 @@ export default function Timesheets() {
       />
       <Tabs
         tabs={[
-          { key: 'daily', label: 'Daily sheet' },
-          { key: 'employee', label: 'Per employee (cutoff)' },
-          { key: 'corrections', label: 'Correction requests' },
+          { key: 'daily', label: 'Daily sheet', icon: <CalendarDays /> },
+          { key: 'employee', label: 'Per employee (cutoff)', icon: <UserRound /> },
+          { key: 'corrections', label: 'Correction requests', icon: <FilePen /> },
         ]}
         active={tab}
         onChange={(t) => {
@@ -915,11 +915,11 @@ function Corrections({ entity }: { entity: Entity }) {
                   onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })}
                   className="w-full sm:w-52"
                 />
-                <Button disabled={reviewing !== null} onClick={() => review(r.id, true)}>
-                  <CheckCircle2 className="size-4" /> Approve
+                <Button variant="dark" disabled={reviewing !== null} onClick={() => review(r.id, true)}>
+                  <Check className="size-4" /> Approve
                 </Button>
-                <Button variant="danger" disabled={reviewing !== null} onClick={() => review(r.id, false)}>
-                  <XCircle className="size-4" /> Reject
+                <Button variant="secondary" disabled={reviewing !== null} onClick={() => review(r.id, false)}>
+                  <X className="size-4 text-rose-600" /> Reject
                 </Button>
               </div>
             )}

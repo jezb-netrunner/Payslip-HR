@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { History, Plus } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, Textarea } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
@@ -10,6 +10,7 @@ import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import { useQuickAction } from '../../lib/quickAction'
 
 export default function MyLeaves() {
   const { employee } = useAuth()
@@ -20,6 +21,8 @@ export default function MyLeaves() {
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
+
+  useQuickAction('leave', () => setOpen(true), !loading)
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ type: '', start: todayManila(), end: todayManila(), reason: '' })
 
@@ -156,9 +159,9 @@ export default function MyLeaves() {
           const used = usedByType[t.id] ?? 0
           const left = total - used // negative = taken beyond the entitlement
           return (
-            <div key={t.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div key={t.id} className="rounded-xl border border-slate-200/80 bg-white p-4">
               <p className="text-xs font-semibold text-slate-500">{t.name}</p>
-              <p className={`mt-1 text-xl font-extrabold ${left < 0 ? 'text-rose-600' : 'text-brand-900'}`}>
+              <p className={`mt-1 text-xl font-bold ${left < 0 ? 'text-rose-600' : 'text-ink-900'}`}>
                 {left}
                 <span className="text-sm font-medium text-slate-400"> / {total} days</span>
               </p>
@@ -174,7 +177,7 @@ export default function MyLeaves() {
         })}
       </div>
 
-      <Card title="Request history">
+      <Card title="Request history" icon={<History />}>
         {requests.length === 0 ? (
           <EmptyState title="No leave requests yet" />
         ) : (

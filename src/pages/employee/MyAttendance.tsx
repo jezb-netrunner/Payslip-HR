@@ -1,13 +1,33 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FilePen, Plus } from 'lucide-react'
-import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Spinner, TableShell, Td, Textarea, Th } from '../../components/ui'
+import { Clock, FilePen, Plus } from 'lucide-react'
+import AttendanceTimeline, { TimelineLegend, type TimelineLeave } from '../../components/AttendanceTimeline'
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Modal,
+  PageHeader,
+  Segmented,
+  Spinner,
+  StatCard,
+  StatGroup,
+  TableShell,
+  Td,
+  Textarea,
+  Th,
+} from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
 import type { TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtHours, fmtTime, plural } from '../../lib/format'
 import { endOfMonth, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { dayTimeline } from '../../lib/timeline'
 import { errorMessage } from '../../lib/errors'
+import { useQuickAction } from '../../lib/quickAction'
 
 export default function MyAttendance() {
   const { employee } = useAuth()
@@ -19,13 +39,18 @@ export default function MyAttendance() {
   const [correcting, setCorrecting] = useState<{ entry: TimeEntry | null } | null>(null)
   const [form, setForm] = useState({ work_date: '', in: '', out: '', reason: '' })
   const [busy, setBusy] = useState(false)
+  const [leaves, setLeaves] = useState<TimelineLeave[]>([])
+  const [view, setView] = useState<'timeline' | 'list'>('timeline')
+  const [graceMinutes, setGraceMinutes] = useState(0)
+
+  useQuickAction('correction', () => openCorrection(null))
 
   const load = useCallback(async () => {
     if (!employee) return
     setLoading(true)
     const start = `${monthStr}-01`
     const end = endOfMonth(start)
-    const [{ data: ent }, { data: reqs }] = await Promise.all([
+    const [{ data: ent }, { data: reqs }, { data: lv }, { data: client }] = await Promise.all([
       supabase
         .from('time_entries')
         .select('*')
@@ -39,9 +64,26 @@ export default function MyAttendance() {
         .eq('employee_id', employee.id)
         .order('created_at', { ascending: false })
         .limit(20),
+      supabase
+        .from('leave_requests')
+        .select('start_date, end_date, leave_types(name)')
+        .eq('employee_id', employee.id)
+        .eq('status', 'approved')
+        .lte('start_date', end)
+        .gte('end_date', start),
+      // "late" on the timeline follows payroll: after the shift start plus the client's grace period
+      supabase.from('entities').select('grace_period_minutes').eq('id', employee.entity_id).maybeSingle(),
     ])
+    setGraceMinutes(Number(client?.grace_period_minutes) || 0)
     setEntries((ent ?? []) as TimeEntry[])
     setRequests((reqs ?? []) as TimeCorrectionRequest[])
+    setLeaves(
+      ((lv ?? []) as unknown as { start_date: string; end_date: string; leave_types: { name: string } | null }[]).map((l) => ({
+        start_date: l.start_date,
+        end_date: l.end_date,
+        label: l.leave_types?.name ?? 'Leave',
+      })),
+    )
     setLoading(false)
   }, [employee, monthStr])
 
@@ -105,6 +147,18 @@ export default function MyAttendance() {
   const totalMinutes = entries
     .filter((e) => e.clock_out)
     .reduce((s, e) => s + (new Date(e.clock_out!).getTime() - new Date(e.clock_in).getTime()) / 60000, 0)
+  const monthStart = `${monthStr}-01`
+  const days = [...new Set(entries.map((e) => e.work_date))]
+  const lateDays = days.filter(
+    (d) =>
+      dayTimeline(
+        d,
+        entries.filter((e) => e.work_date === d),
+        employee.work_schedule,
+        { graceMinutes },
+      ).late,
+  ).length
+  const openEntries = entries.filter((e) => !e.clock_out).length
 
   return (
     <div>
@@ -130,12 +184,48 @@ export default function MyAttendance() {
         <Spinner />
       ) : (
         <div className="space-y-6">
-          <Card title={`Entries — ${plural(entries.length, 'entry', 'entries')} · ${fmtHours(totalMinutes)} total`}>
-            {entries.length === 0 ? (
+          <StatGroup>
+            <StatCard label="Days recorded" value={days.length} sub={`${plural(entries.length, 'entry', 'entries')}`} />
+            <StatCard label="Hours on record" value={fmtHours(totalMinutes)} />
+            <StatCard label="Late time in" value={lateDays} tone={lateDays > 0 ? 'warn' : 'default'} sub="after your shift start and grace period" />
+            <StatCard label="No time out" value={openEntries} tone={openEntries > 0 ? 'warn' : 'default'} />
+            <StatCard label="Pending corrections" value={requests.filter((r) => r.status === 'pending').length} />
+          </StatGroup>
+
+          <Card
+            title="Time entries"
+            icon={<Clock />}
+            actions={
+              <Segmented
+                label="Show entries as"
+                value={view}
+                onChange={setView}
+                options={[
+                  { key: 'timeline', label: 'Timeline' },
+                  { key: 'list', label: 'List' },
+                ]}
+              />
+            }
+          >
+            {entries.length === 0 && leaves.length === 0 ? (
               <EmptyState title="No entries this month" />
+            ) : view === 'timeline' ? (
+              <div className="space-y-4">
+                <TimelineLegend />
+                <AttendanceTimeline
+                  entries={entries}
+                  schedule={employee.work_schedule}
+                  graceMinutes={graceMinutes}
+                  leaves={leaves}
+                  from={monthStart}
+                  to={endOfMonth(monthStart)}
+                  today={todayManila()}
+                  onRequestFix={(e) => openCorrection(e)}
+                />
+              </div>
             ) : (
               <TableShell>
-                <thead className="bg-slate-50">
+                <thead>
                   <tr>
                     <Th>Date</Th>
                     <Th>In</Th>
@@ -145,9 +235,9 @@ export default function MyAttendance() {
                     <Th></Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody>
                   {entries.map((e) => (
-                    <tr key={e.id} className="hover:bg-slate-50">
+                    <tr key={e.id}>
                       <Td className="whitespace-nowrap font-semibold">{fmtDate(e.work_date)}</Td>
                       <Td className="whitespace-nowrap">{fmtTime(e.clock_in)}</Td>
                       <Td className="whitespace-nowrap">{e.clock_out ? fmtTime(e.clock_out) : <Badge tone="green">open</Badge>}</Td>
@@ -167,7 +257,7 @@ export default function MyAttendance() {
                       <Td>
                         <button
                           type="button"
-                          className="flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-brand-600 hover:text-brand-800"
+                          className="flex items-center gap-1 whitespace-nowrap text-xs font-semibold text-brand-700 hover:text-brand-800"
                           onClick={() => openCorrection(e)}
                         >
                           <FilePen className="size-3.5" /> Request fix
@@ -180,7 +270,7 @@ export default function MyAttendance() {
             )}
           </Card>
 
-          <Card title="My correction requests">
+          <Card title="My correction requests" icon={<FilePen />}>
             {requests.length === 0 ? (
               <EmptyState title="No correction requests" />
             ) : (

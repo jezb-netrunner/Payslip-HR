@@ -160,15 +160,38 @@ merge to `main` yet.
   leave/entitlement double-submit guards; login codes also refuse all
   letters and the employee's own names (`admin-users` v5).
 
+### 2026-10-23 — UI revamp to the owner's reference video
+
+**Asked:** make the app look like a screen recording of a "tiimi" HR/payroll
+concept (dark top bar with section pills, white icon rail, lavender canvas,
+flat white cards, dark-green primary, lemon-yellow accent, stepper-style
+"Run Payroll" flow, attendance timeline bars); transitions not needed.
+
+**Did (front end only, no schema/RPC change):** new tokens in
+`src/index.css` (Figtree; `brand` = teal green, `accent` = lemon, `ink`,
+`canvas`, `leaf`, timeline colours; Tailwind's `slate` overridden to the
+design's lavender greys); `ui.tsx` primitives restyled plus `Avatar`,
+`StatGroup`, `StatusCounts`, `Segmented`, `IconButton`, `Donut`, `Logo`;
+dark toast; new `Shell` (top bar: section title + section pills with red
+pending counts, client switcher, yellow quick-add menu, account menu; icon
+rail; phone drawer). Pages: employee card grid/list, employee header with
+prev/next and icon tabs + new read-only **Attendance** tab (timeline),
+payroll runs table, pay-run page as a "Run payroll" workspace (stepper,
+hours & pay rows with per-employee adjustment shortcuts, hour summary and
+employer-cost donut, sticky Compute/Finalize bar), dashboards, split-screen
+login, My Attendance timeline. Quick-add links open create forms through
+`?new=<key>` (`src/lib/quickAction.ts`). Timeline geometry in
+`src/lib/timeline.ts` (+5 tests, 152 total).
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**Backend is multi-client since 2026-10-20; the Pages site is not yet.**
-The live site (`main`) still serves the old single-company front end,
-which does NOT work against the new schema — merging
-`claude/trusting-dirac-fqodu6` into `main` (owner's go-ahead pending) makes
-the live app usable again. Nothing else is outstanding for the backend.
+**Backend and Pages site are both multi-client since 2026-10-20.** The
+owner merged PR #1 (`claude/trusting-dirac-fqodu6`) into `main` at 04:28 UTC
+and the Pages deploy (run 4) succeeded. The UI revamp of 2026-10-23 is on
+branch `claude/kind-hawking-40tjt9` (front end only; no backend change) and
+reaches the live site only when merged into `main`.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-20:
 - **All 14 migrations applied.** The two multi-client ones were run by the
@@ -652,3 +675,26 @@ Entry module before relying on the CSV column positions.
 Verify against each agency's own issuance before showing exact dates again
 (same rule as statutory figures: data from official sources, never memory).
 
+
+### The look lives in theme tokens and ui.tsx primitives (confirmed approach)
+
+> The 2026-10-23 revamp re-skinned the app mostly through `@theme` tokens in `src/index.css` and the primitives in `src/components/ui.tsx`; new screens should compose those (Card `icon`, StatGroup/StatCard, StatusCounts, Badge tones, Segmented, IconButton, Th/Td/TableShell) instead of hand-written colour classes.
+
+Rules that came with it: `brand-*` is the teal green (primary buttons
+`brand-700`), headings and dark buttons use `ink-900` — not brand;
+`accent-*` is lemon yellow, so text on it is `ink-900`, never white;
+`slate-*` is overridden to the design's lavender greys, so existing
+`text-slate-*` classes follow the theme; cards are flat `rounded-xl` with a
+light border, no shadow. Why it mattered: the only page edits the re-skin
+needed were where pages had hand-written navy/orange classes.
+
+### Chart colours come from the dataviz validator, not the brand swatches
+
+> The brand green #335f5a fails the chroma floor and sits under 15 ΔE from the timeline blue, so charts use the validated order green #3a8a5c → blue #1d6fb1 → yellow #eda100 → violet #6250d6 → orange #d9661a (dashboard bars, pay-run donut, payslip ring).
+
+The attendance timeline palette was validated as the pairs that actually
+touch (late | work | break | work | overtime); leave days never sit next to
+another segment and carry a stripe texture plus a label. Re-run
+`validate_palette.js` (dataviz skill) before adding a series colour. Why it
+mattered: eyeballed brand colours gave pairs that colour-blind — and even
+full-vision — readers could not tell apart.

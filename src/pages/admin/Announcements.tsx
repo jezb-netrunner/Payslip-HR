@@ -7,6 +7,7 @@ import type { Announcement, Entity } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { fmtDateTime } from '../../lib/format'
 import { supabase } from '../../lib/supabase'
+import { useQuickAction } from '../../lib/quickAction'
 
 export default function Announcements() {
   const { entity } = useEntity()
@@ -37,6 +38,8 @@ function AnnouncementList({ entity }: { entity: Entity }) {
   const [items, setItems] = useState<Announcement[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Partial<Announcement> | null>(null)
+
+  useQuickAction('announcement', () => setEditing({ pinned: false, published_at: new Date().toISOString() }))
 
   const load = useCallback(async () => {
     const { data } = await supabase

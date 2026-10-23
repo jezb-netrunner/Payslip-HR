@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Ban, CheckCircle2, Plus, Save, XCircle } from 'lucide-react'
+import { Ban, CalendarDays, Check, Hourglass, ListChecks, Plus, Save, Tags, X } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, NoClient, PageHeader, Select, Spinner, TableShell, Tabs, Td, Textarea, Th, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
@@ -11,6 +11,7 @@ import { fmtDate, fullName, plural } from '../../lib/format'
 import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { useQuickAction } from '../../lib/quickAction'
 
 type RequestFull = LeaveRequest & { employees: Employee; leave_types: LeaveType }
 
@@ -33,6 +34,8 @@ function Leaves({ entity }: { entity: Entity }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [editingType, setEditingType] = useState<Partial<LeaveType> | null>(null)
   const [filing, setFiling] = useState(false)
+
+  useQuickAction('leave', () => setFiling(true), !loading)
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -154,10 +157,10 @@ function Leaves({ entity }: { entity: Entity }) {
       />
       <Tabs
         tabs={[
-          { key: 'pending', label: 'Pending', count: pending.length },
-          { key: 'all', label: 'All requests' },
-          { key: 'entitlements', label: 'Entitlements' },
-          { key: 'types', label: 'Leave types' },
+          { key: 'pending', label: 'Pending', count: pending.length, icon: <Hourglass /> },
+          { key: 'all', label: 'All requests', icon: <ListChecks /> },
+          { key: 'entitlements', label: 'Entitlements', icon: <CalendarDays /> },
+          { key: 'types', label: 'Leave types', icon: <Tags /> },
         ]}
         active={tab}
         onChange={setTab}
@@ -251,11 +254,11 @@ function Leaves({ entity }: { entity: Entity }) {
                       onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })}
                       className="w-full sm:w-48"
                     />
-                    <Button disabled={busyId !== null} onClick={() => review(r.id, true)}>
-                      <CheckCircle2 className="size-4" /> Approve
+                    <Button variant="dark" disabled={busyId !== null} onClick={() => review(r.id, true)}>
+                      <Check className="size-4" /> Approve
                     </Button>
-                    <Button variant="danger" disabled={busyId !== null} onClick={() => review(r.id, false)}>
-                      <XCircle className="size-4" /> Reject
+                    <Button variant="secondary" disabled={busyId !== null} onClick={() => review(r.id, false)}>
+                      <X className="size-4 text-rose-600" /> Reject
                     </Button>
                   </div>
                 )}

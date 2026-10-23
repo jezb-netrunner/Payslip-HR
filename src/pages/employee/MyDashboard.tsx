@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, CalendarCheck, Eye, Megaphone, Pin, Wallet } from 'lucide-react'
+import { ArrowRight, CalendarCheck, CalendarRange, Eye, Megaphone, Pin, Wallet } from 'lucide-react'
 import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView'
-import { Card, EmptyState, LoadFailed, Modal, Spinner, StatCard } from '../../components/ui'
+import { Avatar, Button, Card, Donut, EmptyState, LoadFailed, Modal, Spinner, StatCard, StatGroup } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
-import { fmtDate, fmtDateTime, fmtHours, money } from '../../lib/format'
+import { fmtDate, fmtDateTime, fmtHours, fullName, money } from '../../lib/format'
 import { leaveDaysInYear, showsBalance } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -94,20 +94,24 @@ export default function MyDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-brand-900">Hello, {employee.first_name}!</h1>
-        <p className="text-sm text-slate-500">{entity?.name} · {fmtDate(today)}</p>
+      <div className="flex items-center gap-4">
+        <Avatar name={fullName(employee)} size="lg" />
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-ink-900 sm:text-[28px]">Hello, {employee.first_name}!</h1>
+          <p className="text-sm text-slate-500">{entity?.name} · {fmtDate(today)}</p>
+        </div>
       </div>
 
       {news.length > 0 && (
         <Card
-          title={<span className="flex items-center gap-2"><Megaphone className="size-4" /> Announcements</span>}
+          title="Announcements"
+          icon={<Megaphone />}
           actions={<Link to="/me/announcements" className="text-xs font-semibold text-brand-600">See all</Link>}
         >
           <div className="space-y-3">
             {news.slice(0, 3).map((a) => (
-              <div key={a.id} className={`rounded-xl p-3 ${a.pinned ? 'bg-accent-50' : 'bg-slate-50'}`}>
-                <p className="flex items-center gap-1.5 break-words text-sm font-bold text-slate-800">
+              <div key={a.id} className={`rounded-xl border p-3.5 ${a.pinned ? 'border-accent-200 bg-accent-50' : 'border-slate-200/80 bg-slate-50/60'}`}>
+                <p className="flex items-center gap-1.5 break-words text-sm font-bold text-ink-900">
                   {a.pinned && <Pin className="size-3.5 shrink-0 text-accent-600" />} <span className="min-w-0">{a.title}</span>
                 </p>
                 <p className="text-[11px] text-slate-400">{fmtDateTime(a.published_at)}</p>
@@ -119,7 +123,7 @@ export default function MyDashboard() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card title={<span className="flex items-center gap-2"><Wallet className="size-4" /> Latest pay</span>} className="lg:col-span-2">
+        <Card title="Latest pay" icon={<Wallet />} className="lg:col-span-2">
           {!latest ? (
             <EmptyState title="No payslips yet" sub="Your payslip appears here once your payroll is finalized." />
           ) : (
@@ -127,22 +131,19 @@ export default function MyDashboard() {
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <p className="text-xs text-slate-500">{runLabel(runFromSlip(latest))} · paid {fmtDate(latest.pay_date)}</p>
-                  <p className="mt-1 text-4xl font-extrabold tracking-tight text-brand-900">{money(Number(latest.net_pay))}</p>
+                  <p className="mt-1 text-4xl font-bold tracking-tight text-ink-900">{money(Number(latest.net_pay))}</p>
                   <p className="text-xs text-slate-400">take-home pay</p>
                 </div>
-                <button
-                  onClick={() => setViewing(latest)}
-                  className="flex items-center gap-1 text-sm font-semibold text-brand-600 hover:text-brand-800"
-                >
+                <Button variant="secondary" onClick={() => setViewing(latest)}>
                   <Eye className="size-4" /> Full payslip
-                </button>
+                </Button>
               </div>
               <PayBreakdown slip={latest} />
             </div>
           )}
         </Card>
 
-        <Card title={`This year (${year})`}>
+        <Card title={`This year (${year})`} icon={<CalendarRange />}>
           <dl className="space-y-2.5 text-sm">
             <Row label="Gross pay" value={money(sum((s) => Number(s.gross_pay)))} />
             <Row label="Take-home pay" value={money(sum((s) => Number(s.net_pay)))} strong />
@@ -157,7 +158,7 @@ export default function MyDashboard() {
         </Card>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <StatGroup>
         <StatCard
           label="Days recorded this month"
           value={daysWithEntries}
@@ -172,7 +173,7 @@ export default function MyDashboard() {
             sub={total - (used[t.id] ?? 0) < 0 ? 'days beyond your entitlement' : 'days left this year'}
           />
         ))}
-      </div>
+      </StatGroup>
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>
         {viewing && entity && <PayslipView slip={viewing} run={runFromSlip(viewing)} company={entity} />}
@@ -185,12 +186,17 @@ function Row({ label, value, strong = false }: { label: string; value: string; s
   return (
     <div className="flex items-center justify-between gap-3">
       <dt className="text-slate-500">{label}</dt>
-      <dd className={strong ? 'font-extrabold text-brand-900' : 'font-semibold text-slate-700'}>{value}</dd>
+      <dd className={strong ? 'font-bold text-ink-900' : 'font-semibold text-slate-700'}>{value}</dd>
     </div>
   )
 }
 
-/** Where the gross went: take-home vs each deduction, as a single bar + legend. */
+// Categorical colours in fixed order (validated with the dataviz checks);
+// "Other deductions" folds into a neutral grey. Every segment is labelled
+// with its amount in the legend, so no colour stands alone.
+const PART_COLORS = ['#3a8a5c', '#1d6fb1', '#eda100', '#6250d6', '#d9661a', '#9fa1ae']
+
+/** Where the gross went: take-home vs each deduction, as a ring + legend. */
 function PayBreakdown({ slip }: { slip: Payslip }) {
   const gross = Number(slip.gross_pay)
   const rounding = roundingLines(slip)
@@ -198,55 +204,59 @@ function PayBreakdown({ slip }: { slip: Payslip }) {
     {
       label: rounding.length ? 'Net pay (before cash rounding)' : 'Take-home',
       amount: Number(slip.net_pay) - Number(slip.rounding_adjustment),
-      color: '#2c5292',
     },
-    { label: 'SSS', amount: Number(slip.sss_ee) + Number(slip.sss_mpf_ee), color: '#0d9488' },
-    { label: 'PhilHealth', amount: Number(slip.philhealth_ee), color: '#e06614' },
-    { label: 'Pag-IBIG', amount: Number(slip.pagibig_ee), color: '#7c3aed' },
-    { label: 'Tax', amount: Math.max(0, Number(slip.withholding_tax)), color: '#be123c' },
-    { label: 'Other deductions', amount: Number(slip.other_deductions_total), color: '#64748b' },
-  ].filter((p) => p.amount > 0)
-  const total = parts.reduce((s, p) => s + p.amount, 0) || 1
+    { label: 'SSS', amount: Number(slip.sss_ee) + Number(slip.sss_mpf_ee) },
+    { label: 'PhilHealth', amount: Number(slip.philhealth_ee) },
+    { label: 'Pag-IBIG', amount: Number(slip.pagibig_ee) },
+    { label: 'Tax', amount: Math.max(0, Number(slip.withholding_tax)) },
+    { label: 'Other deductions', amount: Number(slip.other_deductions_total) },
+  ]
+    .map((p, i) => ({ ...p, color: PART_COLORS[i] }))
+    .filter((p) => p.amount > 0)
 
   return (
-    <div className="mt-5">
-      <div className="flex h-3 overflow-hidden rounded-full bg-slate-100">
-        {parts.map((p) => (
-          <div key={p.label} style={{ width: `${(p.amount / total) * 100}%`, background: p.color }} title={`${p.label} ${money(p.amount)}`} />
-        ))}
-      </div>
-      <div className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
-        <div className="flex items-center justify-between text-xs">
-          <span className="font-semibold text-slate-600">Gross pay</span>
-          <span className="font-bold text-slate-800">{money(gross)}</span>
+    <div className="mt-6">
+      <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+        <Donut
+          size={168}
+          thickness={16}
+          segments={parts.map((p) => ({ label: p.label, value: p.amount, color: p.color }))}
+          center={
+            <>
+              <p className="text-base font-bold text-ink-900">{money(gross)}</p>
+              <p className="text-xs text-slate-500">Gross pay</p>
+            </>
+          }
+        />
+        <div className="grid w-full flex-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+          {parts.map((p) => (
+            <div key={p.label} className="flex items-center justify-between gap-2 text-sm">
+              <span className="flex items-center gap-2 text-slate-500">
+                <span className="size-2.5 shrink-0 rounded-full" style={{ background: p.color }} />
+                {p.label}
+              </span>
+              <span className="font-semibold text-ink-900">{money(p.amount)}</span>
+            </div>
+          ))}
+          {Number(slip.withholding_tax) < 0 && (
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-leaf-700">Tax refund (year-end adjustment)</span>
+              <span className="font-semibold text-leaf-700">+{money(-Number(slip.withholding_tax))}</span>
+            </div>
+          )}
+          {rounding.map((l) => (
+            <div key={l.label} className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-slate-500">{l.label}</span>
+              <span className="font-semibold text-ink-900">{l.amount > 0 ? '+' : ''}{money(l.amount)}</span>
+            </div>
+          ))}
         </div>
-        {parts.map((p) => (
-          <div key={p.label} className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-1.5 text-slate-500">
-              <span className="size-2.5 rounded-full" style={{ background: p.color }} />
-              {p.label}
-            </span>
-            <span className="font-semibold text-slate-700">{money(p.amount)}</span>
-          </div>
-        ))}
-        {Number(slip.withholding_tax) < 0 && (
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-emerald-700">Tax refund (year-end adjustment)</span>
-            <span className="font-semibold text-emerald-700">+{money(-Number(slip.withholding_tax))}</span>
-          </div>
-        )}
-        {rounding.map((l) => (
-          <div key={l.label} className="flex items-center justify-between text-xs">
-            <span className="text-slate-500">{l.label}</span>
-            <span className="font-semibold text-slate-700">{l.amount > 0 ? '+' : ''}{money(l.amount)}</span>
-          </div>
-        ))}
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500 sm:grid-cols-4">
-        <span>Days worked: <b>{Number(slip.days_worked)}</b></span>
-        <span>OT hours: <b>{Number(slip.overtime_hours)}</b></span>
-        <span>Late: <b>{Number(slip.late_minutes)} min</b></span>
-        <span>Absences: <b>{Number(slip.absent_days)}</b></span>
+      <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 sm:grid-cols-4">
+        <span>Days worked: <b className="text-ink-900">{Number(slip.days_worked)}</b></span>
+        <span>OT hours: <b className="text-ink-900">{Number(slip.overtime_hours)}</b></span>
+        <span>Late: <b className="text-ink-900">{Number(slip.late_minutes)} min</b></span>
+        <span>Absences: <b className="text-ink-900">{Number(slip.absent_days)}</b></span>
       </div>
     </div>
   )

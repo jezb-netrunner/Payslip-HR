@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, FileText, Pencil, Printer } from 'lucide-react'
-import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th } from '../../components/ui'
+import { AlertTriangle, Download, FileText, Landmark, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
+import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th, StatGroup } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees, getStatutoryTables } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
@@ -42,10 +42,10 @@ export default function Reports() {
       />
       <Tabs
         tabs={[
-          { key: 'alphalist', label: 'Alphalist (1604-C schedules)' },
-          { key: '1604c', label: '1604-C summary' },
-          { key: '1601c', label: '1601-C remittances' },
-          { key: 'contrib', label: 'SSS / PhilHealth / Pag-IBIG' },
+          { key: 'alphalist', label: 'Alphalist (1604-C schedules)', icon: <ListOrdered /> },
+          { key: '1604c', label: '1604-C summary', icon: <FileText /> },
+          { key: '1601c', label: '1601-C remittances', icon: <Landmark /> },
+          { key: 'contrib', label: 'SSS / PhilHealth / Pag-IBIG', icon: <ShieldCheck /> },
         ]}
         active={tab}
         onChange={setTab}
@@ -149,7 +149,7 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <StatGroup>
         <StatCard label="Employees" value={rows.length} sub={`${rows.filter((r) => r.schedule === 1).length} on Schedule 1 · ${rows.filter((r) => r.schedule === 2).length} MWE on Schedule 2`} />
         <StatCard label="Gross compensation" value={money(sum((r) => r.summary.gross))} />
         <StatCard label="Tax due (annual)" value={money(sum((r) => r.summary.taxDue))} />
@@ -159,10 +159,10 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
           sub={withIssues.length ? `${plural(withIssues.length, 'employee')} need${withIssues.length === 1 ? 's' : ''} attention` : 'all reconciled'}
           tone={withIssues.length ? 'warn' : 'good'}
         />
-      </div>
+      </StatGroup>
 
       {inProgress && (
-        <div className="rounded-2xl border border-brand-100 bg-brand-50 p-4 text-xs text-brand-800">
+        <div className="rounded-xl border border-brand-100 bg-brand-50 p-4 text-xs text-brand-800">
           <p className="font-bold">{year} is still in progress — these are year-to-date figures.</p>
           <p className="mt-1">
             Withheld and due tax only reconcile once the last payroll paid in December (or an employee's final pay)
@@ -173,7 +173,7 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
       )}
 
       {withIssues.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="mb-1 flex items-center gap-1.5 text-sm font-bold text-amber-800">
             <AlertTriangle className="size-4" /> Fix before filing
           </p>
@@ -478,7 +478,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
         </dl>
       </Card>
 
-      <Card title="Part II — Summary of remittances per BIR Form 1601-C">
+      <Card title="Part II — Summary of remittances per BIR Form 1601-C" icon={<Landmark />}>
         <TableShell>
           <thead className="bg-slate-50">
             <tr>
@@ -526,7 +526,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
         </p>
       </Card>
 
-      <Card title="Alphalist totals">
+      <Card title="Alphalist totals" icon={<ListOrdered />}>
         <div className="grid gap-3 text-sm sm:grid-cols-3">
           <p>Employees: <b>{rows.length}</b> ({rows.filter((r) => r.schedule === 2).length} MWE)</p>
           <p>Gross compensation: <b>{money(sum((r) => r.summary.gross))}</b></p>
@@ -602,7 +602,7 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
   if (loading) return <Spinner />
   if (loadError) return <LoadFailed message={loadError} onRetry={load} />
   return (
-    <Card title={`Monthly BIR Form 1601-C remittances — ${year}`}>
+    <Card title={`Monthly BIR Form 1601-C remittances — ${year}`} icon={<Landmark />}>
       <TableShell>
         <thead className="bg-slate-50">
           <tr>
