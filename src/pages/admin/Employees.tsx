@@ -309,7 +309,7 @@ function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen
     >
       <div className="flex items-start justify-between gap-2">
         {separated ? (
-          <Badge tone="slate">Separated</Badge>
+          <Badge tone="slate">Separated {fmtDate(e.separation_date)}</Badge>
         ) : leaving ? (
           <Badge tone="amber">Leaving {fmtDate(e.separation_date)}</Badge>
         ) : (
@@ -335,7 +335,7 @@ function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen
         <p className="flex min-w-0 items-center gap-2">
           <Wallet className="size-4 shrink-0 text-slate-400" />
           <span className="truncate">
-            {rateLabel(e)} · {FREQUENCY_LABELS[e.pay_frequency]}
+            {rateLabel(e)} · {FREQUENCY_LABELS[e.pay_frequency]} · {PAYMENT_METHOD_LABELS[e.payment_method]}
           </span>
         </p>
         <p className="flex items-center gap-2">

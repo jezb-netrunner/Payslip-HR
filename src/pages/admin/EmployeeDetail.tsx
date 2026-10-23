@@ -169,6 +169,7 @@ export default function EmployeeDetail() {
         </div>
         <span className="hidden h-12 w-px bg-slate-200 xl:block" />
         <dl className="flex flex-wrap gap-x-8 gap-y-3">
+          <HeaderFact label="Client" value={entity.name} />
           <HeaderFact label="Employee ID" value={employee.employee_no} />
           <HeaderFact label="Position" value={employee.position || '—'} />
           <HeaderFact label="Date started" value={fmtDate(employee.hire_date)} />
@@ -219,9 +220,9 @@ export default function EmployeeDetail() {
 
 function HeaderFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 max-w-[16rem]">
       <dt className="text-xs text-slate-500">{label}</dt>
-      <dd className="mt-0.5 truncate text-sm font-semibold text-ink-900">{value}</dd>
+      <dd title={value} className="mt-0.5 truncate text-sm font-semibold text-ink-900">{value}</dd>
     </div>
   )
 }

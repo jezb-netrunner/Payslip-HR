@@ -340,11 +340,11 @@ export default function PayrollRunDetail() {
               </div>
             ) : (
               <>
-                <div className="hidden grid-cols-[minmax(0,1fr)_96px_minmax(0,150px)_104px_112px_32px] gap-3 border-y border-slate-100 bg-slate-100 px-5 py-2.5 text-xs font-semibold text-slate-600 md:grid">
+                <div className="hidden grid-cols-[minmax(0,1fr)_88px_minmax(0,140px)_136px_112px_32px] gap-3 border-y border-slate-100 bg-slate-100 px-5 py-2.5 text-xs font-semibold text-slate-600 md:grid">
                   <span>{plural(slips.length, 'employee')}</span>
                   <span>Hours worked</span>
                   <span>Additional earnings</span>
-                  <span className="text-right">Gross pay</span>
+                  <span className="text-right">Gross · deductions</span>
                   <span className="text-right">Net pay</span>
                   <span />
                 </div>
@@ -355,7 +355,7 @@ export default function PayrollRunDetail() {
                     return (
                       <li
                         key={s.id}
-                        className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-5 py-3.5 md:grid-cols-[minmax(0,1fr)_96px_minmax(0,150px)_104px_112px_32px]"
+                        className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-5 py-3.5 md:grid-cols-[minmax(0,1fr)_88px_minmax(0,140px)_136px_112px_32px]"
                       >
                         <div className="flex min-w-0 items-center gap-3">
                           <Avatar name={snap.name ?? '?'} />
@@ -400,7 +400,16 @@ export default function PayrollRunDetail() {
                           )}
                           {!canAdjust && mine.length === 0 && <span className="text-slate-300">—</span>}
                         </div>
-                        <p className="hidden text-right text-sm md:block">{money(Number(s.gross_pay))}</p>
+                        <div className="hidden text-right md:block">
+                          <p className="text-sm">{money(Number(s.gross_pay))}</p>
+                          {/* the review figures the old register table showed per employee */}
+                          <p className="text-[11px] text-slate-400">
+                            SSS/PH/PI {money(Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.philhealth_ee) + Number(s.pagibig_ee))}
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            {Number(s.withholding_tax) < 0 ? 'Tax refund' : 'W/tax'} {money(Math.abs(Number(s.withholding_tax)))}
+                          </p>
+                        </div>
                         <div className="text-right">
                           <p className="font-bold text-ink-900">{money(Number(s.net_pay))}</p>
                           {Number(s.rounding_adjustment) !== 0 && (

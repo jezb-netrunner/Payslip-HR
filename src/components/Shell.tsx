@@ -176,7 +176,7 @@ function EntitySwitcher({ variant }: { variant: 'bar' | 'drawer' }) {
           onChange={(e) => setEntityId(e.target.value)}
           className={`w-full appearance-none truncate rounded-xl py-2 pl-9 pr-8 text-sm font-semibold focus:outline-none focus:ring-2 ${
             bar
-              ? 'max-w-[15rem] bg-ink-800 text-white hover:bg-ink-700 focus:ring-accent-400'
+              ? 'max-w-[15rem] bg-ink-800 text-white hover:bg-ink-700 focus:ring-accent-400 [&_optgroup]:bg-white [&_optgroup]:text-ink-900 [&_option]:bg-white [&_option]:text-ink-900'
               : 'border border-slate-200 bg-white text-ink-900 focus:ring-brand-200'
           }`}
         >
@@ -308,6 +308,17 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
           <Link to={mode === 'admin' ? '/admin' : '/me'} aria-label="Home" className="shrink-0">
             <Logo />
           </Link>
+          {mode === 'admin' && (
+            // phones have no room for the client switcher: always show which client is open
+            <button
+              type="button"
+              onClick={() => setDrawer(true)}
+              title={entity ? `Working on ${entity.name} (${entity.code}) — tap to switch` : 'No client selected'}
+              className="max-w-[7rem] truncate rounded-lg bg-ink-800 px-2.5 py-1.5 text-xs font-bold text-accent-400 sm:hidden"
+            >
+              {entity?.code ?? 'No client'}
+            </button>
+          )}
           <span className="hidden h-6 w-px shrink-0 bg-white/15 sm:block" />
           <h2 className="hidden shrink-0 text-lg font-bold sm:block">{current.title}</h2>
           {current.items.length > 1 && (
