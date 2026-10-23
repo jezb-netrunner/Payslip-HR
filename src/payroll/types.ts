@@ -214,6 +214,15 @@ export interface ExtraDeductionInput {
   amount: number
   /** One-time payroll adjustment rather than a recurring deduction. */
   oneTime?: boolean
+  /**
+   * Cash advances: deducted last, after tax, and only as far as net pay
+   * allows — what can't be taken stays owed for the next payroll.
+   */
+  upToNet?: boolean
+  /** Balance owed before this payroll: the payslip line then says what is left. */
+  balance?: number
+  /** The whole balance is due now (the employee's separation). */
+  settlement?: boolean
 }
 
 export interface PayrollSettingsInput {

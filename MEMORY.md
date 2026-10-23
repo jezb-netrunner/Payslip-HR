@@ -227,19 +227,48 @@ research/audit sub-agents fed a product review, written as the owner's
 Claude Docs doc "Payslip HR — Product & UX Review"
 (https://claude.ai/artifact/3DbHSdFJgJLhr3yd388fbv) — see *Product direction*.
 
+### 2026-10-23 — Cash advances (owner: "track salary advances per employee")
+
+**Asked:** small PH employers advance part of a salary ("bale") and deduct it
+from the next cutoffs — track advances per employee, integrated accurately.
+
+**Did:** migration `20261023102637 cash_advances` (live via MCP after two
+false-positive "destructive" timeouts, see the MCP lesson): advance details on
+`recurring_deductions`, a balance guard, `advance_requests` (employees file /
+cancel, admins approve via `approve_advance_request` or reject),
+`advance_repayments` (outside payroll). Engine: advances deduct after
+everything else, capped at net pay (`upToNet`), oldest first, label shows the
+balance left; service: whole balance on the payroll that settles a
+separation and on final pay, never on 13th-month runs, paused = skipped.
+UI: admin **Cash Advances** page (Outstanding / Requests / Fully paid, record
+or approve with a signed-authorization date + printable agreement
+`src/pdf/advanceForm.ts`, per-advance ledger from payslips + repayments,
+repay / pause / change installment / delete untouched, CSV), employee
+**Cash Advances** page + dashboard tile, nav counter, dashboard action item,
+Pay-tab card, register CSV "Cash Adv" column, other deductions on pay-run
+rows. Tests 173 → 187, SQL suite `13_cash_advance_tests.sql`; full browser
+QA on the local stack (request → approve → draft → finalize → ledger →
+repayment → separation settlement → reject/cancel, phone + desktop).
+
 ---
 
 ## Current deployed state (update when it changes)
 
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
-(multi-client), #2 (UI revamp) and #3 (Quick Guide) are merged into `main`
-and live. The 2026-10-23 test-round fixes are on `claude/cool-cannon-jmj2oz`
-and reach the site only when merged; their migration is ALREADY live, so
-until then the deployed portal still shows SIL to new hires but the
-database refuses the filing with a clear message.
+(multi-client), #2 (UI revamp), #3 (Quick Guide) and #4 (test-round fixes,
+merged and deployed 2026-10-23 09:23) are in `main` and live. The cash-advance
+work is on `claude/cool-cannon-jmj2oz` (fast-forwarded to `main` after #4
+merged; it needs a NEW PR) and reaches the site only when merged; its
+migration is ALREADY live, so until then the deployed Pay-tab form can't add
+a "Cash advance" recurring deduction (the guard wants release and
+authorization dates — the new Cash Advances page records them).
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
-- **All 15 migrations applied.** The 15th, `20261023080941
+- **All 16 migrations applied.** The 16th, `20261023102637 cash_advances`
+  (2 tables, guards, RPC), went through MCP `apply_migration`; repo file
+  renamed to that version; `fingerprint.sql` matched the local replica on
+  every kind (23 tables, 355 columns, 137 constraints, 65 indexes, 52
+  policies, 41 functions, 69 triggers). The 15th, `20261023080941
   leave_service_requirement` (ADD COLUMN + UPDATE + CREATE OR REPLACE), went
   through MCP `apply_migration`; repo file renamed to that version; a
   rolled-back dry run confirmed the guard's message; advisors unchanged. The two multi-client ones were run by the
@@ -261,11 +290,12 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
 - Edge function **`admin-users` v5** live (verify_jwt on), deployed
   2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
   login codes refused, incl. all-letter codes and the employee's names).
-- Security advisors after the last DDL (2026-10-23): 9 intentional WARNs (RLS helpers
+- Security advisors after the last DDL (2026-10-23, cash advances): 10 intentional WARNs (RLS helpers
   `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
   `current_employee_id` / `current_employee_entity_id` / `run_is_finalized`
   and the RPCs `finalize_payroll_run` / `reopen_payroll_run` /
-  `review_time_correction` are executable by `authenticated` by design) and
+  `review_time_correction` / `approve_advance_request` are executable by
+  `authenticated` by design; each checks the caller's client) and
   "Leaked password protection disabled" (Auth dashboard setting, owner's
   call). Performance advisors: INFO only for unindexed FKs / unused indexes
   (no data yet) and WARN "multiple permissive policies" (admin + own-row
@@ -579,6 +609,13 @@ local replica. Don't evade the confirmation (e.g. dynamic SQL to hide DROP);
 `skip_elicitations` in the connector URL exists but removes a safety check.
 Why it mattered: a "hung" migration looks like a broken database; it is an
 unreachable prompt, and the all-or-nothing timeout leaves nothing behind.
+The detector splits the SQL on every `;` — inside string literals and
+comments too — and flags a piece that starts like DELETE/UPDATE without a
+WHERE: an error message `'…can''t be edited; delete it and…'` and a comment
+`-- …reached zero; a manual pause stays` inside an UPDATE both timed out
+(2026-10-23). Find the culprit with `execute_sql` probes wrapped in
+`begin; … rollback;` (a flagged probe times out, nothing applies), then
+reword the text — that's a false positive, not a destructive statement.
 Non-destructive migrations (CREATE OR REPLACE FUNCTION, CREATE TRIGGER,
 ADD COLUMN, REVOKE) do apply through `apply_migration` — MCP records them
 under the apply timestamp, so rename the repo file to that version.
@@ -821,6 +858,25 @@ mattered: SIL showed 5 days to a hire of one day.
 
 Why it mattered: computing before a cutoff ended, or forgetting a day, would
 silently underpay — the only clue was a "Days absent" total.
+
+### Cash advances are balance-tracked deductions with a ledger, an authorization and a guard (confirmed approach)
+
+> An advance is a `recurring_deductions` row (category `cash_advance`, `total_amount` = released, `balance` = owed, `released_on`, `release_method`, `authorized_on`); payroll deducts it like a loan line (`other:cash_advance`, meta = id), after tax and only up to net pay; finalize/reopen move the balance; `advance_repayments` cover money repaid outside payroll. Invariant: released = finalized payroll lines + repayments + balance — `advanceLedger` rebuilds the history and flags any gap.
+
+Legal basis (secondary sources, re-verify before advising a client): wage
+deductions need the employee's written authorization and the employer may
+not profit (Labor Code Art. 113; IRR Book III Rule VIII as amended by DOLE
+D.O. 195-2018), so the app refuses an advance without the signed date,
+charges no interest, and prints the agreement. Deducting a balance from
+final pay rests on that written authorization (the agreement's term 3);
+commentators disagree on anything less, and some say deductions shouldn't
+push pay below minimum wage — not enforced, the installment is agreed. `guard_cash_advance` lets the balance
+move only inside finalize/reopen (`payroll.lifecycle`) or a repayment
+trigger (`payroll.advance_repayment`); before anything is repaid the amount
+can be corrected or the advance deleted. Repayments take the employee's
+payroll advisory lock first (same order as finalize). Why it mattered: a
+balance edited by hand loses where the money went — the owner asked for
+"accurately".
 
 ### Product direction (owner review 2026-10-23)
 

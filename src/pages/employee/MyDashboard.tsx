@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, CalendarCheck, CalendarRange, Eye, Megaphone, Pin, Wallet } from 'lucide-react'
+import { ArrowRight, CalendarCheck, CalendarRange, Eye, HandCoins, Megaphone, Pin, Wallet } from 'lucide-react'
 import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView'
 import { Avatar, Button, Card, Donut, EmptyState, LoadFailed, Modal, Spinner, StatCard, StatGroup } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
-import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
+import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, RecurringDeduction, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
+import { nextInstallment } from '../../lib/advances'
 import { eligibleFrom, leaveDaysInYear, showsBalance, usableOn } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -23,6 +24,7 @@ export default function MyDashboard() {
   const [leaves, setLeaves] = useState<LeaveRequest[]>([])
   const [ents, setEnts] = useState<Record<string, number>>({})
   const [holidays, setHolidays] = useState<Holiday[]>([])
+  const [advances, setAdvances] = useState<Pick<RecurringDeduction, 'balance' | 'amount_per_period' | 'active' | 'start_date'>[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [viewing, setViewing] = useState<Payslip | null>(null)
@@ -35,7 +37,7 @@ export default function MyDashboard() {
     if (!employee) return
     setLoadError('')
     try {
-      const [ent, ps, an, te, lt, lr, le, hols] = await Promise.all([
+      const [ent, ps, an, te, lt, lr, le, hols, adv] = await Promise.all([
         supabase.from('entities').select('*').eq('id', employee.entity_id).maybeSingle(),
         supabase.from('payslips').select('*').eq('employee_id', employee.id).order('pay_date', { ascending: false }).limit(60),
         supabase.from('announcements').select('*').order('pinned', { ascending: false }).order('published_at', { ascending: false }).limit(5),
@@ -44,10 +46,17 @@ export default function MyDashboard() {
         supabase.from('leave_requests').select('*').eq('employee_id', employee.id).eq('status', 'approved'),
         supabase.from('employee_leave_entitlements').select('*').eq('employee_id', employee.id).eq('year', Number(year)),
         getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year}-12-31`),
+        supabase
+          .from('recurring_deductions')
+          .select('balance, amount_per_period, active, start_date')
+          .eq('employee_id', employee.id)
+          .eq('category', 'cash_advance')
+          .gt('balance', 0),
       ])
-      const failed = [ent, ps, an, te, lt, lr, le].find((r) => r.error)?.error
+      const failed = [ent, ps, an, te, lt, lr, le, adv].find((r) => r.error)?.error
       if (failed) throw failed
       setHolidays(hols)
+      setAdvances(adv.data ?? [])
       setEntity((ent.data as Entity) ?? null)
       setSlips((ps.data ?? []) as Payslip[])
       setNews((an.data ?? []) as Announcement[])
@@ -170,6 +179,18 @@ export default function MyDashboard() {
           sub={`${fmtHours(workedMinutes)} on record`}
           icon={<CalendarCheck className="size-5" />}
         />
+        {advances.length > 0 && (
+          <StatCard
+            label="Cash advance owed"
+            value={money(advances.reduce((t, a) => t + Number(a.balance), 0))}
+            sub={
+              <Link to="/me/advances" className="font-semibold text-brand-600">
+                {money(nextInstallment(advances.filter((a) => !a.start_date || a.start_date <= today)))} next payroll · details
+              </Link>
+            }
+            icon={<HandCoins className="size-5" />}
+          />
+        )}
         {balances.map(({ t, total, opens }) =>
           opens ? (
             <StatCard key={t.id} label={t.name} value={fmtDate(opens)} sub={`available after ${t.min_service_months} months of service`} />

@@ -542,6 +542,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   let otherDeductionsTotal = 0
   let unionDues = 0
   for (const d of employee.extraDeductions) {
+    if (d.upToNet) continue // cash advances come last, after tax
     const amt = round2(d.amount)
     if (amt <= 0) continue
     otherDeductionsTotal += amt
@@ -602,6 +603,37 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   }
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
   deductions.push(...otherLines)
+
+  // ---- cash advances: repaid from what is left, never past zero net pay ----
+  // They don't touch taxable pay; an installment net pay can't cover stays
+  // in the balance for the next payroll (finalize deducts what was taken).
+  let leftCents = Math.round((grossPay - deductions.reduce((s, l) => s + l.amount, 0)) * 100)
+  for (const d of employee.extraDeductions) {
+    if (!d.upToNet) continue
+    const dueCents = Math.round(round2(d.amount) * 100)
+    if (dueCents <= 0) continue
+    const takeCents = Math.min(dueCents, Math.max(0, leftCents))
+    leftCents -= takeCents
+    const take = takeCents / 100
+    if (take > 0) {
+      const left = d.balance === undefined ? null : round2(d.balance - take)
+      deductions.push({
+        code: `other:${d.category}`,
+        label: left === null ? d.label : `${d.label} — ${left > 0 ? `${plainAmount(left)} left` : 'fully paid'}`,
+        amount: take,
+        meta: d.id,
+      })
+      otherDeductionsTotal = round2(otherDeductionsTotal + take)
+    }
+    if (takeCents < dueCents) {
+      const short = (dueCents - takeCents) / 100
+      warnings.push(
+        d.settlement
+          ? `${d.label}: ₱${plainAmount(short)} of the balance could not be deducted (not enough net pay) and is still owed — collect it outside payroll.`
+          : `${d.label}: ₱${plainAmount(short)} of this payroll's installment could not be deducted (not enough net pay); it stays in the balance for the next payroll.`,
+      )
+    }
+  }
 
   const totalDeductions = round2(deductions.reduce((s, l) => s + l.amount, 0))
   const netExact = round2(grossPay - totalDeductions)
@@ -798,6 +830,11 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       days,
     },
   }
+}
+
+/** 1234.5 -> "1,234.50": payslip lines print in PDFs, whose fonts have no peso sign. */
+function plainAmount(v: number): string {
+  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

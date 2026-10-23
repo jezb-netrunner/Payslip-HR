@@ -9,6 +9,7 @@ import {
   Clock,
   FileBarChart,
   FileText,
+  HandCoins,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -36,7 +37,7 @@ import { supabase } from '../lib/supabase'
 import ChangePassword from './ChangePassword'
 import { Avatar, Logo, Modal } from './ui'
 
-type Counter = 'corrections' | 'leaves'
+type Counter = 'corrections' | 'leaves' | 'advances'
 
 interface NavItem {
   to: string
@@ -70,6 +71,7 @@ const adminGroups: NavGroup[] = [
     title: 'Payroll',
     items: [
       { to: '/admin/payroll', label: 'Pay Runs', icon: <Wallet className={ic} /> },
+      { to: '/admin/advances', label: 'Cash Advances', icon: <HandCoins className={ic} />, counter: 'advances' },
       { to: '/admin/reports', label: 'BIR & Reports', icon: <FileBarChart className={ic} /> },
     ],
   },
@@ -94,7 +96,13 @@ const employeeGroups: NavGroup[] = [
       { to: '/me/announcements', label: 'Announcements', icon: <Megaphone className={ic} /> },
     ],
   },
-  { title: 'Pay', items: [{ to: '/me/payslips', label: 'Payslips', icon: <FileText className={ic} /> }] },
+  {
+    title: 'Pay',
+    items: [
+      { to: '/me/payslips', label: 'Payslips', icon: <FileText className={ic} /> },
+      { to: '/me/advances', label: 'Cash Advances', icon: <HandCoins className={ic} /> },
+    ],
+  },
   {
     title: 'Time & Leave',
     items: [
@@ -136,11 +144,13 @@ const quickActions = {
     { to: '/admin/employees?new=employee', label: 'Add employee', icon: <Users className="size-4" /> },
     { to: '/admin/payroll?new=run', label: 'New pay run', icon: <Wallet className="size-4" /> },
     { to: '/admin/leaves?new=leave', label: 'File leave for an employee', icon: <Palmtree className="size-4" /> },
+    { to: '/admin/advances?new=advance', label: 'Record cash advance', icon: <HandCoins className="size-4" /> },
     { to: '/admin/announcements?new=announcement', label: 'Post announcement', icon: <Megaphone className="size-4" /> },
   ],
   employee: [
     { to: '/me/leaves?new=leave', label: 'File a leave', icon: <Palmtree className="size-4" /> },
     { to: '/me/attendance?new=correction', label: 'Report a missing time entry', icon: <ClipboardList className="size-4" /> },
+    { to: '/me/advances?new=request', label: 'Request a cash advance', icon: <HandCoins className="size-4" /> },
   ],
 }
 
@@ -268,7 +278,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   const [accountOpen, setAccountOpen] = useState(false)
   const [changingPw, setChangingPw] = useState(false)
   const [employerName, setEmployerName] = useState('')
-  const [counts, setCounts] = useState<{ entityId: string; corrections: number; leaves: number } | null>(null)
+  const [counts, setCounts] = useState<{ entityId: string; corrections: number; leaves: number; advances: number } | null>(null)
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [countsTick, setCountsTick] = useState(0)
   const quickRef = useDismiss(quickOpen, () => setQuickOpen(false))
@@ -309,8 +319,9 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
     Promise.all([
       supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entityId).eq('status', 'pending'),
       supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entityId).eq('status', 'pending'),
-    ]).then(([corr, leaves]) => {
-      if (!stale) setCounts({ entityId, corrections: corr.count ?? 0, leaves: leaves.count ?? 0 })
+      supabase.from('advance_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entityId).eq('status', 'pending'),
+    ]).then(([corr, leaves, advances]) => {
+      if (!stale) setCounts({ entityId, corrections: corr.count ?? 0, leaves: leaves.count ?? 0, advances: advances.count ?? 0 })
     })
     return () => {
       stale = true

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { computeAttendance } from './attendance'
 import { DEFAULT_TABLES } from './defaults'
 import { allocateMonthly, computePayslip } from './engine'
+import { round2 } from './types'
 import type {
   DayComputation,
   HolidayLite,
@@ -576,5 +577,57 @@ describe('13th month pay (PD 851)', () => {
     // marginal: tax(145,550 + 60,000) - tax(145,550) on the monthly table
     expect(slip.withholdingTax).toBe(16944.15)
     expect(slip.netPay).toBe(133055.85)
+  })
+})
+
+describe('payslip: cash advances', () => {
+  const days = attendance(WORKDAYS.map((d) => entry(d)))
+  const run = (extra: PayrollEmployeeInput['extraDeductions']) =>
+    computePayslip({ employee: { ...monthlyEmployee, extraDeductions: extra }, settings, period, tables: DEFAULT_TABLES, days, runType: 'regular' })
+  const advance = (over: Partial<PayrollEmployeeInput['extraDeductions'][number]> = {}) => ({
+    id: 'adv-1', label: 'Cash advance (Oct 20, 2026)', category: 'cash_advance', amount: 1000, upToNet: true, balance: 3000, ...over,
+  })
+
+  it('comes out of net pay after tax, and the line says what is left', () => {
+    const base = run([])
+    const slip = run([advance()])
+    expect(slip.taxableIncome).toBe(base.taxableIncome)
+    expect(slip.withholdingTax).toBe(base.withholdingTax)
+    expect(slip.netPay).toBe(round2(base.netPay - 1000))
+    expect(slip.otherDeductionsTotal).toBe(1000)
+    expect(slip.deductions.at(-1)).toEqual({ code: 'other:cash_advance', label: 'Cash advance (Oct 20, 2026) — 2,000.00 left', amount: 1000, meta: 'adv-1' })
+    expect(slip.trace.warnings).toEqual([])
+  })
+
+  it('never takes net pay below zero: the rest stays in the balance', () => {
+    const base = run([]) // net 13,271.30 on the full-attendance fixture
+    const slip = run([advance({ amount: 20000, balance: 20000 })])
+    const line = slip.deductions.find((l) => l.meta === 'adv-1')!
+    expect(line.amount).toBe(base.netPay)
+    expect(slip.netPay).toBe(0)
+    expect(line.label).toBe(`Cash advance (Oct 20, 2026) — ${(20000 - base.netPay).toLocaleString('en-US', { minimumFractionDigits: 2 })} left`)
+    expect(slip.trace.warnings).toEqual([
+      `Cash advance (Oct 20, 2026): ₱${(20000 - base.netPay).toLocaleString('en-US', { minimumFractionDigits: 2 })} of this payroll's installment could not be deducted (not enough net pay); it stays in the balance for the next payroll.`,
+    ])
+  })
+
+  it('takes advances in the order given, after the other deductions', () => {
+    const base = run([{ label: 'Uniform', category: 'other', amount: 500 }])
+    const slip = run([
+      advance({ id: 'old', amount: base.netPay - 100, balance: base.netPay - 100 }),
+      { label: 'Uniform', category: 'other', amount: 500 },
+      advance({ id: 'new', amount: 400, balance: 400 }),
+    ])
+    expect(slip.deductions.find((l) => l.meta === 'old')!.amount).toBe(round2(base.netPay - 100))
+    expect(slip.deductions.find((l) => l.meta === 'new')!.amount).toBe(100)
+    expect(slip.netPay).toBe(0)
+  })
+
+  it('on separation the whole balance is due; a shortfall is to be collected outside payroll', () => {
+    const full = run([advance({ amount: 3000, balance: 3000, settlement: true })])
+    expect(full.deductions.find((l) => l.meta === 'adv-1')!.label).toBe('Cash advance (Oct 20, 2026) — fully paid')
+    const short = run([advance({ amount: 50000, balance: 50000, settlement: true })])
+    expect(short.netPay).toBe(0)
+    expect(short.trace.warnings[0]).toMatch(/of the balance could not be deducted \(not enough net pay\) and is still owed — collect it outside payroll\.$/)
   })
 })

@@ -53,6 +53,7 @@ import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../.
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import { round2 } from '../../payroll/types'
 
 // Categorical chart colours in fixed order (validated: lightness, chroma,
 // colour-blind and normal-vision separation; yellow sits below 3:1, so every
@@ -192,7 +193,8 @@ export default function PayrollRunDetail() {
     if (!run) return
     const header = [
       'Employee No', 'Employee', 'Position', 'Paid by', 'Days', 'OT Hrs', 'Basic (earned)', 'Gross', 'SSS EE', 'SSS MPF EE',
-      'PhilHealth EE', 'Pag-IBIG EE', 'W/Tax', 'Union dues', 'Other Ded', 'Total Ded', 'Rounding', 'Net Pay',
+      'PhilHealth EE', 'Pag-IBIG EE', 'W/Tax', 'Union dues', 'Cash Adv', 'Other Ded (incl. union dues, cash adv)', 'Total Ded',
+      'Rounding', 'Net Pay',
       'SSS ER', 'SSS MPF ER', 'EC ER', 'PhilHealth ER', 'Pag-IBIG ER',
     ]
     const rows = slips.map((s) => {
@@ -201,7 +203,9 @@ export default function PayrollRunDetail() {
         snap.employee_no ?? '', snap.name ?? '', snap.position ?? '',
         s.payment_method ? PAYMENT_METHOD_LABELS[s.payment_method] : '',
         s.days_worked, s.overtime_hours, s.basic_pay, s.gross_pay, s.sss_ee, s.sss_mpf_ee,
-        s.philhealth_ee, s.pagibig_ee, s.withholding_tax, s.union_dues, s.other_deductions_total,
+        s.philhealth_ee, s.pagibig_ee, s.withholding_tax, s.union_dues,
+        round2((s.deductions ?? []).filter((l) => l.code === 'other:cash_advance').reduce((t, l) => t + Number(l.amount), 0)),
+        s.other_deductions_total,
         s.total_deductions, s.rounding_adjustment, s.net_pay, s.sss_er, s.sss_mpf_er, s.sss_ec_er,
         s.philhealth_er, s.pagibig_er,
       ]
@@ -501,6 +505,7 @@ export default function PayrollRunDetail() {
                               )}
                               <p>
                                 Gross {money(Number(s.gross_pay))} · SSS/PH/PI {money(statEe)} · {tax}
+                                {Number(s.other_deductions_total) > 0 && ` · Other ded. ${money(Number(s.other_deductions_total))}`}
                               </p>
                               {(mine.length > 0 || shortcuts) && <div className="space-y-0.5 pt-0.5">{adjusts}</div>}
                             </div>
@@ -533,6 +538,9 @@ export default function PayrollRunDetail() {
                           {/* the review figures the old register table showed per employee */}
                           <p className="text-[11px] text-slate-400">SSS/PH/PI {money(statEe)}</p>
                           <p className="text-[11px] text-slate-400">{tax}</p>
+                          {Number(s.other_deductions_total) > 0 && (
+                            <p className="text-[11px] text-slate-400">Other ded. {money(Number(s.other_deductions_total))}</p>
+                          )}
                         </div>
                         <div className="text-right">
                           <p className="font-bold text-ink-900">

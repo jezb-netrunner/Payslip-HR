@@ -439,12 +439,17 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         })
 
     const empAdjustments = adjustmentsBy.get(emp.id) ?? []
+    const empDeductions = deductionsBy.get(emp.id) ?? []
+    const inPeriod = (d: RecurringDeduction) =>
+      (!d.start_date || d.start_date <= run.period_end) && (!d.end_date || d.end_date >= run.period_start)
     // a final pay after the last day carries one-time items only
-    const recurring = extrasOnly(emp, run)
-      ? []
-      : (deductionsBy.get(emp.id) ?? []).filter(
-          (d) => (!d.start_date || d.start_date <= run.period_end) && (!d.end_date || d.end_date >= run.period_start),
-        )
+    const recurring = extrasOnly(emp, run) ? [] : empDeductions.filter((d) => d.category !== 'cash_advance' && inPeriod(d))
+    // Cash advances, oldest first: this payroll's installment, or the whole
+    // balance on the payroll that settles a separation (and on final pay).
+    const settles = separatedBy(emp, run)
+    const advances = empDeductions
+      .filter((d) => d.category === 'cash_advance' && Number(d.balance ?? 0) > 0 && (settles || inPeriod(d)))
+      .sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? '') || a.id.localeCompare(b.id))
 
     const empYear = yearBy.get(emp.id) ?? []
     const empTax = taxBy.get(emp.id) ?? []
@@ -497,6 +502,15 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
               ...empAdjustments
                 .filter((a) => a.kind === 'deduction')
                 .map((a) => ({ id: a.id, label: a.label, category: a.category, amount: Number(a.amount), oneTime: true })),
+              ...advances.map((d) => ({
+                id: d.id,
+                label: d.label,
+                category: d.category,
+                amount: settles ? Number(d.balance) : Math.min(Number(d.amount_per_period), Number(d.balance)),
+                upToNet: true,
+                balance: Number(d.balance),
+                settlement: settles,
+              })),
             ],
         oneTimeEarnings: empAdjustments
           .filter((a) => a.kind === 'earning')
