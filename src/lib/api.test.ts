@@ -60,6 +60,12 @@ describe('callAdminUsers', () => {
     expect(auth.signOut).not.toHaveBeenCalled()
   })
 
+  it('an expired session that could not be refreshed offline is a connection problem', async () => {
+    auth.getSession.mockResolvedValueOnce({ data: { session: null }, error: new AuthRetryableFetchError('Failed to fetch', 0) })
+    expect((await callAdminUsers({ action: 'create_admin' })).error).toMatch(/connection/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('reports a signed-out state without calling the function', async () => {
     auth.getSession.mockResolvedValueOnce({ data: { session: null } })
     expect(await callAdminUsers({ action: 'create_admin' })).toEqual({ error: SESSION_ENDED })

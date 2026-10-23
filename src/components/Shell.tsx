@@ -359,7 +359,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   )
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="app-frame flex flex-col overflow-hidden">
       {/* top bar */}
       <header className="shrink-0 bg-ink-900 text-white">
         <div className="flex h-16 items-center gap-3 px-3 sm:px-5">

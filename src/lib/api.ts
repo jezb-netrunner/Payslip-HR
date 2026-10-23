@@ -94,6 +94,8 @@ export function edgeFunctionUrl(name: string): string {
 export const SESSION_ENDED =
   'Your sign-in has ended — you were signed out on another device or tab. Please sign in again.'
 
+const OFFLINE = 'Could not reach the server — check your connection and try again.'
+
 type AdminUsersResult = { ok?: boolean; error?: string; user_id?: string; code?: string }
 
 /**
@@ -106,14 +108,13 @@ type AdminUsersResult = { ok?: boolean; error?: string; user_id?: string; code?:
  * leaving a page that looks signed in but can't save.
  */
 export async function callAdminUsers(body: Record<string, unknown>): Promise<AdminUsersResult> {
-  const { data: sess } = await supabase.auth.getSession()
-  if (!sess.session) return { error: SESSION_ENDED }
+  const { data: sess, error: sessErr } = await supabase.auth.getSession()
+  // an expired token whose refresh couldn't reach the server is a connection problem, not a sign-out
+  if (!sess.session) return { error: sessErr && isAuthRetryableFetchError(sessErr) ? OFFLINE : SESSION_ENDED }
   let res = await postAdminUsers(sess.session.access_token, body)
   if (res.status === 401) {
     const { data: fresh, error } = await supabase.auth.refreshSession()
-    if (error && isAuthRetryableFetchError(error)) {
-      return { error: 'Could not reach the server — check your connection and try again.' }
-    }
+    if (error && isAuthRetryableFetchError(error)) return { error: OFFLINE }
     if (error || !fresh.session) {
       await supabase.auth.signOut({ scope: 'local' })
       return { error: SESSION_ENDED }

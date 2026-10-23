@@ -473,6 +473,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         dailyRate: Number(emp.daily_rate),
         isMinimumWageEarner: emp.is_minimum_wage_earner,
         schedule: emp.work_schedule,
+        hireDate: emp.hire_date,
+        separationDate: emp.separation_date,
         allowances: (allowancesBy.get(emp.id) ?? []).map((a) => ({
           label: a.label,
           amount: Number(a.amount),

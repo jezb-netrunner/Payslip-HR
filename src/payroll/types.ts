@@ -187,6 +187,9 @@ export interface PayrollEmployeeInput {
   extraDeductions: ExtraDeductionInput[]
   /** One-time earnings for this run (payroll adjustments). */
   oneTimeEarnings?: OneTimeEarningInput[]
+  /** Employment dates: days outside them are no one's missing time (warnings only; pay is unchanged). */
+  hireDate?: string
+  separationDate?: string | null
 }
 
 export interface AllowanceInput {

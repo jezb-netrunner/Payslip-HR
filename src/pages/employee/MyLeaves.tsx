@@ -17,7 +17,8 @@ export default function MyLeaves() {
   const toast = useToast()
   const [types, setTypes] = useState<LeaveType[]>([])
   const [requests, setRequests] = useState<LeaveRequest[]>([])
-  // credits HR set, by year then leave type: this year's balances, next year's leaves filed ahead
+  // credits HR set, by year then leave type: this year's balances, leaves filed late for last
+  // year or ahead for next
   const [credits, setCredits] = useState<Record<number, Record<string, number>>>({})
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,7 +47,7 @@ export default function MyLeaves() {
           .from('employee_leave_entitlements')
           .select('*')
           .eq('employee_id', employee.id)
-          .in('year', [year, year + 1]),
+          .in('year', [year - 1, year, year + 1]),
         // this year and next: leave can be filed ahead and across New Year
         getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year + 1}-12-31`),
       ])

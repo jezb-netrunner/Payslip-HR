@@ -217,7 +217,11 @@ sidebar + employee bottom tabs; bulk payslips (tick/Select all → one PDF or
 ZIP, `buildPayslipsDoc/Zip`, drafts print DRAFT PAYSLIP, deductions table no
 longer drawn on the wrong page when earnings spill); engine warns about
 uncovered workdays; corrections tab count + `?tab=corrections`; hint
-contrast. Tests 156 → 171; SQL suite `12_leave_service_tests.sql`. Rebuilt
+contrast. Tests 156 → 173; SQL suite `12_leave_service_tests.sql`. An
+independent review of the diff found 5 more, all fixed: the app frame used
+100vh (phones' toolbars hid the new bottom tabs → `.app-frame` 100dvh),
+prior-year credits, an offline refresh read as "signed out", a long payslip
+footer note ran off the page, and the absence warning named pre-hire days. Rebuilt
 the local stack and QA'd every change in the browser (see lesson). Three
 research/audit sub-agents fed a product review, written as the owner's
 Claude Docs doc "Payslip HR — Product & UX Review"
@@ -813,7 +817,7 @@ mattered: SIL showed 5 days to a hire of one day.
 
 ### A scheduled day with no time in/out is an absence — the engine says so
 
-> `attendance.ts` marks a scheduled regular day with no entry and no leave `absent` (docked for monthly, unpaid for daily); nothing distinguishes "not entered yet". `computePayslip` now warns with the dates; the planned "ready check" should block computing instead.
+> `attendance.ts` marks a scheduled regular day with no complete entry (an entry without a time out is dropped) and no leave `absent` (docked for monthly, unpaid for daily); nothing distinguishes "not entered yet". `computePayslip` now warns with the dates — only dates inside the employment (`hireDate`/`separationDate` on the engine input: days before a mid-period hire are absences in pay, which is how such a period is prorated, but no one's missing time); the planned "ready check" should block computing instead.
 
 Why it mattered: computing before a cutoff ended, or forgetting a day, would
 silently underpay — the only clue was a "Days absent" total.

@@ -285,14 +285,18 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     )
   }
 
-  // A scheduled workday with no time in/out and no approved leave is charged
-  // as an absence. That is usually right, but it is also what a day nobody
-  // entered looks like (attendance is keyed in by admins): name the dates.
-  const absentDates = days.filter((d) => d.absent).map((d) => d.date)
+  // A scheduled workday without a complete time in/out (an entry with no
+  // time out doesn't count) and no approved leave is charged as an absence.
+  // That is usually right, but it is also what a day nobody entered looks
+  // like (attendance is keyed in by admins): name the dates. Days before the
+  // hire or after the separation are absences too, but no one's missing time.
+  const employed = (d: string) =>
+    (!employee.hireDate || d >= employee.hireDate) && (!employee.separationDate || d <= employee.separationDate)
+  const absentDates = days.filter((d) => d.absent && employed(d.date)).map((d) => d.date)
   if (absentDates.length > 0) {
     const shown = absentDates.slice(0, 6).map(shortDate).join(', ') + (absentDates.length > 6 ? ', …' : '')
     warnings.push(
-      `${absentDates.length === 1 ? '1 scheduled workday has' : `${absentDates.length} scheduled workdays have`} no time in/out or approved leave and ${absentDates.length === 1 ? 'is' : 'are'} charged as absence (${shown}). If the employee worked, enter the time and recompute.`,
+      `${absentDates.length === 1 ? '1 scheduled workday' : `${absentDates.length} scheduled workdays`} without a complete time in/out or approved leave ${absentDates.length === 1 ? 'is' : 'are'} charged as absence (${shown}). If the employee worked, enter the missing time and recompute.`,
     )
   }
 

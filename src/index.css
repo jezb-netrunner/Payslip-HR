@@ -109,3 +109,11 @@ input[type='datetime-local'] {
 input::-webkit-date-and-time-value {
   text-align: left;
 }
+
+/* The signed-in frame fills the visible viewport. On phones 100vh also
+   covers the area under the browser's toolbars, which hid the employee
+   bottom tabs; 100dvh is the visible part (100vh stays as the fallback). */
+.app-frame {
+  height: 100vh;
+  height: 100dvh;
+}

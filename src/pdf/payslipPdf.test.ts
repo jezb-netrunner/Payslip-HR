@@ -60,6 +60,16 @@ describe('bulk payslip PDFs', () => {
     expect(final).not.toContain('DRAFT')
   })
 
+  it('a long footer note never runs off the bottom of the page', async () => {
+    const note = Array.from({ length: 3 }, (_, i) => `Footer line ${i + 1}: `.padEnd(120, 'x')).join(' ')
+    const doc = await buildPayslipsDoc([slip('A-001', 'Ana Reyes', 22)], { ...run, status: 'draft' }, { ...company, payslip_footer_note: note })
+    const pages = (doc.internal as unknown as { pages: string[][] }).pages
+    const ys = pages.flatMap((p) => [...(p ?? []).join('\n').matchAll(/([\d.]+) ([\d.-]+) Td\n\(Generated/g)].map((m) => Number(m[2])))
+    expect(ys).toHaveLength(1)
+    // PDF y runs up from the bottom edge in points: at least 8 mm (22.7 pt) clear of it
+    expect(ys[0]).toBeGreaterThan(22.7)
+  })
+
   it('names files safely', () => {
     expect(payslipFileName(slip('A/01 x', 'X'), run)).toBe('payslip_A_01_x_2026-10-31.pdf')
   })

@@ -249,6 +249,10 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
   // the note is free text from client settings: wrap it, and start the
   // "Generated" line below however many lines it took
   const note: string[] = doc.splitTextToSize(company.payslip_footer_note ?? '', pageW - margin * 2)
+  if (y + Math.max(1, note.length) * 3.6 + 5 > pageH - 8) {
+    doc.addPage()
+    y = 20
+  }
   doc.text(note, margin, y)
   doc.text(
     `Generated ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} • Confidential` +
