@@ -555,7 +555,14 @@ export default function PayrollRunDetail() {
             <RunFact label="Pay date" value={fmtDate(run.pay_date)} />
             <RunFact
               label="Payroll month"
-              value={`${fmtMonth(run.period_month)}${run.periods_in_month > 1 ? ` · ${run.period_index} of ${run.periods_in_month}` : ''}`}
+              value={
+                <>
+                  <span className="whitespace-nowrap">{fmtMonth(run.period_month)}</span>
+                  {run.periods_in_month > 1 && (
+                    <span className="whitespace-nowrap"> · {run.period_index} of {run.periods_in_month}</span>
+                  )}
+                </>
+              }
             />
             <RunFact label="Employees" value={`${t.employees ?? slips.length}${isDraft ? ` of ${covered.length} covered` : ''}`} />
             <RunFact label="Employer cost" value={money(t.employer_cost ?? 0)} />
@@ -698,7 +705,7 @@ function HourFact({ value, label }: { value: string; label: string }) {
   )
 }
 
-function RunFact({ label, value }: { label: string; value: string }) {
+function RunFact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3">
       <dt className="shrink-0 text-slate-500">{label}</dt>
