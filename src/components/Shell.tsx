@@ -3,6 +3,8 @@ import {
   Briefcase,
   CalendarDays,
   ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
   ClipboardList,
   Clock,
   FileBarChart,
@@ -27,7 +29,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
 import { useFocusTrap } from '../lib/focus'
 import { useEntity } from '../lib/entity'
-import { fullName, initials, personInitials } from '../lib/format'
+import { fullName, personInitials } from '../lib/format'
 import { ROLE_LABELS } from '../lib/labels'
 import { onPendingChanged } from '../lib/pending'
 import { supabase } from '../lib/supabase'
@@ -103,6 +105,32 @@ const employeeGroups: NavGroup[] = [
   { title: 'Profile', items: [{ to: '/me/profile', label: 'My Profile', icon: <User className={ic} /> }] },
 ]
 
+/** The employee portal's phone navigation: the five places employees go, always on screen. */
+const employeeTabs: NavItem[] = [
+  { to: '/me', label: 'Home', icon: <LayoutDashboard className={ic} />, end: true },
+  { to: '/me/payslips', label: 'Payslips', icon: <FileText className={ic} /> },
+  { to: '/me/attendance', label: 'Attendance', icon: <ClipboardList className={ic} /> },
+  { to: '/me/leaves', label: 'Leaves', icon: <Palmtree className={ic} /> },
+  { to: '/me/profile', label: 'Profile', icon: <User className={ic} /> },
+]
+
+// a per-viewer convenience: storage can be missing or throw (private mode, blocked site data)
+const COLLAPSED_KEY = 'payslip-hr:sidebar-collapsed'
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+function saveCollapsed(v: boolean) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, v ? '1' : '0')
+  } catch {
+    // not remembered: fine
+  }
+}
+
 const quickActions = {
   admin: [
     { to: '/admin/employees?new=employee', label: 'Add employee', icon: <Users className="size-4" /> },
@@ -120,7 +148,6 @@ function isActive(item: NavItem, pathname: string) {
   return matchPath({ path: item.to, end: !!item.end }, pathname) !== null
 }
 
-/** Closes a popover on an outside click or Escape. */
 /**
  * Closes a popover on an outside click, on Escape (focus goes back to its
  * button) and when keyboard focus moves on past it.
@@ -242,6 +269,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   const [changingPw, setChangingPw] = useState(false)
   const [employerName, setEmployerName] = useState('')
   const [counts, setCounts] = useState<{ entityId: string; corrections: number; leaves: number } | null>(null)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   const [countsTick, setCountsTick] = useState(0)
   const quickRef = useDismiss(quickOpen, () => setQuickOpen(false))
   const drawerRef = useRef<HTMLElement>(null)
@@ -295,8 +323,12 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   const roleLabel =
     mode === 'admin' ? ROLE_LABELS[profile?.role ?? 'employee'] : employerName || 'Employee'
   const count = (n: NavItem) => (n.counter && counts && counts.entityId === entityId ? counts[n.counter] : 0)
-  const orgBadge = mode === 'admin' ? (entity?.code ?? '—').slice(0, 3) : initials(employerName || 'PH')
-  const orgTitle = mode === 'admin' ? (entity ? `${entity.name} (${entity.code})` : 'No client selected') : employerName
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      saveCollapsed(!c)
+      return !c
+    })
+  }
 
   const doSignOut = async () => {
     await signOut()
@@ -327,7 +359,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   )
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="app-frame flex flex-col overflow-hidden">
       {/* top bar */}
       <header className="shrink-0 bg-ink-900 text-white">
         <div className="flex h-16 items-center gap-3 px-3 sm:px-5">
@@ -353,14 +385,9 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
               {entity?.code ?? 'No client'}
             </button>
           )}
-          <span className="hidden h-6 w-px shrink-0 bg-white/15 sm:block" />
-          <h2 className="hidden shrink-0 text-lg font-bold sm:block">{current.title}</h2>
-          {current.items.length > 1 && (
-            // inline only where every section's pills fit; narrower screens get their own row below
-            <nav aria-label={current.title} className="no-scrollbar ml-4 hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto xl:flex">
-              {pills}
-            </nav>
-          )}
+          {/* phones and tablets: name the section (the sidebar does on desktop) */}
+          <span className="hidden h-6 w-px shrink-0 bg-white/15 sm:block lg:hidden" />
+          <h2 className="hidden shrink-0 text-lg font-bold sm:block lg:hidden">{current.title}</h2>
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {mode === 'admin' && (
               <div className="hidden sm:block">
@@ -439,54 +466,93 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
             </div>
           </div>
         </div>
-        {current.items.length > 1 && (
-          <nav aria-label={`${current.title} pages`} className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 sm:px-5 xl:hidden">
+        {/* admins on phones and tablets: the section's other pages one tap away (employees have the bottom tabs) */}
+        {mode === 'admin' && current.items.length > 1 && (
+          <nav aria-label={`${current.title} pages`} className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 sm:px-5 lg:hidden">
             {pills}
           </nav>
         )}
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* icon rail: one column, compact on short screens, with a visible thin scrollbar when it still overflows */}
-        <aside className="scroll-thin hidden w-[76px] shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden border-r border-slate-200/70 bg-white py-3 lg:flex">
-          <div
-            title={orgTitle}
-            className="mb-2 flex size-11 shrink-0 items-center justify-center rounded-xl bg-ink-900 text-sm font-extrabold uppercase tracking-tight text-accent-400 shadow-sm [@media(max-height:820px)]:size-10"
-          >
-            {orgBadge}
-          </div>
-          {groups.map((g, gi) => (
-            <div key={g.title} className="flex flex-col items-center gap-0.5 [@media(max-height:820px)]:gap-0">
-              {gi > 0 && <span className="my-1.5 h-px w-8 bg-slate-200 [@media(max-height:820px)]:my-1" />}
-              {g.items.map((n) => (
-                <NavLink
-                  key={n.to}
-                  to={n.to}
-                  end={n.end}
-                  title={n.label}
-                  aria-label={n.label}
-                  className={({ isActive: on }) =>
-                    `relative flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors [@media(max-height:820px)]:size-9 ${
-                      on ? 'bg-slate-100 text-ink-900' : 'text-slate-500 hover:bg-slate-50 hover:text-ink-900'
-                    }`
-                  }
-                >
-                  {n.icon}
-                  {count(n) > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-rose-500 ring-2 ring-white" />}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-          <div className="mt-auto flex shrink-0 flex-col items-center pt-3">
-            <span className="mb-2 h-px w-8 bg-slate-200" />
+        {/* desktop sidebar: every page named, grouped; collapsible to icons (remembered per browser) */}
+        <aside
+          aria-label="Main navigation"
+          className={`scroll-thin hidden shrink-0 flex-col overflow-y-auto overflow-x-hidden border-r border-slate-200/70 bg-white py-3 lg:flex ${
+            collapsed ? 'w-[76px] items-center' : 'w-60'
+          }`}
+        >
+          <nav aria-label="Pages" className={collapsed ? 'flex flex-col items-center' : 'px-3'}>
+            {groups.map((g, gi) => (
+              <div key={g.title} className={collapsed ? 'flex flex-col items-center gap-0.5' : 'mb-2'}>
+                {collapsed
+                  ? gi > 0 && <span className="my-1.5 h-px w-8 bg-slate-200" />
+                  : g.items.length > 1 && (
+                      <p className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{g.title}</p>
+                    )}
+                {g.items.map((n) => (
+                  <NavLink
+                    key={n.to}
+                    to={n.to}
+                    end={n.end}
+                    title={collapsed ? n.label : undefined}
+                    aria-label={collapsed ? n.label : undefined}
+                    className={({ isActive: on }) =>
+                      collapsed
+                        ? `relative flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                            on ? 'bg-slate-100 text-ink-900' : 'text-slate-500 hover:bg-slate-50 hover:text-ink-900'
+                          }`
+                        : `flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
+                            on
+                              ? 'bg-slate-100 font-semibold text-ink-900 [&>.nav-icon]:text-ink-900'
+                              : 'font-medium text-slate-600 hover:bg-slate-50 hover:text-ink-900'
+                          }`
+                    }
+                  >
+                    {collapsed ? (
+                      <>
+                        {n.icon}
+                        {count(n) > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-rose-500 ring-2 ring-white" />}
+                      </>
+                    ) : (
+                      <>
+                        <span className="nav-icon text-slate-400">{n.icon}</span>
+                        <span className="min-w-0 flex-1 truncate">{n.label}</span>
+                        {count(n) > 0 && (
+                          <span className="rounded-md bg-rose-600 px-1.5 py-px text-[11px] font-bold text-white">{count(n)}</span>
+                        )}
+                      </>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <div className={`mt-auto flex shrink-0 flex-col gap-0.5 border-t border-slate-100 pt-2 ${collapsed ? 'items-center' : 'px-3'}`}>
             <button
               type="button"
-              title="Sign out"
-              aria-label="Sign out"
-              onClick={doSignOut}
-              className="flex size-10 items-center justify-center rounded-full bg-ink-900 text-white hover:bg-ink-800 [@media(max-height:820px)]:size-9"
+              onClick={toggleCollapsed}
+              aria-expanded={!collapsed}
+              title={collapsed ? 'Expand the menu' : undefined}
+              aria-label={collapsed ? 'Expand the menu' : undefined}
+              className={`flex items-center rounded-xl text-sm font-medium text-slate-500 transition-colors hover:bg-slate-50 hover:text-ink-900 ${
+                collapsed ? 'size-10 justify-center' : 'gap-3 px-3 py-2'
+              }`}
             >
-              <LogOut className="size-4.5" />
+              {collapsed ? <ChevronsRight className={ic} /> : <ChevronsLeft className={ic} />}
+              {!collapsed && 'Collapse menu'}
+            </button>
+            <button
+              type="button"
+              onClick={doSignOut}
+              title={collapsed ? 'Sign out' : undefined}
+              aria-label={collapsed ? 'Sign out' : undefined}
+              className={`flex items-center rounded-xl text-sm font-medium text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 ${
+                collapsed ? 'size-10 justify-center' : 'gap-3 px-3 py-2'
+              }`}
+            >
+              <LogOut className={ic} />
+              {!collapsed && 'Sign out'}
             </button>
           </div>
         </aside>
@@ -497,6 +563,29 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
           </div>
         </main>
       </div>
+
+      {mode === 'employee' && (
+        // part of the page column, not fixed: the content scrolls above it and is never hidden under it
+        <nav aria-label="Main" className="shrink-0 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
+          <div className="mx-auto grid max-w-lg grid-cols-5">
+            {employeeTabs.map((t) => (
+              <NavLink
+                key={t.to}
+                to={t.to}
+                end={t.end}
+                className={({ isActive: on }) =>
+                  `flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition-colors ${
+                    on ? 'text-brand-700' : 'text-slate-500 hover:text-ink-900'
+                  }`
+                }
+              >
+                {t.icon}
+                {t.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {/* phone / tablet drawer */}
       {drawer && (

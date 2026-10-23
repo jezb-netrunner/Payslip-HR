@@ -1,7 +1,8 @@
 // Leave day counting shared by the employee portal views.
 
 import type { Holiday, LeaveRequest, LeaveType } from './db'
-import { eachDate, isoWeekday } from './manila'
+import { fmtDate } from './format'
+import { addMonths, eachDate, isoWeekday } from './manila'
 
 type HolidayLite = Pick<Holiday, 'holiday_date' | 'kind'>
 
@@ -17,6 +18,35 @@ const EVENT_LEAVE_CODES = ['ML', 'PL', 'MCW', 'SPL', 'VAWC']
 export function showsBalance(t: Pick<LeaveType, 'code' | 'default_annual_days'>, entitlement: number | undefined): boolean {
   if (entitlement !== undefined) return entitlement > 0
   return !EVENT_LEAVE_CODES.includes(t.code) && Number(t.default_annual_days) > 0
+}
+
+/**
+ * First date an employee may use a leave type: the hire date plus the type's
+ * months of service (SIL: 12, Labor Code Art. 95), or null when it needs
+ * none. The database's guard_leave_request applies the same rule.
+ */
+export function eligibleFrom(t: Pick<LeaveType, 'min_service_months'>, hireDate: string): string | null {
+  const months = Number(t.min_service_months ?? 0)
+  return months > 0 ? addMonths(hireDate, months) : null
+}
+
+/**
+ * Whether a leave of this type may start on `date`: the service requirement
+ * is met, or HR set credits above zero for that year (granting it sooner).
+ */
+export function usableOn(
+  t: Pick<LeaveType, 'min_service_months'>,
+  hireDate: string,
+  date: string,
+  creditsThatYear: number | undefined,
+): boolean {
+  const from = eligibleFrom(t, hireDate)
+  return !from || date >= from || (creditsThatYear ?? 0) > 0
+}
+
+/** "Service Incentive Leave can be used from Oct 23, 2027, after 12 months of service." */
+export function notYetUsable(t: Pick<LeaveType, 'name' | 'min_service_months'>, from: string): string {
+  return `${t.name} can be used from ${fmtDate(from)}, after ${t.min_service_months} months of service.`
 }
 
 /** Scheduled workdays in [start, end], not counting non-working holidays (already paid days off). */

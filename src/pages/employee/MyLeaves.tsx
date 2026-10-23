@@ -6,7 +6,7 @@ import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Holiday, LeaveRequest, LeaveType } from '../../lib/db'
 import { fmtDate, plural } from '../../lib/format'
-import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
+import { eligibleFrom, leaveDaysInYear, leaveWorkdays, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
@@ -17,7 +17,9 @@ export default function MyLeaves() {
   const toast = useToast()
   const [types, setTypes] = useState<LeaveType[]>([])
   const [requests, setRequests] = useState<LeaveRequest[]>([])
-  const [entitlements, setEntitlements] = useState<Record<string, number>>({})
+  // credits HR set, by year then leave type: this year's balances, leaves filed late for last
+  // year or ahead for next
+  const [credits, setCredits] = useState<Record<number, Record<string, number>>>({})
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
   const [open, setOpen] = useState(false)
@@ -45,7 +47,7 @@ export default function MyLeaves() {
           .from('employee_leave_entitlements')
           .select('*')
           .eq('employee_id', employee.id)
-          .eq('year', year),
+          .in('year', [year - 1, year, year + 1]),
         // this year and next: leave can be filed ahead and across New Year
         getHolidaysBetween(employee.entity_id, `${year}-01-01`, `${year + 1}-12-31`),
       ])
@@ -55,9 +57,12 @@ export default function MyLeaves() {
       setHolidays(hols)
       setTypes((tRes.data ?? []) as LeaveType[])
       setRequests((rRes.data ?? []) as LeaveRequest[])
-      const map: Record<string, number> = {}
-      for (const e of eRes.data ?? []) map[e.leave_type_id as string] = Number(e.days)
-      setEntitlements(map)
+      const byYear: Record<number, Record<string, number>> = {}
+      for (const e of eRes.data ?? []) {
+        const y = Number(e.year)
+        byYear[y] = { ...byYear[y], [e.leave_type_id as string]: Number(e.days) }
+      }
+      setCredits(byYear)
     } catch (err) {
       setLoadError(errorMessage(err, 'Failed to load your leaves'))
     } finally {
@@ -75,11 +80,25 @@ export default function MyLeaves() {
     return leaveWorkdays(start, end, employee.work_schedule.days, holidays)
   }
 
+  /** Why the picked type can't start on the picked date yet, if it can't. */
+  function eligibilityProblem(): string {
+    const type = types.find((t) => t.id === form.type)
+    if (!employee || !type || !form.start) return ''
+    const credit = credits[Number(form.start.slice(0, 4))]?.[type.id]
+    if (usableOn(type, employee.hire_date, form.start, credit)) return ''
+    return notYetUsable(type, eligibleFrom(type, employee.hire_date)!)
+  }
+
   async function submit() {
     if (!employee) return
     const days = workdayCount(form.start, form.end)
     if (!form.type || days <= 0) {
       toast('error', 'Pick a leave type and a valid date range.')
+      return
+    }
+    const problem = eligibilityProblem()
+    if (problem) {
+      toast('error', problem)
       return
     }
     setBusy(true)
@@ -139,7 +158,11 @@ export default function MyLeaves() {
     if (d > 0) usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + d
   }
 
+  const entitlements = credits[year] ?? {}
+  const balanceLeft = (t: LeaveType) => (entitlements[t.id] ?? Number(t.default_annual_days)) - (usedByType[t.id] ?? 0)
   const balanceTypes = types.filter((t) => showsBalance(t, entitlements[t.id]))
+  const problem = open ? eligibilityProblem() : ''
+  const picked = types.find((t) => t.id === form.type)
 
   return (
     <div>
@@ -158,6 +181,19 @@ export default function MyLeaves() {
           const total = entitlements[t.id] ?? t.default_annual_days
           const used = usedByType[t.id] ?? 0
           const left = total - used // negative = taken beyond the entitlement
+          // not usable at all this year (no credits from HR): say when it opens instead of a balance
+          const from = eligibleFrom(t, employee.hire_date)
+          const opensLater = from && !usableOn(t, employee.hire_date, `${year}-12-31`, entitlements[t.id]) ? from : null
+          const opensThisYear = from && !opensLater && !usableOn(t, employee.hire_date, todayManila(), entitlements[t.id]) ? from : null
+          if (opensLater) {
+            return (
+              <div key={t.id} className="rounded-xl border border-dashed border-slate-300 bg-white p-4">
+                <p className="text-xs font-semibold text-slate-500">{t.name}</p>
+                <p className="mt-1 text-base font-bold text-ink-900">Available {fmtDate(opensLater)}</p>
+                <p className="mt-1 text-xs text-slate-500">after {t.min_service_months} months of service</p>
+              </div>
+            )
+          }
           return (
             <div key={t.id} className="rounded-xl border border-slate-200/80 bg-white p-4">
               <p className="text-xs font-semibold text-slate-500">{t.name}</p>
@@ -165,7 +201,8 @@ export default function MyLeaves() {
                 {left}
                 <span className="text-sm font-medium text-slate-400"> / {total} days</span>
               </p>
-              {left < 0 && <p className="text-[11px] text-rose-600">{plural(-left, 'day')} beyond your entitlement</p>}
+              {left < 0 && <p className="text-xs text-rose-600">{plural(-left, 'day')} beyond your entitlement</p>}
+              {opensThisYear && <p className="text-xs text-slate-500">usable from {fmtDate(opensThisYear)}</p>}
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-brand-600"
@@ -214,8 +251,9 @@ export default function MyLeaves() {
                     </Badge>
                     {r.status === 'pending' && (
                       <button
+                        type="button"
                         onClick={() => cancel(r.id)}
-                        className="text-xs font-semibold text-slate-400 hover:text-rose-600"
+                        className="-my-2 rounded-lg px-2 py-2 text-xs font-semibold text-slate-600 hover:bg-rose-50 hover:text-rose-600"
                       >
                         Cancel
                       </button>
@@ -233,32 +271,52 @@ export default function MyLeaves() {
           <Field label="Leave type">
             <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
               <option value="">Select…</option>
-              {types.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} {t.paid ? '(paid)' : '(unpaid)'}
-                </option>
-              ))}
+              {types.map((t) => {
+                const from = eligibleFrom(t, employee.hire_date)
+                const later = from && !usableOn(t, employee.hire_date, todayManila(), entitlements[t.id])
+                return (
+                  <option key={t.id} value={t.id}>
+                    {t.name} {t.paid ? '(paid)' : '(unpaid)'}
+                    {later ? ` — from ${fmtDate(from)}` : ''}
+                  </option>
+                )
+              })}
             </Select>
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          {/* one column on phones: two native date pickers side by side overflow a narrow dialog */}
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="From">
               <Input
                 type="date"
                 value={form.start}
-                onChange={(e) => setForm({ ...form, start: e.target.value })}
+                onChange={(e) => {
+                  const start = e.target.value
+                  // keep the range valid: moving the start past the end moves the end along
+                  setForm({ ...form, start, end: start && form.end < start ? start : form.end })
+                }}
               />
             </Field>
             <Field label="To">
               <Input
                 type="date"
                 value={form.end}
+                min={form.start || undefined}
                 onChange={(e) => setForm({ ...form, end: e.target.value })}
               />
             </Field>
           </div>
-          <p className="text-xs text-slate-500">
-            Working days requested: <b>{workdayCount(form.start, form.end)}</b>
-          </p>
+          {problem ? (
+            <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+              {problem}
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Working days requested: <b>{workdayCount(form.start, form.end)}</b>
+              {picked && showsBalance(picked, entitlements[picked.id]) && (
+                <> · {balanceLeft(picked) > 0 ? `${plural(balanceLeft(picked), 'day')} left this year` : 'no days left this year'}</>
+              )}
+            </p>
+          )}
           <Field label="Reason">
             <Textarea
               rows={3}
@@ -266,7 +324,7 @@ export default function MyLeaves() {
               onChange={(e) => setForm({ ...form, reason: e.target.value })}
             />
           </Field>
-          <Button className="w-full" disabled={busy} onClick={submit}>
+          <Button className="w-full" disabled={busy || !!problem} onClick={submit}>
             {busy ? 'Submitting…' : 'Submit request'}
           </Button>
         </div>

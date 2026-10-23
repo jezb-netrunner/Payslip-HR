@@ -421,7 +421,7 @@ function derive(data: DashData, entity: Entity, today: string) {
     actions.push({
       title: `${plural(data.pendingCorrections, 'time correction')} pending`,
       sub: 'Employee-filed corrections to review',
-      to: '/admin/timesheets',
+      to: '/admin/timesheets?tab=corrections',
       tone: 'warn',
       icon: <Clock className="size-4" />,
     })

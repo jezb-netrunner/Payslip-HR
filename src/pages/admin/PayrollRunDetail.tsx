@@ -11,6 +11,7 @@ import {
   Clock,
   Download,
   Eye,
+  FileDown,
   Lock,
   PieChart,
   Plus,
@@ -18,7 +19,7 @@ import {
   Trash2,
   Unlock,
 } from 'lucide-react'
-import PayslipView, { runLabel } from '../../components/PayslipView'
+import PayslipView, { runLabel, type PayslipCompany, type PayslipRunInfo } from '../../components/PayslipView'
 import {
   Avatar,
   Badge,
@@ -41,7 +42,8 @@ import {
 } from '../../components/ui'
 import { fetchAll } from '../../lib/fetchAll'
 import { useToast } from '../../components/toast'
-import { downloadCsv, getEmployees } from '../../lib/api'
+import { downloadBlob, downloadCsv, getEmployees } from '../../lib/api'
+import { buildPayslipsDoc, buildPayslipsZip } from '../../pdf/payslipPdf'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
 import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
@@ -79,6 +81,9 @@ export default function PayrollRunDetail() {
   const [viewing, setViewing] = useState<Payslip | null>(null)
   const [addingAdj, setAddingAdj] = useState<{ employeeId?: string; kind: 'earning' | 'deduction' } | null>(null)
   const [showCash, setShowCash] = useState(false)
+  // payslips picked for a bulk download, by employee: survives a recompute (new payslip rows)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -280,6 +285,14 @@ export default function PayrollRunDetail() {
   // a stale draft can hold payslips for people the run no longer covers: no shortcut for them
   const coveredIds = new Set(covered.map((e) => e.id))
   const hasWarnings = warnings.length > 0 || (result?.warnings.length ?? 0) > 0
+  const pickedSlips = slips.filter((x) => picked.has(x.employee_id))
+  const togglePicked = (employeeId: string) =>
+    setPicked((cur) => {
+      const next = new Set(cur)
+      if (next.has(employeeId)) next.delete(employeeId)
+      else next.add(employeeId)
+      return next
+    })
   const notices =
     stale || hasWarnings ? (
       <>
@@ -331,6 +344,9 @@ export default function PayrollRunDetail() {
           )}
           <Button variant="secondary" onClick={exportRegister} disabled={slips.length === 0}>
             <Download className="size-4" /> Register CSV
+          </Button>
+          <Button variant="secondary" onClick={() => setExporting(true)} disabled={slips.length === 0}>
+            <FileDown className="size-4" /> Payslips PDF
           </Button>
           {isDraft && (
             <IconButton label="Delete draft run" onClick={deleteDraft} className="text-rose-600">
@@ -386,6 +402,29 @@ export default function PayrollRunDetail() {
               </div>
             ) : (
               <>
+                <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-5 py-2.5">
+                  <label className="flex items-center gap-2.5 text-sm font-medium text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-brand-700"
+                      checked={pickedSlips.length > 0 && pickedSlips.length === slips.length}
+                      ref={(el) => {
+                        if (el) el.indeterminate = pickedSlips.length > 0 && pickedSlips.length < slips.length
+                      }}
+                      onChange={() => setPicked(pickedSlips.length === slips.length ? new Set() : new Set(slips.map((x) => x.employee_id)))}
+                    />
+                    {pickedSlips.length > 0 ? `${pickedSlips.length} of ${slips.length} selected` : 'Select all'}
+                  </label>
+                  {pickedSlips.length > 0 && (
+                    <button type="button" onClick={() => setPicked(new Set())} className="text-xs font-semibold text-slate-500 hover:text-ink-900">
+                      Clear
+                    </button>
+                  )}
+                  <Button variant="secondary" size="sm" className="ml-auto" onClick={() => setExporting(true)}>
+                    <FileDown className="size-4" />
+                    {pickedSlips.length > 0 ? `Download ${plural(pickedSlips.length, 'payslip')}` : 'Download all payslips'}
+                  </Button>
+                </div>
                 {/* rows follow the card's own width: full columns only where the name keeps room */}
                 <div className="@container">
                 <div className="hidden grid-cols-[minmax(0,1fr)_88px_minmax(0,140px)_136px_112px_32px] gap-3 border-y border-slate-100 bg-slate-100 px-5 py-2.5 text-xs font-semibold text-slate-600 @3xl:grid">
@@ -438,6 +477,13 @@ export default function PayrollRunDetail() {
                         className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-3 px-5 py-3.5 @3xl:grid-cols-[minmax(0,1fr)_88px_minmax(0,140px)_136px_112px_32px] @3xl:items-center"
                       >
                         <div className="flex min-w-0 items-start gap-3 @3xl:items-center">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${snap.name}'s payslip`}
+                            className="mt-3 size-4 shrink-0 accent-brand-700 @3xl:mt-0"
+                            checked={picked.has(s.employee_id)}
+                            onChange={() => togglePicked(s.employee_id)}
+                          />
                           <Avatar name={snap.name ?? '?'} />
                           <div className="min-w-0">
                             <p className="line-clamp-2 break-words font-semibold leading-snug text-ink-900">{snap.name}</p>
@@ -670,6 +716,17 @@ export default function PayrollRunDetail() {
         {viewing && <PayslipView slip={viewing} run={run} company={entity} showTrace />}
       </Modal>
 
+      {exporting && (
+        <PayslipExportModal
+          slips={slips}
+          picked={pickedSlips}
+          run={run}
+          company={entity}
+          fileBase={`payslips_${entity.code}_${run.period_end}`}
+          onClose={() => setExporting(false)}
+        />
+      )}
+
       <Modal open={showCash} onClose={() => setShowCash(false)} title="Cash payout — bills and coins per envelope" wide>
         <div className="space-y-4">
           {cashTotal.centavos > 0 && (
@@ -846,7 +903,7 @@ function AdjustmentModal({
             ))}
           </Select>
         </Field>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Type">
             <Select
               value={f.kind}
@@ -884,6 +941,104 @@ function AdjustmentModal({
           </p>
         )}
         <Button className="w-full" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Add adjustment'}</Button>
+      </div>
+    </Modal>
+  )
+}
+
+// ---------- bulk payslip download ----------
+
+/**
+ * Download many payslips at once: everyone in the run or the ones picked in
+ * the list, as one PDF (a payslip per page, for printing) or a ZIP of one
+ * PDF per employee (for sending individually).
+ */
+function PayslipExportModal({
+  slips,
+  picked,
+  run,
+  company,
+  fileBase,
+  onClose,
+}: {
+  slips: Payslip[]
+  picked: Payslip[]
+  run: PayslipRunInfo
+  company: PayslipCompany
+  fileBase: string
+  onClose: () => void
+}) {
+  const toast = useToast()
+  const [scope, setScope] = useState<'picked' | 'all'>(picked.length > 0 ? 'picked' : 'all')
+  const [format, setFormat] = useState<'pdf' | 'zip'>('pdf')
+  const [done, setDone] = useState<number | null>(null)
+  const chosen = scope === 'picked' ? picked : slips
+  const busy = done !== null
+
+  async function download() {
+    if (busy || chosen.length === 0) return
+    setDone(0)
+    try {
+      if (format === 'pdf') {
+        const doc = await buildPayslipsDoc(chosen, run, company, setDone)
+        downloadBlob(`${fileBase}.pdf`, doc.output('blob'))
+      } else {
+        const zip = await buildPayslipsZip(chosen, run, company, setDone)
+        downloadBlob(`${fileBase}.zip`, new Blob([zip as BlobPart], { type: 'application/zip' }))
+      }
+      toast('success', `Downloaded ${plural(chosen.length, 'payslip')}.`)
+      onClose()
+    } catch (err) {
+      toast('error', errorMessage(err, 'Could not prepare the payslips'))
+      setDone(null)
+    }
+  }
+
+  const option = (checked: boolean, onPick: () => void, title: string, sub: string, disabled = false) => (
+    <label
+      className={`flex items-start gap-3 rounded-xl border p-3 ${
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+      } ${checked ? 'border-brand-600 bg-brand-50/60' : 'border-slate-200 hover:bg-slate-50'}`}
+    >
+      <input type="radio" className="mt-0.5 size-4 accent-brand-700" checked={checked} disabled={disabled || busy} onChange={onPick} />
+      <span>
+        <span className="block text-sm font-semibold text-ink-900">{title}</span>
+        <span className="block text-xs text-slate-500">{sub}</span>
+      </span>
+    </label>
+  )
+
+  return (
+    <Modal open onClose={busy ? () => {} : onClose} title="Download payslips">
+      <div className="space-y-5">
+        <Field group label="Whose payslips">
+          <div className="space-y-2">
+            {option(
+              scope === 'picked',
+              () => setScope('picked'),
+              `Selected employees (${picked.length})`,
+              picked.length > 0 ? 'The ones ticked in the list' : 'Tick employees in the list first',
+              picked.length === 0,
+            )}
+            {option(scope === 'all', () => setScope('all'), `Everyone in this run (${slips.length})`, 'Sorted by name, as listed')}
+          </div>
+        </Field>
+        <Field group label="Format">
+          <div className="space-y-2">
+            {option(format === 'pdf', () => setFormat('pdf'), 'One PDF', 'A payslip per page, ready to print in one go')}
+            {option(format === 'zip', () => setFormat('zip'), 'Separate PDFs in a ZIP', 'One file per employee, named by employee no., for sending individually')}
+          </div>
+        </Field>
+        {run.status === 'draft' && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            This payroll is still a draft: every page is marked DRAFT PAYSLIP, and amounts may change before it is
+            finalized.
+          </p>
+        )}
+        <Button className="w-full" disabled={busy || chosen.length === 0} onClick={download}>
+          <FileDown className="size-4" />
+          {busy ? `Preparing… ${done} of ${chosen.length}` : `Download ${plural(chosen.length, 'payslip')}`}
+        </Button>
       </div>
     </Modal>
   )

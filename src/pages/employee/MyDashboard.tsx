@@ -7,7 +7,7 @@ import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
-import { leaveDaysInYear, showsBalance } from '../../lib/leave'
+import { eligibleFrom, leaveDaysInYear, showsBalance, usableOn } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { roundingLines } from '../../lib/payslip'
@@ -89,7 +89,12 @@ export default function MyDashboard() {
   }
   const balances = types
     .filter((t) => t.paid && showsBalance(t, ents[t.id]))
-    .map((t) => ({ t, total: ents[t.id] ?? Number(t.default_annual_days) }))
+    .map((t) => ({
+      t,
+      total: ents[t.id] ?? Number(t.default_annual_days),
+      // a leave that needs months of service (SIL) and doesn't open this year shows its opening date
+      opens: usableOn(t, employee.hire_date, `${year}-12-31`, ents[t.id]) ? null : eligibleFrom(t, employee.hire_date),
+    }))
     .slice(0, 4)
 
   return (
@@ -165,14 +170,18 @@ export default function MyDashboard() {
           sub={`${fmtHours(workedMinutes)} on record`}
           icon={<CalendarCheck className="size-5" />}
         />
-        {balances.map(({ t, total }) => (
-          <StatCard
-            key={t.id}
-            label={t.name}
-            value={`${total - (used[t.id] ?? 0)} / ${total}`}
-            sub={total - (used[t.id] ?? 0) < 0 ? 'days beyond your entitlement' : 'days left this year'}
-          />
-        ))}
+        {balances.map(({ t, total, opens }) =>
+          opens ? (
+            <StatCard key={t.id} label={t.name} value={fmtDate(opens)} sub={`available after ${t.min_service_months} months of service`} />
+          ) : (
+            <StatCard
+              key={t.id}
+              label={t.name}
+              value={`${total - (used[t.id] ?? 0)} / ${total}`}
+              sub={total - (used[t.id] ?? 0) < 0 ? 'days beyond your entitlement' : 'days left this year'}
+            />
+          ),
+        )}
       </StatGroup>
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>

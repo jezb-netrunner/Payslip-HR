@@ -207,6 +207,8 @@ export interface LeaveType {
   default_annual_days: number
   paid: boolean
   active: boolean
+  /** Months of service before the leave can be used (SIL: 12, Labor Code Art. 95); 0 = from the hire date. */
+  min_service_months: number
 }
 
 export interface LeaveRequest {

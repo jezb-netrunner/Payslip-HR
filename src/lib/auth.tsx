@@ -135,8 +135,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshProfile: async () => {
           if (session) await loadProfile(session.user.id)
         },
+        // This device only. Supabase's default ('global') ends every session of
+        // the account — signing out on a phone left the desktop tab with a
+        // token the admin-users function rejects as "Not authenticated".
         signOut: async () => {
-          await supabase.auth.signOut()
+          await supabase.auth.signOut({ scope: 'local' })
         },
       }}
     >

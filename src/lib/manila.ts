@@ -101,3 +101,13 @@ export function endOfMonth(dateStr: string): string {
   const [y, m] = dateStr.split('-').map(Number)
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
 }
+
+/**
+ * YYYY-MM-DD plus n calendar months, clamped to the end of a shorter month
+ * the way Postgres `date + interval 'n months'` is (Jan 31 + 1 month = Feb 28/29).
+ */
+export function addMonths(dateStr: string, n: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate()
+  return new Date(Date.UTC(y, m - 1 + n, Math.min(d, lastDay))).toISOString().slice(0, 10)
+}

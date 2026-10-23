@@ -81,6 +81,7 @@ describe('payslip: monthly-paid, semi-monthly, full attendance', () => {
     expect(slip.grossPay).toBe(15000)
     expect(slip.daysWorked).toBe(11)
     expect(slip.absentDays).toBe(0)
+    expect(slip.trace.warnings.filter((w) => w.includes('charged as absence'))).toEqual([])
   })
 
   it('splits monthly contributions across the two halves', () => {
@@ -131,6 +132,21 @@ describe('payslip: absences, tardiness and overtime', () => {
     expect(absence?.amount).toBe(-1379.31)
     expect(late?.amount).toBe(-86.21)
     expect(slip.absentDays).toBe(1)
+    // a day with no time in/out may just not have been entered yet: say which
+    expect(slip.trace.warnings).toContain(
+      '1 scheduled workday without a complete time in/out or approved leave is charged as absence (Aug 17). If the employee worked, enter the missing time and recompute.',
+    )
+    // days before the hire date are absences in pay, but no one's missing time
+    const hired = computePayslip({
+      employee: { ...monthlyEmployee, hireDate: '2026-08-18' },
+      settings,
+      period,
+      tables: DEFAULT_TABLES,
+      days: attendance(entries),
+      runType: 'regular',
+    })
+    expect(hired.absentDays).toBe(1)
+    expect(hired.trace.warnings.filter((w) => w.includes('charged as absence'))).toEqual([])
     expect(slip.lateMinutes).toBe(30)
     expect(slip.withholdingTax).toBe(283.87)
     expect(slip.netPay).toBe(12025.61)

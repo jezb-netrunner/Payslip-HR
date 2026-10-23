@@ -96,3 +96,24 @@ body {
 /* Horizontal pill strips scroll without a visible bar */
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Native date/time pickers carry an intrinsic minimum width (iOS Safari
+   especially) that pushed them past narrow dialogs on phones; let them
+   shrink to their box, and keep their text where the other fields' is. */
+input[type='date'],
+input[type='time'],
+input[type='month'],
+input[type='datetime-local'] {
+  min-width: 0;
+}
+input::-webkit-date-and-time-value {
+  text-align: left;
+}
+
+/* The signed-in frame fills the visible viewport. On phones 100vh also
+   covers the area under the browser's toolbars, which hid the employee
+   bottom tabs; 100dvh is the visible part (100vh stays as the fallback). */
+.app-frame {
+  height: 100vh;
+  height: 100dvh;
+}

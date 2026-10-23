@@ -19,7 +19,7 @@ import { fmtDate, fmtDateTime, fmtHours, fullName, plural } from '../../lib/form
 import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
-import { notifyPendingChanged } from '../../lib/pending'
+import { notifyPendingChanged, onPendingChanged } from '../../lib/pending'
 
 interface SheetPreset {
   employeeId: string
@@ -38,18 +38,40 @@ export default function Timesheets() {
     const employeeId = params.get('employee')
     return employeeId ? { employeeId, from: isDate(params.get('from')), to: isDate(params.get('to')) } : null
   })
-  const [tab, setTab] = useState(preset ? 'employee' : 'daily')
+  // ?tab=corrections (the dashboard's "corrections pending") opens the review queue
+  const [linkedTab] = useState(() => (params.get('tab') === 'corrections' ? 'corrections' : null))
+  const [tab, setTab] = useState(linkedTab ?? (preset ? 'employee' : 'daily'))
   useEffect(() => {
-    if (!preset) return
+    if (!preset && !linkedTab) return
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev)
-        for (const k of ['employee', 'from', 'to']) next.delete(k)
+        for (const k of ['employee', 'from', 'to', 'tab']) next.delete(k)
         return next
       },
       { replace: true },
     )
-  }, [preset, setParams])
+  }, [preset, linkedTab, setParams])
+  // pending correction requests, shown on their tab (the menu's red count lands on the daily sheet)
+  const [pendingCount, setPendingCount] = useState<{ entityId: string; n: number } | null>(null)
+  const [pendingTick, setPendingTick] = useState(0)
+  useEffect(() => onPendingChanged(() => setPendingTick((n) => n + 1)), [])
+  const entityId = entity?.id
+  useEffect(() => {
+    if (!entityId) return
+    let stale = false
+    supabase
+      .from('time_correction_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('entity_id', entityId)
+      .eq('status', 'pending')
+      .then(({ count }) => {
+        if (!stale) setPendingCount({ entityId, n: count ?? 0 })
+      })
+    return () => {
+      stale = true
+    }
+  }, [entityId, pendingTick])
   // unsaved edits in the open sheet: switching tabs or closing the page asks first
   const dirty = useRef(0)
   const onDirty = useCallback((n: number) => {
@@ -73,7 +95,12 @@ export default function Timesheets() {
         tabs={[
           { key: 'daily', label: 'Daily sheet', icon: <CalendarDays /> },
           { key: 'employee', label: 'Per employee (cutoff)', icon: <UserRound /> },
-          { key: 'corrections', label: 'Correction requests', icon: <FilePen /> },
+          {
+            key: 'corrections',
+            label: 'Correction requests',
+            icon: <FilePen />,
+            count: pendingCount && pendingCount.entityId === entityId ? pendingCount.n : 0,
+          },
         ]}
         active={tab}
         onChange={(t) => {
