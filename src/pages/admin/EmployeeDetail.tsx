@@ -463,18 +463,18 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
           <Field label="Phone"><Input value={f.phone ?? ''} onChange={(e) => set('phone', e.target.value)} /></Field>
           <Field label="Email (optional)"><Input value={f.email ?? ''} onChange={(e) => set('email', e.target.value)} /></Field>
         </div>
-        <div className="mt-3 grid grid-cols-4 gap-3">
-          <Field label="Registered address" className="col-span-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          <Field label="Registered address" className="sm:col-span-3">
             <Textarea rows={2} value={f.address ?? ''} onChange={(e) => set('address', e.target.value)} />
           </Field>
           <Field label="ZIP code"><Input value={f.zip_code ?? ''} onChange={(e) => set('zip_code', e.target.value)} /></Field>
         </div>
-        <div className="mt-3 grid grid-cols-2 gap-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <Field label="Emergency contact"><Input value={f.emergency_contact_name ?? ''} onChange={(e) => set('emergency_contact_name', e.target.value)} /></Field>
           <Field label="Emergency phone"><Input value={f.emergency_contact_phone ?? ''} onChange={(e) => set('emergency_contact_phone', e.target.value)} /></Field>
         </div>
         <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Government IDs</h4>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="TIN" hint="Required for BIR 1604-C / alphalist"><Input value={f.tin ?? ''} placeholder="000-000-000" onChange={(e) => set('tin', e.target.value)} /></Field>
           <Field label="SSS no."><Input value={f.sss_no ?? ''} onChange={(e) => set('sss_no', e.target.value)} /></Field>
           <Field label="PhilHealth no."><Input value={f.philhealth_no ?? ''} onChange={(e) => set('philhealth_no', e.target.value)} /></Field>
@@ -548,7 +548,7 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
                 ))}
               </Select>
             </Field>
-            <Field label="Remarks" className="col-span-2">
+            <Field label="Remarks" className="sm:col-span-2">
               <Input value={f.separation_remarks ?? ''} onChange={(e) => set('separation_remarks', e.target.value)} />
             </Field>
           </div>
@@ -708,7 +708,7 @@ function PayTab({
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card title="Pay and payroll policy" icon={<Wallet />}>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Rate basis">
             <Select value={f.pay_type} onChange={(e) => setF({ ...f, pay_type: e.target.value as 'monthly' | 'daily' })}>
               <option value="daily">Daily-rated (no work, no pay)</option>
@@ -1114,7 +1114,7 @@ function CareerTab({
               <Input type="date" value={f.effective_date} onChange={(e) => setF({ ...f, effective_date: e.target.value })} />
             </Field>
             {f.event_type === 'separated' ? (
-              <Field label="Reason" className="col-span-2">
+              <Field label="Reason" className="sm:col-span-2">
                 <Select value={f.separation_reason} onChange={(e) => setF({ ...f, separation_reason: e.target.value as SeparationReason })}>
                   {Object.entries(SEPARATION_REASON_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
@@ -1429,7 +1429,7 @@ function BirTab({ employee }: { employee: Employee }) {
                 </Select>
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               {TAX_FIELDS.map((f) => (
                 <Field key={f.key} label={f.label}>
                   <Input type="number" step="0.01" value={String(row[f.key] ?? 0)} onChange={(e) => set(f.key, e.target.value)} />

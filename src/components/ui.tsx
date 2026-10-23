@@ -370,7 +370,7 @@ export function Field({
   const note = hint && <span className="mt-1 block text-xs text-slate-400">{hint}</span>
   if (group) {
     return (
-      <div role="group" aria-labelledby={id} className={`block ${className}`}>
+      <div role="group" aria-labelledby={id} className={`block min-w-0 ${className}`}>
         {caption}
         {children}
         {note}
@@ -378,7 +378,8 @@ export function Field({
     )
   }
   return (
-    <label className={`block ${className}`}>
+    // min-w-0: a grid or flex cell may shrink below the control's intrinsic width
+    <label className={`block min-w-0 ${className}`}>
       {caption}
       {children}
       {note}

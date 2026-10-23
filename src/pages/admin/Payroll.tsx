@@ -453,7 +453,7 @@ function NewRunModal({
               {advanced ? 'Hide' : 'Change'}
             </button>
             {advanced && (
-              <div className="mt-2 grid grid-cols-3 gap-2">
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <Field label="Payroll month">
                   <Input type="month" value={slot.month.slice(0, 7)} onChange={(e) => setSlot({ ...slot, month: `${e.target.value}-01` })} />
                 </Field>

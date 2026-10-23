@@ -188,7 +188,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :ue1, true);
 insert into leave_requests (employee_id, leave_type_id, start_date, end_date, days, status)
-select '20000000-0000-0000-0000-0000000000e1', id, '2026-10-12', '2026-10-12', 1, 'pending' from leave_types where code = 'SIL';
+select '20000000-0000-0000-0000-0000000000e1', id, '2026-10-12', '2026-10-12', 1, 'pending' from leave_types where code = 'VL';
 select pg_temp.expect_error($$update leave_requests set end_date = '2026-10-30', days = 10$$, '%only cancel a pending request%');
 select pg_temp.expect_error($$update leave_requests set status = 'approved'$$, '%');
 select pg_temp.check((select count(*) from leave_types) = 9, 'employee sees only own client leave types');
@@ -291,7 +291,7 @@ select pg_temp.expect_error($$select public.finalize_payroll_run('30000000-0000-
 select pg_temp.expect_error($$update payslips set payroll_run_id = '30000000-0000-0000-0000-000000000009' where payroll_run_id = '30000000-0000-0000-0000-000000000001'$$, '%');
 delete from payroll_runs where id = '30000000-0000-0000-0000-000000000009';
 -- leave on paid days can't be approved
-select pg_temp.expect_error($$insert into leave_requests (employee_id, leave_type_id, start_date, end_date, days, status) select '20000000-0000-0000-0000-0000000000e1', id, '2026-10-06', '2026-10-06', 1, 'approved' from leave_types where entity_id = '10000000-0000-0000-0000-00000000000a' and code = 'SIL'$$, '%finalized payroll run%');
+select pg_temp.expect_error($$insert into leave_requests (employee_id, leave_type_id, start_date, end_date, days, status) select '20000000-0000-0000-0000-0000000000e1', id, '2026-10-06', '2026-10-06', 1, 'approved' from leave_types where entity_id = '10000000-0000-0000-0000-00000000000a' and code = 'VL'$$, '%finalized payroll run%');
 commit;
 -- next week's run consumes the carry; reopening the earlier one is then refused
 begin;

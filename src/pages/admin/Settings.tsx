@@ -157,7 +157,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
 
         <div className="space-y-6">
           <Card title="Employer numbers" icon={<Hash />}>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="SSS employer no.">
                 <Input value={s.sss_employer_no} onChange={(e) => set('sss_employer_no', e.target.value)} />
               </Field>
@@ -170,7 +170,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             </div>
           </Card>
           <Card title="Minimum wage" icon={<Coins />}>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Wage region">
                 <Select value={s.minimum_wage_region} onChange={(e) => set('minimum_wage_region', e.target.value)}>
                   <option value="">Select…</option>
@@ -187,7 +187,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                   onChange={(e) => set('minimum_wage_daily', e.target.value as unknown as number)}
                 />
               </Field>
-              <Field label="Wage order reference" className="col-span-2">
+              <Field label="Wage order reference" className="sm:col-span-2">
                 <Input value={s.minimum_wage_reference} onChange={(e) => set('minimum_wage_reference', e.target.value)} />
               </Field>
             </div>
@@ -195,7 +195,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
         </div>
 
         <Card title="Payroll policy" icon={<SlidersHorizontal />}>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Default pay frequency" hint="For new employees; set per employee on their record">
               <Select
                 value={s.default_pay_frequency}

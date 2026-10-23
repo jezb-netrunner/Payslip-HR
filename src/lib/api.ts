@@ -1,5 +1,6 @@
 import { fetchAll } from './fetchAll'
 import { toCsv } from './csv'
+import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
 import type {
@@ -89,20 +90,37 @@ export function edgeFunctionUrl(name: string): string {
   return `${base}/functions/v1/${name}`
 }
 
-export async function callAdminUsers(
-  body: Record<string, unknown>,
-): Promise<{ ok?: boolean; error?: string; user_id?: string; code?: string }> {
+/** Shown when the access token outlived its session (signed out elsewhere, or revoked). */
+export const SESSION_ENDED =
+  'Your sign-in has ended — you were signed out on another device or tab. Please sign in again.'
+
+type AdminUsersResult = { ok?: boolean; error?: string; user_id?: string; code?: string }
+
+/**
+ * Calls the admin-users edge function as the signed-in user. The function
+ * checks the session with Supabase Auth, which the rest of the API doesn't:
+ * an access token keeps working for database reads and writes until it
+ * expires, even after its session was ended (signed out on another device,
+ * code replaced). So a 401 gets one token refresh and a retry; if the
+ * session can't be refreshed it is over — sign out here too, instead of
+ * leaving a page that looks signed in but can't save.
+ */
+export async function callAdminUsers(body: Record<string, unknown>): Promise<AdminUsersResult> {
   const { data: sess } = await supabase.auth.getSession()
-  const token = sess.session?.access_token
-  const res = await fetch(edgeFunctionUrl('admin-users'), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  })
-  let payload: { ok?: boolean; error?: string; message?: string; msg?: string; user_id?: string; code?: string } = {}
+  if (!sess.session) return { error: SESSION_ENDED }
+  let res = await postAdminUsers(sess.session.access_token, body)
+  if (res.status === 401) {
+    const { data: fresh, error } = await supabase.auth.refreshSession()
+    if (error && isAuthRetryableFetchError(error)) {
+      return { error: 'Could not reach the server — check your connection and try again.' }
+    }
+    if (error || !fresh.session) {
+      await supabase.auth.signOut({ scope: 'local' })
+      return { error: SESSION_ENDED }
+    }
+    res = await postAdminUsers(fresh.session.access_token, body)
+  }
+  let payload: AdminUsersResult & { message?: string; msg?: string } = {}
   try {
     payload = await res.json()
   } catch {
@@ -114,8 +132,22 @@ export async function callAdminUsers(
   return payload
 }
 
+function postAdminUsers(token: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(edgeFunctionUrl('admin-users'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  })
+}
+
 export function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {
-  const blob = new Blob(['﻿' + toCsv(rows)], { type: 'text/csv;charset=utf-8' })
+  downloadBlob(filename, new Blob(['\ufeff' + toCsv(rows)], { type: 'text/csv;charset=utf-8' }))
+}
+
+export function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url

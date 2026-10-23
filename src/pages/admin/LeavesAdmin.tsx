@@ -8,7 +8,7 @@ import type { Employee, Entity, Holiday, LeaveRequest, LeaveType } from '../../l
 import { useEntity } from '../../lib/entity'
 import { errorMessage } from '../../lib/errors'
 import { fmtDate, fullName, plural } from '../../lib/format'
-import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
+import { eligibleFrom, leaveDaysInYear, leaveWorkdays, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { useQuickAction } from '../../lib/quickAction'
@@ -127,6 +127,11 @@ function Leaves({ entity }: { entity: Entity }) {
       toast('error', 'Code and name are required.')
       return
     }
+    const months = Number(editingType.min_service_months ?? 0)
+    if (!Number.isInteger(months) || months < 0 || months > 120) {
+      toast('error', 'Months of service: a whole number from 0 to 120.')
+      return
+    }
     const payload = {
       entity_id: entity.id,
       code: editingType.code.trim().toUpperCase(),
@@ -134,6 +139,7 @@ function Leaves({ entity }: { entity: Entity }) {
       default_annual_days: Number(editingType.default_annual_days ?? 0),
       paid: editingType.paid ?? true,
       active: editingType.active ?? true,
+      min_service_months: months,
     }
     const { error } = editingType.id
       ? await supabase.from('leave_types').update(payload).eq('id', editingType.id)
@@ -186,7 +192,7 @@ function Leaves({ entity }: { entity: Entity }) {
         <Card
           title={`Leave types — ${entity.name}`}
           actions={
-            <Button variant="secondary" onClick={() => setEditingType({ paid: true, active: true, default_annual_days: 0 })}>
+            <Button variant="secondary" onClick={() => setEditingType({ paid: true, active: true, default_annual_days: 0, min_service_months: 0 })}>
               <Plus className="size-4" /> Add type
             </Button>
           }
@@ -197,6 +203,7 @@ function Leaves({ entity }: { entity: Entity }) {
                 <Th>Code</Th>
                 <Th>Name</Th>
                 <Th className="text-right">Days / year</Th>
+                <Th>Usable after</Th>
                 <Th>Paid</Th>
                 <Th>Active</Th>
                 <Th></Th>
@@ -208,6 +215,7 @@ function Leaves({ entity }: { entity: Entity }) {
                   <Td className="font-mono text-xs font-bold">{t.code}</Td>
                   <Td>{t.name}</Td>
                   <Td className="text-right">{Number(t.default_annual_days)}</Td>
+                  <Td>{t.min_service_months > 0 ? `${t.min_service_months} months of service` : 'Day one'}</Td>
                   <Td>{t.paid ? <Badge tone="green">paid</Badge> : <Badge tone="slate">unpaid</Badge>}</Td>
                   <Td>{t.active ? 'Yes' : 'No'}</Td>
                   <Td>
@@ -218,9 +226,10 @@ function Leaves({ entity }: { entity: Entity }) {
             </tbody>
           </TableShell>
           <p className="mt-3 text-xs text-slate-400">
-            Seeded with the statutory leaves: SIL 5 days (Art. 95), Maternity 105 (RA 11210), Paternity 7 (RA 8187),
-            Solo Parent 7 (RA 11861), VAWC 10 (RA 9262), Special Leave for Women 60 (RA 9710). Add company leaves
-            (e.g. VL/SL credits) as needed. Set individual credits under Entitlements.
+            Seeded with the statutory leaves: SIL 5 days after 12 months of service (Art. 95), Maternity 105 (RA 11210),
+            Paternity 7 (RA 8187), Solo Parent 7 (RA 11861), VAWC 10 (RA 9262), Special Leave for Women 60 (RA 9710). Add
+            company leaves (e.g. VL/SL credits) as needed. Set individual credits under Entitlements — credits set for a
+            year also let that employee use the leave before the service requirement is met.
           </p>
         </Card>
       ) : shown.length === 0 ? (
@@ -279,15 +288,30 @@ function Leaves({ entity }: { entity: Entity }) {
       <Modal open={editingType !== null} onClose={() => setEditingType(null)} title={editingType?.id ? 'Edit leave type' : 'Add leave type'}>
         {editingType && (
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid gap-3 sm:grid-cols-3">
               <Field label="Code">
                 <Input value={editingType.code ?? ''} onChange={(e) => setEditingType({ ...editingType, code: e.target.value })} className="uppercase" />
               </Field>
-              <Field label="Name" className="col-span-2">
+              <Field label="Name" className="sm:col-span-2">
                 <Input value={editingType.name ?? ''} onChange={(e) => setEditingType({ ...editingType, name: e.target.value })} />
               </Field>
               <Field label="Days per year">
                 <Input type="number" value={String(editingType.default_annual_days ?? 0)} onChange={(e) => setEditingType({ ...editingType, default_annual_days: Number(e.target.value) })} />
+              </Field>
+              <Field
+                label="Usable after (months of service)"
+                className="sm:col-span-2"
+                hint="0 = from the first day. Service Incentive Leave: 12 (Labor Code Art. 95)."
+              >
+                <Input
+                  type="number"
+                  min={0}
+                  max={120}
+                  step={1}
+                  inputMode="numeric"
+                  value={String(editingType.min_service_months ?? 0)}
+                  onChange={(e) => setEditingType({ ...editingType, min_service_months: e.target.value === '' ? 0 : Number(e.target.value) })}
+                />
               </Field>
             </div>
             <Toggle checked={editingType.paid ?? true} onChange={(v) => setEditingType({ ...editingType, paid: v })} label="Paid leave" />
@@ -358,6 +382,9 @@ function FileLeaveModal({
   }, [entity.id, f.start, f.end, toast])
 
   const employee = employees.find((e) => e.id === f.employeeId)
+  const type = types.find((t) => t.id === f.typeId)
+  // the database refuses it unless this year's credits were set: say so before saving
+  const opens = employee && type && f.start && !usableOn(type, employee.hire_date, f.start, undefined) ? eligibleFrom(type, employee.hire_date) : null
   const counted = holidays?.range === range
   const days =
     employee && counted && f.end >= f.start ? leaveWorkdays(f.start, f.end, employee.work_schedule.days, holidays.list) : 0
@@ -424,6 +451,12 @@ function FileLeaveModal({
             <Input type="date" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
           </Field>
         </div>
+        {opens && type && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {notYetUsable(type, opens)} It can be filed sooner only if this employee has {f.start.slice(0, 4)} credits
+            for it under Entitlements.
+          </p>
+        )}
         <p className="text-xs text-slate-500">
           {!employee
             ? 'Pick an employee to count the workdays.'
@@ -617,11 +650,20 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
               // event-based statutory leaves and unpaid types are not a yearly balance until HR sets one
               const balance = t.paid && showsBalance(t, set ? Number(values[t.id]) : undefined)
               const u = used[t.id] ?? 0
+              const from = eligibleFrom(t, employee.hire_date)
+              // opens after Jan 1 of the year shown: usable only from then, unless a credit is set
+              const opensInYear = from && from > `${year}-01-01` && !set ? from : null
+              const notThisYear = opensInYear && opensInYear > `${year}-12-31`
               return (
                 <tr key={t.id}>
                   <Td>
                     {t.name}
                     {!t.active && <span className="ml-1 text-xs text-slate-400">(inactive)</span>}
+                    {opensInYear && (
+                      <span className="block text-xs text-amber-700">
+                        {notThisYear ? 'Not yet eligible this year — ' : ''}usable from {fmtDate(opensInYear)}
+                      </span>
+                    )}
                   </Td>
                   <Td className="text-right text-slate-500">{Number(t.default_annual_days)}</Td>
                   <Td>
@@ -638,7 +680,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
                   </Td>
                   <Td className="text-right">{u}</Td>
                   <Td className={`text-right font-semibold ${balance && credit - u < 0 ? 'text-rose-600' : 'text-slate-700'}`}>
-                    {balance ? credit - u : '—'}
+                    {balance && !notThisYear ? credit - u : '—'}
                   </Td>
                 </tr>
               )
@@ -648,7 +690,9 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
       )}
       <p className="mt-3 text-xs text-slate-400">
         Blank = the leave type's default. Event-based statutory leaves (maternity, paternity, solo parent, VAWC,
-        special leave for women) show on the employee's portal only once a credit is set here.
+        special leave for women) show on the employee's portal only once a credit is set here. A leave that needs
+        months of service (SIL: 12) opens on that anniversary; a credit set here for a year lets the employee use it
+        sooner.
       </p>
     </Card>
   )

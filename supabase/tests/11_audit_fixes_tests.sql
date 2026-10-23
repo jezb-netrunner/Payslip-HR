@@ -130,7 +130,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :ga, true);
 insert into leave_requests (id, employee_id, leave_type_id, start_date, end_date, days, status)
 select '5000000c-0000-0000-0000-000000000002', '20000000-0000-0000-0000-0000000000f1', id, '2026-12-02', '2026-12-02', 1, 'approved'
-from leave_types where entity_id = '10000000-0000-0000-0000-00000000000c' and code = 'SIL';
+from leave_types where entity_id = '10000000-0000-0000-0000-00000000000c' and code = 'VL';
 insert into payroll_runs (id, entity_id, run_type, pay_frequency, period_start, period_end, pay_date, period_month, period_index, periods_in_month)
 values ('3000000c-0000-0000-0000-000000000004', '10000000-0000-0000-0000-00000000000c', 'regular', 'weekly', '2026-11-30', '2026-12-06', '2026-12-11', '2026-12-01', 1, 4);
 insert into payslips (payroll_run_id, employee_id, gross_pay, net_pay) values ('3000000c-0000-0000-0000-000000000004', '20000000-0000-0000-0000-0000000000f1', 4530, 4530);
@@ -191,7 +191,7 @@ values ('20000000-0000-0000-0000-0000000000f2', 2026, true, 'contractual', 'end_
 select pg_temp.expect_error($$update employee_tax_years set prev_employment_status = 'boss' where employee_id = '20000000-0000-0000-0000-0000000000f2'$$, '%prev_employment_status_check%');
 insert into leave_requests (id, employee_id, leave_type_id, start_date, end_date, days, status)
 select '5000000c-0000-0000-0000-000000000009', '20000000-0000-0000-0000-0000000000f2', id, '2026-12-14', '2026-12-14', 1, 'pending'
-from leave_types where entity_id = '10000000-0000-0000-0000-00000000000c' and code = 'SIL';
+from leave_types where entity_id = '10000000-0000-0000-0000-00000000000c' and code = 'VL';
 update leave_requests set status = 'approved' where id = '5000000c-0000-0000-0000-000000000009';
 select pg_temp.check((select count(*) from audit_logs where table_name = 'leave_requests' and record_id = '5000000c-0000-0000-0000-000000000009') = 2, 'leave filing and approval audited');
 select pg_temp.check((select count(*) from audit_logs where table_name = 'employee_tax_years' and entity_id = '10000000-0000-0000-0000-00000000000c') = 1, 'tax-year data audited under its client');
