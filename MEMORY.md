@@ -285,9 +285,9 @@ partial list (`showFoot: 'lastPage'`). Tests 189 → 191.
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide) and #4 (test-round fixes,
 merged and deployed 2026-10-23 09:23) are in `main` and live. The cash-advance
-work is on `claude/cool-cannon-jmj2oz` (fast-forwarded to `main` after #4
-merged; it needs a NEW PR) and reaches the site only when merged; its
-migration is ALREADY live, so until then the deployed Pay-tab form can't add
+work and the audit fixes are on `claude/cool-cannon-jmj2oz` (fast-forwarded
+to `main` after #4 merged), open as PR #5, and reach the site only when
+merged; their migrations are ALREADY live, so until then the deployed Pay-tab form can't add
 a "Cash advance" recurring deduction (the guard wants release and
 authorization dates — the new Cash Advances page records them).
 
