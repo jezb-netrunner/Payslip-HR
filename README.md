@@ -48,12 +48,18 @@ are refused; the Generate button makes random ones.
   corrections. Attendance is locked once it has been paid in a finalized run
 - Leaves: per-client leave types (seeded from statutory templates),
   per-employee credits, approvals that feed payroll, leaves filed by HR for
-  an employee, and revoking an approved leave (until its days are paid)
+  an employee, and revoking an approved leave (until its days are paid).
+  A leave type can require months of service: **Service Incentive Leave opens
+  after 12 months** (Labor Code Art. 95), enforced by the database; credits
+  set for a year grant it sooner
 - Payroll runs per **pay frequency** (weekly / semi-monthly / monthly) with
   regular, 13th-month, special and final-pay run types; adjustments
   (bonuses, deductions, back pay); review → finalize (immutable) → reopen
-  (audited); payroll register CSV; payslip PDFs; **cash payout sheet** with
-  bill/coin breakdown per employee and per run
+  (audited); payroll register CSV; payslip PDFs for one employee or in
+  **bulk** (ticked employees or everyone: one PDF, a payslip per page, or a
+  ZIP of single PDFs); **cash payout sheet** with bill/coin breakdown per
+  employee and per run. Computing warns, per employee, about scheduled
+  workdays with no time in/out or leave (charged as absences)
 - **Announcements** (pinned / expiring) shown on the employee portal
 - **BIR & Reports**: 1604-C alphalist Schedule 1 and Schedule 2 (MWEs), BIR
   2316 working copies, 1604-C summary, 1601-C monthly remittance log,

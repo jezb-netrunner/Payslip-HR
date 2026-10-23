@@ -201,18 +201,44 @@ dialogs/drawer/menus, 13th-month runs shown with hours. Older bugs fixed on
 the way: the timesheet's unsaved-change highlight never showed; a cleared
 month field on My Attendance sent invalid queries. Tests 153 → 156.
 
+### 2026-10-23 — Owner's test round + product/UX review (branch `claude/cool-cannon-jmj2oz`)
+
+**Asked:** new hire could use SIL; Request Leave field overflowed on phones;
+icon-only side tabs confusing; "Not authenticated" creating an entity admin;
+bulk payslip PDFs; "is this the best form/workflow? brainstorm the optimal app
+to the highest industry standards" (paying client).
+
+**Did:** SIL gated on 12 months of service — `leave_types.min_service_months`
++ DB guard (migration `20261023080941`, applied live via MCP) + eligibility in
+portal/admin screens (see lessons); root-caused "Not authenticated" from the
+live auth logs (global sign-out, see lesson) → local sign-out + refresh-and-
+retry in `callAdminUsers`; phone-safe form grids; labeled collapsible desktop
+sidebar + employee bottom tabs; bulk payslips (tick/Select all → one PDF or
+ZIP, `buildPayslipsDoc/Zip`, drafts print DRAFT PAYSLIP, deductions table no
+longer drawn on the wrong page when earnings spill); engine warns about
+uncovered workdays; corrections tab count + `?tab=corrections`; hint
+contrast. Tests 156 → 171; SQL suite `12_leave_service_tests.sql`. Rebuilt
+the local stack and QA'd every change in the browser (see lesson). Three
+research/audit sub-agents fed a product review, written as the owner's
+Claude Docs doc "Payslip HR — Product & UX Review"
+(https://claude.ai/artifact/3DbHSdFJgJLhr3yd388fbv) — see *Product direction*.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**Backend and Pages site are both multi-client since 2026-10-20.** The
-owner merged PR #1 (`claude/trusting-dirac-fqodu6`) into `main` at 04:28 UTC
-and the Pages deploy (run 4) succeeded. The UI revamp of 2026-10-23 is on
-branch `claude/kind-hawking-40tjt9` (front end only; no backend change) and
-reaches the live site only when merged into `main`.
+**Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
+(multi-client), #2 (UI revamp) and #3 (Quick Guide) are merged into `main`
+and live. The 2026-10-23 test-round fixes are on `claude/cool-cannon-jmj2oz`
+and reach the site only when merged; their migration is ALREADY live, so
+until then the deployed portal still shows SIL to new hires but the
+database refuses the filing with a clear message.
 
-Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-20:
-- **All 14 migrations applied.** The two multi-client ones were run by the
+Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
+- **All 15 migrations applied.** The 15th, `20261023080941
+  leave_service_requirement` (ADD COLUMN + UPDATE + CREATE OR REPLACE), went
+  through MCP `apply_migration`; repo file renamed to that version; a
+  rolled-back dry run confirmed the guard's message; advisors unchanged. The two multi-client ones were run by the
   owner in the SQL editor (MCP could not — see lesson) and then recorded in
   `supabase_migrations.schema_migrations` under the repo versions
   `20261019120000 multi_client_schema` / `20261019120100
@@ -223,15 +249,15 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
   MCP recorded. Verified with `supabase/tests/fingerprint.sql`: tables,
   columns, constraints, indexes, policies, functions, grants and triggers
   all match the local replica (21 tables, 328 columns, 120 constraints, 57
-  indexes, 46 policies, 36 functions, 61 triggers). Data: owner =
-  `company_admin`, 5 statutory versions, 9 global leave templates, 21
-  national 2026 holidays; RLS on every table. No clients, employees or
-  payroll data yet; each client carries its own policy incl. minimum-wage
-  region/rate (no default).
+  indexes, 46 policies, 36 functions, 61 triggers — before the 15th
+  migration's extra column). Data: owner = `company_admin`, 5 statutory
+  versions, 9 global leave templates, 21 national 2026 holidays; RLS on
+  every table. Owner's test data since 2026-10-23: 1 client, 1 employee
+  (hired 2026-10-23, has a login code), 1 finalized semi-monthly run.
 - Edge function **`admin-users` v5** live (verify_jwt on), deployed
   2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
   login codes refused, incl. all-letter codes and the employee's names).
-- Security advisors after the last DDL (2026-10-20): 9 intentional WARNs (RLS helpers
+- Security advisors after the last DDL (2026-10-23): 9 intentional WARNs (RLS helpers
   `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
   `current_employee_id` / `current_employee_entity_id` / `run_is_finalized`
   and the RPCs `finalize_payroll_run` / `reopen_payroll_run` /
@@ -284,6 +310,15 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   HB 11357 (3.5% cut) died with the 19th Congress.
 - **Pag-IBIG** (Circular 460): max fund salary ₱10,000 since Feb 2024; EE 1%
   (≤₱1,500) / 2%; ER always 2%. Max ₱200 + ₱200.
+- **Service Incentive Leave** (Labor Code Art. 95 + IRR Book III Rule V,
+  checked 2026-10-23 via DOLE handbook / Senate extracts): 5 days a year
+  after "at least one year of service" = 12 months, continuous or broken,
+  from the start date (a shorter period counts if practice/contract says
+  so); exempt: firms regularly employing < 10, those already giving ≥ 5 days
+  paid VL, managerial/field personnel; unused SIL converts to cash. Bills to
+  raise it to 10 days were unenacted as far as search showed. NOT seeded:
+  Solo Parent Leave's 6-month service requirement (RA 11861) — reported by
+  research, unverified; set it under Leave types once checked.
 - **Labor standards**: OT +25% ordinary / day-rate ×1.30 otherwise
   (169/195/260/338%); ND +10% (22:00–06:00), stacks multiplicatively;
   premiums 130/150/200/260%; unworked regular holiday 100% (presence on the
@@ -650,7 +685,17 @@ Why it mattered: the walkthrough found what unit tests and SQL tests
 couldn't — wrong-date saves, mislabeled controls, phone overflow, a
 double-click that duplicated loans.
 
-Rebuilt 2026-10-23 (scripts were in a session scratchpad, now gone):
+Rebuilt again 2026-10-23 (second session, ~10 minutes): binaries from
+GitHub releases `postgrest-v12.2.12-linux-static-x86-64.tar.xz` and
+`supabase/auth` `auth-v2.180.0-x86.tar.gz` (its `migrations/` dir is
+GOTRUE_DB_MIGRATIONS_PATH); create roles `authenticator` / `supabase_auth_admin`
+and schema `auth` first, start GoTrue (it migrates), then replace
+`auth.uid()`/`auth.jwt()` with the stub's versions, add the storage stub,
+replay the repo migrations, sign the owner up through GoTrue (first user =
+company admin). The gateway must DROP upstream `access-control-*` headers
+before adding its own (duplicates fail CORS); the edge function runs under
+`node --experimental-strip-types` with its `npm:` import rewritten to the
+repo's supabase-js and a `globalThis.Deno` shim. Earlier rebuild notes:
 the edge function also runs in-process in the Node gateway behind a tiny
 Deno stand-in; payroll for seeding ran through the app's own
 `computeRun`/`finalizeRun` loaded via Vite's server-side module loader;
@@ -741,3 +786,43 @@ issued login code shown and printed under the next employee's name.
 
 Why it mattered: employees would have seen lateness they weren't docked and
 overtime they wouldn't be paid.
+
+### Sign out this device only — edge functions see revoked sessions, PostgREST doesn't
+
+> `supabase.auth.signOut()` defaults to scope `global`: it deletes EVERY session of the account. A tab elsewhere keeps a still-valid access token, so database calls (stateless JWT) keep working while `admin-users` (`auth.getUser` → GoTrue checks the session row) answers 401 "Not authenticated".
+
+Found in the live auth logs on 2026-10-23: the owner signed out (testing the
+employee portal) at 07:37 UTC; the desktop tab's create-admin calls failed
+from 07:50 with `session_not_found`. Fix: `signOut({ scope: 'local' })`, and
+`callAdminUsers` refreshes once on 401 — a failed refresh means the session
+is gone, so it signs this device out with `SESSION_ENDED`. Note auth-js
+2.112 keeps the stored session when a refresh fails while the access token
+is still valid, so the explicit local sign-out is required. Why it mattered:
+the app looked signed in but could not create admins or set login codes.
+
+### Leave service requirements are leave-type data plus a database guard (confirmed approach)
+
+> `leave_types.min_service_months` (SIL 12, per client, editable) + `guard_leave_request` refuses a pending/approved leave starting before `hire_date + months` unless that year's `employee_leave_entitlements.days > 0`; `src/lib/leave.ts` (`eligibleFrom`, `usableOn`, `addMonths` clamps like Postgres) mirrors it for the screens.
+
+Credits as the override let HR grant it sooner (company policy, rehires with
+broken service) without a code change; zero credits don't count. The check
+runs on insert and on status/date/type changes, never on reject/cancel. For
+event leaves (SPL) a credit is also the eligibility switch, so setting one
+bypasses the months — the Entitlements tab shows the opening date. Why it
+mattered: SIL showed 5 days to a hire of one day.
+
+### A scheduled day with no time in/out is an absence — the engine says so
+
+> `attendance.ts` marks a scheduled regular day with no entry and no leave `absent` (docked for monthly, unpaid for daily); nothing distinguishes "not entered yet". `computePayslip` now warns with the dates; the planned "ready check" should block computing instead.
+
+Why it mattered: computing before a cutoff ended, or forgetting a day, would
+silently underpay — the only clue was a "Days absent" total.
+
+### Product direction (owner review 2026-10-23)
+
+> Keep the engine and DB controls; rebuild the experience around the pay cycle. Agreed order: quick wins (ready check before computing, one requests inbox with balances + bulk approve, form safety nets, onboarding checklist, plain-language renames) → big bets (Excel import of employees/attendance, all-clients payroll board, bank + SSS/PhilHealth/Pag-IBIG files) → on client demand (phone clock-in as admin-approved requests, emailed payslips, second approver, alphalist DAT).
+
+Full reasoning, PH must-haves and sources: the owner's doc
+https://claude.ai/artifact/3DbHSdFJgJLhr3yd388fbv (Claude Docs). Open
+questions there (client's banks, SIL exemption, time capture, approvers,
+email) decide the order — ask before building the lower-right items.

@@ -18,7 +18,8 @@ Always pick the client first in the client selector at the top.
 3. **Leaves** → approve/reject leave requests; **Time In / Out → Correction requests** → review employees' missing-time reports (red counts show what's pending).
 4. **Pay Runs** → **New pay run** (frequency + period) → add adjustments if any → **Compute draft** → review → **Finalize**.
    Finalizing publishes payslips to employees and locks the period's attendance. **Reopen** if you need to fix something (audit-logged), then recompute and finalize again.
-5. Download the payroll register, payslip PDFs or cash payout sheet from the run.
+5. Download the payroll register or cash payout sheet from the run. For payslips, tick employees (or **Select all**) → **Download payslips** → one PDF to print, or a ZIP with one file per employee.
+   Before finalizing, read the review warnings: a workday with no time in/out and no leave is charged as an absence.
 6. **BIR & Reports** → 1601-C, 1604-C alphalist, 2316, SSS / PhilHealth / Pag-IBIG reports.
 7. **Announcements** → post notices to employees.
 
@@ -26,5 +27,5 @@ Always pick the client first in the client selector at the top.
 - **Dashboard** — latest take-home pay, deductions, leave balances.
 - **Payslips** — view/download finalized payslips.
 - **Attendance** — check records; **report a missing time entry** if something's wrong (HR fixes it).
-- **Leaves** — file leave requests.
+- **Leaves** — file leave requests. Service Incentive Leave becomes available after 12 months of service (the date shows on the card).
 - Lost your code? Ask HR for a new one.
