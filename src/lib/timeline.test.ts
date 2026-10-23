@@ -47,6 +47,10 @@ describe('attendance timeline', () => {
     const g = dayTimeline('2026-10-21', [{ clock_in: at('09:04'), clock_out: at('18:00') }], sched, { graceMinutes: 5 })
     expect(g.late).toBe(false)
     expect(g.segments[0]).toEqual({ kind: 'work', from: 544, to: 1080 })
+    // payroll charges no tardiness on a non-working holiday
+    const h = dayTimeline('2026-10-21', [{ clock_in: at('09:30'), clock_out: at('18:00') }], sched, { holiday: true })
+    expect(h.late).toBe(false)
+    expect(h.segments.some((x) => x.kind === 'late')).toBe(false)
   })
 
   it('draws rest-day work without late or overtime marks', () => {

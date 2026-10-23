@@ -357,6 +357,7 @@ function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen
         <Link
           to={`/admin/employees/${e.id}`}
           onClick={(ev) => ev.stopPropagation()}
+          aria-label={`View details of ${fullName(e)}`}
           className="flex items-center gap-0.5 font-semibold text-ink-900 underline decoration-slate-300 underline-offset-4 hover:decoration-ink-900"
         >
           View details <ChevronRight className="size-4" />

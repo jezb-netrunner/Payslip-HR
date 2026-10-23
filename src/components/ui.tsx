@@ -41,14 +41,19 @@ const variantClasses: Record<ButtonVariant, string> = {
   ghost: 'text-brand-700 hover:bg-brand-50 disabled:text-slate-400',
 }
 
+// Sizes are props, not caller classes: in Tailwind v4 a caller's px-3 can lose
+// to the base px-4 (stylesheet order decides, not class order).
+const buttonSizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm' }
+
 export function Button({
   variant = 'primary',
+  size = 'md',
   className = '',
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: keyof typeof buttonSizes }) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-1 disabled:cursor-not-allowed ${variantClasses[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-1 disabled:cursor-not-allowed ${buttonSizes[size]} ${variantClasses[variant]} ${className}`}
       {...props}
     />
   )
@@ -58,15 +63,16 @@ export function Button({
 export function IconButton({
   label,
   round = false,
+  size = 'md',
   className = '',
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; round?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; round?: boolean; size?: 'sm' | 'md' }) {
   return (
     <button
       type="button"
       title={label}
       aria-label={label}
-      className={`inline-flex size-9 shrink-0 items-center justify-center border border-slate-200 bg-white text-ink-900 shadow-xs transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 ${round ? 'rounded-full' : 'rounded-lg'} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center border border-slate-200 bg-white text-ink-900 shadow-xs transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300 ${size === 'sm' ? 'size-8' : 'size-9'} ${round ? 'rounded-full' : 'rounded-lg'} ${className}`}
       {...props}
     />
   )

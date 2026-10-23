@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Clock, FilePen, Plus } from 'lucide-react'
-import AttendanceTimeline, { TimelineLegend, type TimelineLeave } from '../../components/AttendanceTimeline'
+import AttendanceTimeline, { type TimelineLeave } from '../../components/AttendanceTimeline'
 import {
   Badge,
   Button,
@@ -21,9 +21,10 @@ import {
 } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
-import type { TimeCorrectionRequest, TimeEntry } from '../../lib/db'
+import type { Holiday, TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtHours, fmtTime, plural } from '../../lib/format'
 import { endOfMonth, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
+import { getHolidaysBetween } from '../../lib/api'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
 import { errorMessage } from '../../lib/errors'
@@ -42,15 +43,19 @@ export default function MyAttendance() {
   const [leaves, setLeaves] = useState<TimelineLeave[]>([])
   const [view, setView] = useState<'timeline' | 'list'>('timeline')
   const [graceMinutes, setGraceMinutes] = useState(0)
+  const [holidays, setHolidays] = useState<Holiday[]>([])
+  const seq = useRef(0)
 
   useQuickAction('correction', () => openCorrection(null))
 
   const load = useCallback(async () => {
     if (!employee) return
+    // quick month changes: only the latest request may fill the page
+    const my = ++seq.current
     setLoading(true)
     const start = `${monthStr}-01`
     const end = endOfMonth(start)
-    const [{ data: ent }, { data: reqs }, { data: lv }, { data: client }] = await Promise.all([
+    const [{ data: ent }, { data: reqs }, { data: lv }, { data: client }, hol] = await Promise.all([
       supabase
         .from('time_entries')
         .select('*')
@@ -71,10 +76,14 @@ export default function MyAttendance() {
         .eq('status', 'approved')
         .lte('start_date', end)
         .gte('end_date', start),
-      // "late" on the timeline follows payroll: after the shift start plus the client's grace period
+      // "late" on the timeline follows payroll: an ordinary working day (not a
+      // non-working holiday), after the shift start plus the client's grace period
       supabase.from('entities').select('grace_period_minutes').eq('id', employee.entity_id).maybeSingle(),
+      getHolidaysBetween(employee.entity_id, start, end).catch(() => [] as Holiday[]),
     ])
+    if (my !== seq.current) return
     setGraceMinutes(Number(client?.grace_period_minutes) || 0)
+    setHolidays(hol)
     setEntries((ent ?? []) as TimeEntry[])
     setRequests((reqs ?? []) as TimeCorrectionRequest[])
     setLeaves(
@@ -155,7 +164,7 @@ export default function MyAttendance() {
         d,
         entries.filter((e) => e.work_date === d),
         employee.work_schedule,
-        { graceMinutes },
+        { graceMinutes, holiday: holidays.some((h) => h.holiday_date === d && h.kind !== 'special_working') },
       ).late,
   ).length
   const openEntries = entries.filter((e) => !e.clock_out).length
@@ -187,7 +196,7 @@ export default function MyAttendance() {
           <StatGroup>
             <StatCard label="Days recorded" value={days.length} sub={`${plural(entries.length, 'entry', 'entries')}`} />
             <StatCard label="Hours on record" value={fmtHours(totalMinutes)} />
-            <StatCard label="Late time in" value={lateDays} tone={lateDays > 0 ? 'warn' : 'default'} sub="after your shift start and grace period" />
+            <StatCard label="Late time in" value={lateDays} tone={lateDays > 0 ? 'warn' : 'default'} sub="workdays, after the shift start and grace period" />
             <StatCard label="No time out" value={openEntries} tone={openEntries > 0 ? 'warn' : 'default'} />
             <StatCard label="Pending corrections" value={requests.filter((r) => r.status === 'pending').length} />
           </StatGroup>
@@ -207,22 +216,21 @@ export default function MyAttendance() {
               />
             }
           >
-            {entries.length === 0 && leaves.length === 0 ? (
+            {view === 'timeline' ? (
+              <AttendanceTimeline
+                entries={entries}
+                schedule={employee.work_schedule}
+                graceMinutes={graceMinutes}
+                holidays={holidays}
+                leaves={leaves}
+                from={monthStart}
+                to={endOfMonth(monthStart)}
+                today={todayManila()}
+                emptyTitle="No entries this month"
+                onRequestFix={(e) => openCorrection(e)}
+              />
+            ) : entries.length === 0 ? (
               <EmptyState title="No entries this month" />
-            ) : view === 'timeline' ? (
-              <div className="space-y-4">
-                <TimelineLegend />
-                <AttendanceTimeline
-                  entries={entries}
-                  schedule={employee.work_schedule}
-                  graceMinutes={graceMinutes}
-                  leaves={leaves}
-                  from={monthStart}
-                  to={endOfMonth(monthStart)}
-                  today={todayManila()}
-                  onRequestFix={(e) => openCorrection(e)}
-                />
-              </div>
             ) : (
               <TableShell>
                 <thead>

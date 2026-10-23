@@ -9,6 +9,7 @@ import {
   EmptyState,
   Field,
   Input,
+  LoadFailed,
   Modal,
   NoClient,
   PageHeader,
@@ -32,6 +33,7 @@ import { slotFor, suggestPeriod } from '../../lib/payPeriods'
 import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
+import { fetchAll } from '../../lib/fetchAll'
 import { useQuickAction } from '../../lib/quickAction'
 
 export default function Payroll() {
@@ -54,20 +56,32 @@ function RunList({ entity }: { entity: Entity }) {
   const [frequency, setFrequency] = useState('')
   const [status, setStatus] = useState('')
   const [query, setQuery] = useState('')
+  const [loadError, setLoadError] = useState('')
   const navigate = useNavigate()
 
   // wait for the runs: the new-run form suggests the period after the latest one
-  useQuickAction('run', () => setCreating(true), !loading)
+  useQuickAction('run', () => setCreating(true), !loading && !loadError)
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('payroll_runs')
-      .select('*')
-      .eq('entity_id', entity.id)
-      .order('period_start', { ascending: false })
-      .limit(200)
-    setRuns((data ?? []) as PayrollRun[])
-    setLoading(false)
+    setLoadError('')
+    try {
+      // every run: the status counts and the search cover the client's whole history
+      setRuns(
+        await fetchAll<PayrollRun>((from, to) =>
+          supabase
+            .from('payroll_runs')
+            .select('*')
+            .eq('entity_id', entity.id)
+            .order('period_start', { ascending: false })
+            .order('id')
+            .range(from, to),
+        ),
+      )
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Could not load the payroll runs'))
+    } finally {
+      setLoading(false)
+    }
   }, [entity.id])
 
   useEffect(() => {
@@ -123,7 +137,9 @@ function RunList({ entity }: { entity: Entity }) {
         </FilterPill>
       </div>
 
-      {loading ? (
+      {loadError ? (
+        <LoadFailed message={loadError} onRetry={load} />
+      ) : loading ? (
         <Spinner />
       ) : shown.length === 0 ? (
         <Card>
@@ -180,7 +196,7 @@ function RunList({ entity }: { entity: Entity }) {
                   <Td className="text-right">
                     <Button
                       variant={r.status === 'draft' ? 'dark' : 'secondary'}
-                      className="px-3 py-1.5 text-xs"
+                      size="sm"
                       onClick={(ev) => {
                         ev.stopPropagation()
                         open()

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -23,13 +23,12 @@ import {
   UserX,
   Wallet,
 } from 'lucide-react'
-import AttendanceTimeline, { TimelineLegend, type TimelineLeave } from '../../components/AttendanceTimeline'
+import AttendanceTimeline, { type TimelineLeave } from '../../components/AttendanceTimeline'
 import {
   Avatar,
   Badge,
   Button,
   Card,
-  EmptyState,
   Field,
   IconButton,
   Input,
@@ -44,7 +43,8 @@ import {
   Toggle,
 } from '../../components/ui'
 import { useToast } from '../../components/toast'
-import { callAdminUsers } from '../../lib/api'
+import { callAdminUsers, getHolidaysBetween, isActiveOn } from '../../lib/api'
+import { fetchAll } from '../../lib/fetchAll'
 import type {
   CareerEvent,
   Employee,
@@ -52,6 +52,7 @@ import type {
   EmployeeTaxYear,
   EmploymentStatus,
   Entity,
+  Holiday,
   PaymentMethod,
   Profile,
   RecurringDeduction,
@@ -68,6 +69,7 @@ import {
   PAYMENT_METHOD_LABELS,
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
+import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -87,7 +89,19 @@ const eventLabels: Record<string, string> = {
   other: 'Note',
 }
 
+/**
+ * Prev/next only change the URL, so each employee gets a fresh, keyed record:
+ * otherwise the tabs' forms (and a freshly issued login code) would carry one
+ * person's data over to the next, and saving would write it there. The open
+ * tab is kept across prev/next.
+ */
 export default function EmployeeDetail() {
+  const { id } = useParams()
+  const [tab, setTab] = useState('profile')
+  return <EmployeeRecord key={id} tab={tab} onTab={setTab} />
+}
+
+function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: string) => void }) {
   const { id } = useParams()
   const { entities } = useEntity()
   const [employee, setEmployee] = useState<Employee | null>(null)
@@ -95,7 +109,6 @@ export default function EmployeeDetail() {
   const [allowances, setAllowances] = useState<EmployeeAllowance[]>([])
   const [deductions, setDeductions] = useState<RecurringDeduction[]>([])
   const [account, setAccount] = useState<Profile | null>(null)
-  const [tab, setTab] = useState('profile')
   const [loading, setLoading] = useState(true)
   const [siblings, setSiblings] = useState<string[]>([])
   const navigate = useNavigate()
@@ -121,18 +134,18 @@ export default function EmployeeDetail() {
     load()
   }, [load])
 
-  // prev / next walk the client's employees in the list's order
+  // prev / next walk the employees the list shows by default (its order, the
+  // separated left out) — plus this one if separated, so it keeps its place
   const entityId = employee?.entity_id
   useEffect(() => {
     if (!entityId) return
-    supabase
-      .from('employees')
-      .select('id')
-      .eq('entity_id', entityId)
-      .order('last_name')
-      .order('id')
-      .then(({ data }) => setSiblings((data ?? []).map((r) => r.id as string)))
-  }, [entityId])
+    const today = todayManila()
+    fetchAll<{ id: string; separation_date: string | null }>((from, to) =>
+      supabase.from('employees').select('id, separation_date').eq('entity_id', entityId).order('last_name').order('id').range(from, to),
+    )
+      .then((rows) => setSiblings(rows.filter((r) => r.id === id || isActiveOn(r, today)).map((r) => r.id)))
+      .catch(() => setSiblings([]))
+  }, [entityId, id])
 
   if (loading) return <Spinner />
   if (!employee) return <p className="text-sm text-slate-500">Employee not found.</p>
@@ -233,15 +246,19 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
   const [month, setMonth] = useState(today.slice(0, 7))
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [leaves, setLeaves] = useState<TimelineLeave[]>([])
+  const [holidays, setHolidays] = useState<Holiday[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const seq = useRef(0)
   const start = `${month}-01`
   const end = endOfMonth(start)
 
   const load = useCallback(async () => {
+    // quick month clicks: only the latest request may fill the page
+    const my = ++seq.current
     setLoading(true)
     setLoadError('')
-    const [ent, lv] = await Promise.all([
+    const [ent, lv, hol] = await Promise.all([
       supabase
         .from('time_entries')
         .select('*')
@@ -256,9 +273,15 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
         .eq('status', 'approved')
         .lte('start_date', end)
         .gte('end_date', start),
+      getHolidaysBetween(employee.entity_id, start, end).then(
+        (data) => ({ data, error: null }),
+        (error: unknown) => ({ data: [] as Holiday[], error }),
+      ),
     ])
-    if (ent.error || lv.error) setLoadError(errorMessage(ent.error ?? lv.error, 'Could not load attendance'))
+    if (my !== seq.current) return
+    if (ent.error || lv.error || hol.error) setLoadError(errorMessage(ent.error ?? lv.error ?? hol.error, 'Could not load attendance'))
     setEntries((ent.data ?? []) as TimeEntry[])
+    setHolidays(hol.data)
     setLeaves(
       ((lv.data ?? []) as unknown as { start_date: string; end_date: string; leave_types: { name: string } | null }[]).map((l) => ({
         start_date: l.start_date,
@@ -267,7 +290,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
       })),
     )
     setLoading(false)
-  }, [employee.id, start, end])
+  }, [employee.id, employee.entity_id, start, end])
 
   useEffect(() => {
     load()
@@ -278,17 +301,23 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
     const t = y * 12 + (m - 1) + n
     setMonth(`${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`)
   }
+  const offDays = new Set(holidays.filter((h) => h.kind !== 'special_working').map((h) => h.holiday_date))
   const days = [...new Set(entries.map((e) => e.work_date))]
   const worked = days.map((d) =>
     dayTimeline(
       d,
       entries.filter((e) => e.work_date === d),
       employee.work_schedule,
-      { graceMinutes },
+      { graceMinutes, holiday: offDays.has(d) },
     ),
   )
+  // charged leave days, as leave is counted elsewhere: scheduled workdays, not holidays
   const leaveDays = new Set(
-    leaves.flatMap((l) => eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date)),
+    leaves.flatMap((l) =>
+      eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date).filter(
+        (d) => leaveWorkdays(d, d, employee.work_schedule.days, holidays) > 0,
+      ),
+    ),
   ).size
 
   return (
@@ -320,21 +349,19 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
           <LoadFailed message={loadError} onRetry={load} />
         ) : loading ? (
           <Spinner />
-        ) : entries.length === 0 && leaves.length === 0 ? (
-          <EmptyState title="No time entries this month" sub="Time in / out entered for this employee shows here day by day." />
         ) : (
-          <>
-            <TimelineLegend />
-            <AttendanceTimeline
-              entries={entries}
-              schedule={employee.work_schedule}
-              graceMinutes={graceMinutes}
-              leaves={leaves}
-              from={start}
-              to={end}
-              today={today}
-            />
-          </>
+          <AttendanceTimeline
+            entries={entries}
+            schedule={employee.work_schedule}
+            graceMinutes={graceMinutes}
+            holidays={holidays}
+            leaves={leaves}
+            from={start}
+            to={end}
+            today={today}
+            emptyTitle="No time entries this month"
+            emptySub="Time in / out entered for this employee shows here day by day."
+          />
         )}
       </div>
     </div>

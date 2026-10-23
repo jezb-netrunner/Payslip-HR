@@ -269,6 +269,36 @@ export default function PayrollRunDetail() {
           body: 'Check pay rates, overtime, holiday premiums and night differential against the timesheets. Add one-time adjustments, then recompute before finalizing.',
         }
   const canAdjust = isDraft && run.run_type !== 'thirteenth_month'
+  // a stale draft can hold payslips for people the run no longer covers: no shortcut for them
+  const coveredIds = new Set(covered.map((e) => e.id))
+  const hasWarnings = warnings.length > 0 || (result?.warnings.length ?? 0) > 0
+  const notices =
+    stale || hasWarnings ? (
+      <>
+        {stale && (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            Attendance, adjustments, leave or pay settings changed since this draft was computed (or the last
+            computation did not finish). Recompute the draft before finalizing.
+          </p>
+        )}
+        {hasWarnings && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-bold text-amber-800">
+              <AlertTriangle className="size-4" /> Review warnings
+            </p>
+            {/* run-level notes and employees left out of the run (they have no payslip to carry them) */}
+            {result?.warnings.map((w, i) => (
+              <p key={`r${i}`} className="text-xs text-amber-700">
+                • {w.employee === 'This run' ? '' : `${w.employee}: `}{w.warnings.join('; ')}
+              </p>
+            ))}
+            {warnings.map((w, i) => (
+              <p key={i} className="text-xs text-amber-700">• {w.name}: {w.warning}</p>
+            ))}
+          </div>
+        )}
+      </>
+    ) : null
 
   return (
     <div>
@@ -306,6 +336,8 @@ export default function PayrollRunDetail() {
         <Stepper steps={steps} />
 
         <div className="min-w-0 space-y-6">
+          {/* below xl the aside drops under the payslips: keep what blocks finalizing in view */}
+          {notices && <div className="space-y-4 xl:hidden">{notices}</div>}
           <section className="rounded-xl border border-slate-200/80 bg-white">
             <div className="p-5">
               <h2 className="flex items-center gap-2 text-base font-bold text-ink-900">
@@ -368,7 +400,10 @@ export default function PayrollRunDetail() {
                           </div>
                         </div>
                         <div className="hidden text-sm md:block">
-                          <p className="font-semibold text-ink-900">{hrs(Number(s.hours_worked))} hrs</p>
+                          <p className="font-semibold text-ink-900">
+                            <span className="sr-only">Hours worked: </span>
+                            {hrs(Number(s.hours_worked))} hrs
+                          </p>
                           <p className="text-xs text-slate-400">
                             {Number(s.days_worked)} days
                             {Number(s.overtime_hours) > 0 && ` · ${hrs(Number(s.overtime_hours))} OT`}
@@ -380,10 +415,11 @@ export default function PayrollRunDetail() {
                               {a.kind === 'earning' ? '+' : '−'} {money(Number(a.amount))} {a.label}
                             </p>
                           ))}
-                          {canAdjust && (
+                          {canAdjust && coveredIds.has(s.employee_id) ? (
                             <div className="flex gap-3 text-slate-500">
                               <button
                                 type="button"
+                                aria-label={`Add an earning for ${snap.name}`}
                                 onClick={() => setAddingAdj({ employeeId: s.employee_id, kind: 'earning' })}
                                 className="flex items-center gap-0.5 font-medium hover:text-ink-900"
                               >
@@ -391,17 +427,22 @@ export default function PayrollRunDetail() {
                               </button>
                               <button
                                 type="button"
+                                aria-label={`Add a deduction for ${snap.name}`}
                                 onClick={() => setAddingAdj({ employeeId: s.employee_id, kind: 'deduction' })}
                                 className="flex items-center gap-0.5 font-medium hover:text-ink-900"
                               >
                                 <Plus className="size-3.5" /> Deduction
                               </button>
                             </div>
+                          ) : (
+                            mine.length === 0 && <span className="text-slate-300">—</span>
                           )}
-                          {!canAdjust && mine.length === 0 && <span className="text-slate-300">—</span>}
                         </div>
                         <div className="hidden text-right md:block">
-                          <p className="text-sm">{money(Number(s.gross_pay))}</p>
+                          <p className="text-sm">
+                            <span className="sr-only">Gross pay: </span>
+                            {money(Number(s.gross_pay))}
+                          </p>
                           {/* the review figures the old register table showed per employee */}
                           <p className="text-[11px] text-slate-400">
                             SSS/PH/PI {money(Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.philhealth_ee) + Number(s.pagibig_ee))}
@@ -411,7 +452,10 @@ export default function PayrollRunDetail() {
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="font-bold text-ink-900">{money(Number(s.net_pay))}</p>
+                          <p className="font-bold text-ink-900">
+                            <span className="sr-only">Net pay: </span>
+                            {money(Number(s.net_pay))}
+                          </p>
                           {Number(s.rounding_adjustment) !== 0 && (
                             <p className="text-[10px] text-slate-400">
                               rounding {Number(s.rounding_adjustment) > 0 ? '+' : ''}
@@ -419,7 +463,7 @@ export default function PayrollRunDetail() {
                             </p>
                           )}
                         </div>
-                        <IconButton label={`View ${snap.name}'s payslip`} onClick={() => setViewing(s)} className="size-8">
+                        <IconButton size="sm" label={`View ${snap.name}'s payslip`} onClick={() => setViewing(s)}>
                           <Eye className="size-4" />
                         </IconButton>
                       </li>
@@ -537,28 +581,7 @@ export default function PayrollRunDetail() {
             <p className="text-sm font-semibold text-ink-900">{tip.title}</p>
             <p className="mt-1 text-sm text-slate-600">{tip.body}</p>
           </div>
-          {stale && (
-            <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              Attendance, adjustments, leave or pay settings changed since this draft was computed (or the last
-              computation did not finish). Recompute the draft before finalizing.
-            </p>
-          )}
-          {(warnings.length > 0 || (result?.warnings.length ?? 0) > 0) && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <p className="mb-1.5 flex items-center gap-1.5 text-sm font-bold text-amber-800">
-                <AlertTriangle className="size-4" /> Review warnings
-              </p>
-              {/* run-level notes and employees left out of the run (they have no payslip to carry them) */}
-              {result?.warnings.map((w, i) => (
-                <p key={`r${i}`} className="text-xs text-amber-700">
-                  • {w.employee === 'This run' ? '' : `${w.employee}: `}{w.warnings.join('; ')}
-                </p>
-              ))}
-              {warnings.map((w, i) => (
-                <p key={i} className="text-xs text-amber-700">• {w.name}: {w.warning}</p>
-              ))}
-            </div>
-          )}
+          {notices && <div className="hidden space-y-4 xl:block">{notices}</div>}
           <dl className="space-y-3 rounded-xl border border-slate-200/80 bg-white p-4 text-sm">
             <RunFact label="Pay period" value={fmtPeriod(run.period_start, run.period_end)} />
             <RunFact label="Pay date" value={fmtDate(run.pay_date)} />
@@ -744,7 +767,7 @@ function AdjustmentModal({
 }) {
   const toast = useToast()
   const [f, setF] = useState({
-    employee_id: initialEmployeeId ?? employees[0]?.id ?? '',
+    employee_id: initialEmployeeId && employees.some((e) => e.id === initialEmployeeId) ? initialEmployeeId : (employees[0]?.id ?? ''),
     kind: initialKind as string,
     label: '',
     amount: '',
@@ -753,7 +776,7 @@ function AdjustmentModal({
   const [busy, setBusy] = useState(false)
 
   async function save() {
-    if (!f.employee_id || !f.label.trim() || !(Number(f.amount) > 0)) {
+    if (!employees.some((e) => e.id === f.employee_id) || !f.label.trim() || !(Number(f.amount) > 0)) {
       toast('error', 'Employee, label and a positive amount are required.')
       return
     }

@@ -1,10 +1,10 @@
 import { FilePen } from 'lucide-react'
-import type { TimeEntry } from '../lib/db'
+import type { Holiday, TimeEntry } from '../lib/db'
 import { fmtHours, fmtTime } from '../lib/format'
 import { eachDate, manilaInstant } from '../lib/manila'
 import { dayTimeline, shiftOn, timelineWindow, type SegmentKind } from '../lib/timeline'
 import type { WorkSchedule } from '../payroll/types'
-import { Badge } from './ui'
+import { Badge, EmptyState } from './ui'
 
 const LOOK: Record<SegmentKind | 'leave', { label: string; bar: string }> = {
   late: { label: 'Late', bar: 'bg-late text-white' },
@@ -35,7 +35,7 @@ function dayTitle(date: string, today: string) {
   })
 }
 
-export function TimelineLegend() {
+function TimelineLegend() {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-slate-500">
       {(['work', 'break', 'late', 'overtime', 'leave'] as const).map((k) => (
@@ -62,16 +62,23 @@ export default function AttendanceTimeline({
   to,
   today,
   graceMinutes = 0,
+  holidays = [],
+  emptyTitle = 'Nothing recorded yet',
+  emptySub,
   onRequestFix,
 }: {
   entries: TimeEntry[]
   schedule: WorkSchedule | null | undefined
   /** the client's late grace period, so "late" matches payroll */
   graceMinutes?: number
+  /** the client's holidays in [from, to]: payroll charges no tardiness on non-working ones */
+  holidays?: Pick<Holiday, 'holiday_date' | 'kind' | 'name'>[]
   leaves?: TimelineLeave[]
   from: string
   to: string
   today: string
+  emptyTitle?: string
+  emptySub?: string
   onRequestFix?: (entry: TimeEntry) => void
 }) {
   const last = to < today ? to : today
@@ -84,11 +91,13 @@ export default function AttendanceTimeline({
     .reverse()
     .map((date) => {
       const mine = entries.filter((e) => e.work_date === date)
+      const holiday = holidays.find((h) => h.holiday_date === date)
       const line = dayTimeline(date, mine, schedule, {
         now: date === today ? new Date().toISOString() : undefined,
         graceMinutes,
+        holiday: !!holiday && holiday.kind !== 'special_working',
       })
-      return { date, entries: mine, line, leave: mine.length ? undefined : leaveOn(date) }
+      return { date, entries: mine, line, holiday, leave: mine.length ? undefined : leaveOn(date) }
     })
   const [lo, hi] = timelineWindow(
     days.map((d) => d.line),
@@ -100,11 +109,14 @@ export default function AttendanceTimeline({
   for (let m = lo; m <= hi; m += step) ticks.push(m)
   const pct = (m: number) => ((m - lo) / span) * 100
 
-  if (days.length === 0) return null
+  if (days.length === 0) return <EmptyState title={emptyTitle} sub={emptySub} />
 
   return (
     <div className="space-y-3">
-      {days.map(({ date, entries: mine, line, leave }) => {
+      <div className="pb-1">
+        <TimelineLegend />
+      </div>
+      {days.map(({ date, entries: mine, line, holiday, leave }) => {
         const flags = [...new Set(mine.flatMap((e) => e.flags.filter((f) => f !== 'corrected')))]
         const corrected = mine.some((e) => e.manually_edited)
         const firstEntry = [...mine].sort((a, b) => a.clock_in.localeCompare(b.clock_in))[0]
@@ -120,6 +132,11 @@ export default function AttendanceTimeline({
                 {flags.map((f) => (
                   <Badge key={f} tone="amber">{f.replaceAll('_', ' ')}</Badge>
                 ))}
+                {holiday && (
+                  <Badge tone={holiday.kind === 'regular' ? 'red' : holiday.kind === 'special_non_working' ? 'amber' : 'slate'} dot={false}>
+                    {holiday.name}
+                  </Badge>
+                )}
                 {leave && <Badge tone="amber">{leave.label}</Badge>}
                 {onRequestFix &&
                   mine.map((e, i) => (

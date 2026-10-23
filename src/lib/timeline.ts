@@ -49,7 +49,8 @@ export function shiftOn(date: string, schedule: WorkSchedule | null | undefined)
  * Splits a day's entries into drawable segments: time worked inside the
  * shift, overtime past the shift end, gaps between entries as breaks, and
  * the stretch from the shift start to a late first time in — late as payroll
- * counts it: after the shift start plus the client's grace period. With
+ * counts it: only on an ordinary working day (a non-working `holiday` has no
+ * tardiness) and after the shift start plus the client's grace period. With
  * `now`, an entry without a time out is drawn up to now (marked live) but not
  * counted as worked.
  */
@@ -57,7 +58,11 @@ export function dayTimeline(
   date: string,
   entries: EntrySpan[],
   schedule: WorkSchedule | null | undefined,
-  { now: nowIso, graceMinutes = 0 }: { now?: string; graceMinutes?: number } = {},
+  {
+    now: nowIso,
+    graceMinutes = 0,
+    holiday = false,
+  }: { now?: string; graceMinutes?: number; holiday?: boolean } = {},
 ): DayTimeline {
   const now = nowIso ? minutesFrom(date, nowIso) : null
   const spans = entries
@@ -71,7 +76,7 @@ export function dayTimeline(
   const shift = shiftOn(date, schedule)
   const segments: Segment[] = []
   const firstIn = spans.length ? spans[0].a : null
-  const late = shift !== null && firstIn !== null && firstIn > shift[0] + graceMinutes
+  const late = !holiday && shift !== null && firstIn !== null && firstIn > shift[0] + graceMinutes
   if (late && shift && firstIn !== null) segments.push({ kind: 'late', from: shift[0], to: Math.min(firstIn, shift[1]) })
 
   let prevEnd: number | null = null
