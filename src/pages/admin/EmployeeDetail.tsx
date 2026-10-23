@@ -60,7 +60,7 @@ import type {
   TimeEntry,
 } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtDateTime, fmtHours, fullName, money } from '../../lib/format'
+import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
 import {
   ALLOWANCE_BASIS_LABELS,
   ALLOWANCE_CATEGORY_LABELS,
@@ -165,7 +165,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
           <IconButton round label="All employees" onClick={() => navigate('/admin/employees')}>
             <ArrowLeft className="size-4" />
           </IconButton>
-          <Avatar name={name} size="lg" />
+          <Avatar name={name} initials={personInitials(employee)} size="lg" />
           <div className="min-w-0">
             <h1 className="truncate text-xl font-bold text-ink-900">{name}</h1>
             <div className="mt-1 flex flex-wrap gap-1.5">
@@ -243,6 +243,7 @@ function HeaderFact({ label, value }: { label: string; value: string }) {
 function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entity }) {
   const today = todayManila()
   const graceMinutes = Number(entity.grace_period_minutes) || 0
+  const standardHoursPerDay = Number(entity.standard_hours_per_day) || 8
   const [month, setMonth] = useState(today.slice(0, 7))
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [leaves, setLeaves] = useState<TimelineLeave[]>([])
@@ -301,14 +302,13 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
     const t = y * 12 + (m - 1) + n
     setMonth(`${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`)
   }
-  const offDays = new Set(holidays.filter((h) => h.kind !== 'special_working').map((h) => h.holiday_date))
   const days = [...new Set(entries.map((e) => e.work_date))]
   const worked = days.map((d) =>
     dayTimeline(
       d,
       entries.filter((e) => e.work_date === d),
       employee.work_schedule,
-      { graceMinutes, holiday: offDays.has(d) },
+      { graceMinutes, standardHoursPerDay, holidays },
     ),
   )
   // charged leave days, as leave is counted elsewhere: scheduled workdays, not holidays
@@ -339,7 +339,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
       </div>
       <StatGroup bare className="border-b border-slate-200/80">
         <StatCard label="Days recorded" value={days.length} />
-        <StatCard label="Hours on record" value={fmtHours(worked.reduce((sum, d) => sum + d.workedMinutes, 0))} />
+        <StatCard label="Hours worked" value={fmtHours(worked.reduce((sum, d) => sum + d.workedMinutes, 0))} sub="net of unpaid breaks" />
         <StatCard label="Late time in" value={worked.filter((d) => d.late).length} tone={worked.some((d) => d.late) ? 'warn' : 'default'} />
         <StatCard label="No time out" value={worked.filter((d) => d.open).length} tone={worked.some((d) => d.open) ? 'warn' : 'default'} />
         <StatCard label="Leave days" value={leaveDays} sub="approved" />
@@ -354,6 +354,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
             entries={entries}
             schedule={employee.work_schedule}
             graceMinutes={graceMinutes}
+            standardHoursPerDay={standardHoursPerDay}
             holidays={holidays}
             leaves={leaves}
             from={start}

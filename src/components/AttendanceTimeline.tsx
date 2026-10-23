@@ -2,7 +2,7 @@ import { FilePen } from 'lucide-react'
 import type { Holiday, TimeEntry } from '../lib/db'
 import { fmtHours, fmtTime } from '../lib/format'
 import { eachDate, manilaInstant } from '../lib/manila'
-import { dayTimeline, shiftOn, timelineWindow, type SegmentKind } from '../lib/timeline'
+import { dayTimeline, shiftOn, timelineTicks, timelineWindow, type DayTimeline, type SegmentKind } from '../lib/timeline'
 import type { WorkSchedule } from '../payroll/types'
 import { Badge, EmptyState } from './ui'
 
@@ -35,6 +35,16 @@ function dayTitle(date: string, today: string) {
   })
 }
 
+/** Hours as payroll counts them: net of the unpaid break, open entries excluded. */
+function HoursValue({ line }: { line: DayTimeline }) {
+  return (
+    <p className="text-sm font-semibold text-ink-900" title="Worked hours as payroll counts them (net of the unpaid break)">
+      {line.workedMinutes ? fmtHours(line.workedMinutes) : '—'}
+      {line.otMinutes > 0 && <span className="block text-[11px] font-medium text-slate-500">incl. {fmtHours(line.otMinutes)} OT</span>}
+    </p>
+  )
+}
+
 function TimelineLegend() {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-slate-500">
@@ -62,6 +72,7 @@ export default function AttendanceTimeline({
   to,
   today,
   graceMinutes = 0,
+  standardHoursPerDay = 8,
   holidays = [],
   emptyTitle = 'Nothing recorded yet',
   emptySub,
@@ -69,8 +80,9 @@ export default function AttendanceTimeline({
 }: {
   entries: TimeEntry[]
   schedule: WorkSchedule | null | undefined
-  /** the client's late grace period, so "late" matches payroll */
+  /** the client's late grace period and standard day, so late, overtime and hours match payroll */
   graceMinutes?: number
+  standardHoursPerDay?: number
   /** the client's holidays in [from, to]: payroll charges no tardiness on non-working ones */
   holidays?: Pick<Holiday, 'holiday_date' | 'kind' | 'name'>[]
   leaves?: TimelineLeave[]
@@ -82,7 +94,13 @@ export default function AttendanceTimeline({
   onRequestFix?: (entry: TimeEntry) => void
 }) {
   const last = to < today ? to : today
-  const leaveOn = (date: string) => leaves.find((l) => l.start_date <= date && l.end_date >= date)
+  const holidayOn = (date: string) => holidays.find((h) => h.holiday_date === date)
+  // leave covers workdays only: rest days and non-working holidays are no leave days
+  const leaveOn = (date: string) => {
+    const h = holidayOn(date)
+    if (!shiftOn(date, schedule) || (h && h.kind !== 'special_working')) return undefined
+    return leaves.find((l) => l.start_date <= date && l.end_date >= date)
+  }
   const dates = new Set(entries.map((e) => e.work_date))
   if (last >= from) for (const d of eachDate(from, last)) if (leaveOn(d)) dates.add(d)
   const days = [...dates]
@@ -91,11 +109,12 @@ export default function AttendanceTimeline({
     .reverse()
     .map((date) => {
       const mine = entries.filter((e) => e.work_date === date)
-      const holiday = holidays.find((h) => h.holiday_date === date)
+      const holiday = holidayOn(date)
       const line = dayTimeline(date, mine, schedule, {
         now: date === today ? new Date().toISOString() : undefined,
         graceMinutes,
-        holiday: !!holiday && holiday.kind !== 'special_working',
+        standardHoursPerDay,
+        holidays,
       })
       return { date, entries: mine, line, holiday, leave: mine.length ? undefined : leaveOn(date) }
     })
@@ -104,9 +123,7 @@ export default function AttendanceTimeline({
     days.map((d) => shiftOn(d.date, schedule)),
   )
   const span = hi - lo
-  const step = span > 1440 ? 240 : 120
-  const ticks: number[] = []
-  for (let m = lo; m <= hi; m += step) ticks.push(m)
+  const ticks = timelineTicks(lo, hi)
   const pct = (m: number) => ((m - lo) / span) * 100
 
   if (days.length === 0) return <EmptyState title={emptyTitle} sub={emptySub} />
@@ -163,23 +180,29 @@ export default function AttendanceTimeline({
                 </div>
                 <div className="md:hidden">
                   <p className="text-xs text-slate-500">Hours</p>
-                  <p className="text-sm font-semibold text-ink-900">{line.workedMinutes ? fmtHours(line.workedMinutes) : '—'}</p>
+                  <HoursValue line={line} />
                 </div>
               </div>
               <div className="min-w-0 md:border-l md:border-slate-200 md:pl-4">
                 <div aria-hidden="true" className="relative mb-1.5 hidden h-4 text-[11px] text-slate-400 sm:block">
-                  {ticks.map((m, i) => (
-                    <span
-                      key={m}
-                      className="absolute top-0 whitespace-nowrap"
-                      style={{
-                        left: `${pct(m)}%`,
-                        transform: i === 0 ? undefined : i === ticks.length - 1 ? 'translateX(-100%)' : 'translateX(-50%)',
-                      }}
-                    >
-                      {m === hi && m % 1440 === 0 ? '23:59' : clock(m)}
-                    </span>
-                  ))}
+                  {ticks.map((m, i) => {
+                    const end = i === ticks.length - 1
+                    return (
+                      <span
+                        key={m}
+                        // every other label only on narrower bars, so neighbours never collide
+                        className={`absolute top-0 whitespace-nowrap ${i % 2 === 1 && !end ? 'hidden lg:inline' : ''} ${
+                          !end && i === ticks.length - 2 ? 'max-lg:hidden' : ''
+                        }`}
+                        style={{
+                          left: `${pct(m)}%`,
+                          transform: i === 0 ? undefined : end ? 'translateX(-100%)' : 'translateX(-50%)',
+                        }}
+                      >
+                        {end && m % 1440 === 0 ? '23:59' : clock(m)}
+                      </span>
+                    )
+                  })}
                 </div>
                 <div className="relative h-6 overflow-hidden rounded-md bg-slate-100">
                   {leave ? (
@@ -193,7 +216,7 @@ export default function AttendanceTimeline({
                         <span
                           key={i}
                           title={`${LOOK[s.kind].label} ${clock(s.from)}–${s.live ? 'now' : clock(s.to)}`}
-                          className={`absolute inset-y-0 flex items-center justify-center overflow-hidden border-x border-white text-[10px] font-semibold ${LOOK[s.kind].bar} ${s.live ? 'opacity-60' : ''}`}
+                          className={`absolute inset-y-0 flex items-center justify-center overflow-hidden border-x border-white text-[10px] font-semibold ${LOOK[s.kind].bar}`}
                           style={{ left: `${pct(s.from)}%`, width: `${w}%` }}
                         >
                           {w > 9 && <span className="truncate px-1">{s.live ? 'In progress' : LOOK[s.kind].label}</span>}
@@ -210,7 +233,7 @@ export default function AttendanceTimeline({
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Hours</p>
-                  <p className="text-sm font-semibold text-ink-900">{line.workedMinutes ? fmtHours(line.workedMinutes) : '—'}</p>
+                  <HoursValue line={line} />
                 </div>
               </div>
             </div>

@@ -43,6 +43,7 @@ export default function MyAttendance() {
   const [leaves, setLeaves] = useState<TimelineLeave[]>([])
   const [view, setView] = useState<'timeline' | 'list'>('timeline')
   const [graceMinutes, setGraceMinutes] = useState(0)
+  const [standardHoursPerDay, setStandardHoursPerDay] = useState(8)
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const seq = useRef(0)
 
@@ -76,13 +77,14 @@ export default function MyAttendance() {
         .eq('status', 'approved')
         .lte('start_date', end)
         .gte('end_date', start),
-      // "late" on the timeline follows payroll: an ordinary working day (not a
-      // non-working holiday), after the shift start plus the client's grace period
-      supabase.from('entities').select('grace_period_minutes').eq('id', employee.entity_id).maybeSingle(),
+      // late, overtime and hours on the timeline follow payroll: the client's
+      // grace period, standard day and holidays
+      supabase.from('entities').select('grace_period_minutes, standard_hours_per_day').eq('id', employee.entity_id).maybeSingle(),
       getHolidaysBetween(employee.entity_id, start, end).catch(() => [] as Holiday[]),
     ])
     if (my !== seq.current) return
     setGraceMinutes(Number(client?.grace_period_minutes) || 0)
+    setStandardHoursPerDay(Number(client?.standard_hours_per_day) || 8)
     setHolidays(hol)
     setEntries((ent ?? []) as TimeEntry[])
     setRequests((reqs ?? []) as TimeCorrectionRequest[])
@@ -153,20 +155,19 @@ export default function MyAttendance() {
 
   if (!employee) return <Spinner />
 
-  const totalMinutes = entries
-    .filter((e) => e.clock_out)
-    .reduce((s, e) => s + (new Date(e.clock_out!).getTime() - new Date(e.clock_in).getTime()) / 60000, 0)
   const monthStart = `${monthStr}-01`
   const days = [...new Set(entries.map((e) => e.work_date))]
-  const lateDays = days.filter(
-    (d) =>
-      dayTimeline(
-        d,
-        entries.filter((e) => e.work_date === d),
-        employee.work_schedule,
-        { graceMinutes, holiday: holidays.some((h) => h.holiday_date === d && h.kind !== 'special_working') },
-      ).late,
-  ).length
+  // the same per-day figures the timeline shows, as payroll counts them
+  const dayFacts = days.map((d) =>
+    dayTimeline(
+      d,
+      entries.filter((e) => e.work_date === d),
+      employee.work_schedule,
+      { graceMinutes, standardHoursPerDay, holidays },
+    ),
+  )
+  const workedMinutes = dayFacts.reduce((sum, d) => sum + d.workedMinutes, 0)
+  const lateDays = dayFacts.filter((d) => d.late).length
   const openEntries = entries.filter((e) => !e.clock_out).length
 
   return (
@@ -195,7 +196,7 @@ export default function MyAttendance() {
         <div className="space-y-6">
           <StatGroup>
             <StatCard label="Days recorded" value={days.length} sub={`${plural(entries.length, 'entry', 'entries')}`} />
-            <StatCard label="Hours on record" value={fmtHours(totalMinutes)} />
+            <StatCard label="Hours worked" value={fmtHours(workedMinutes)} sub="net of unpaid breaks" />
             <StatCard label="Late time in" value={lateDays} tone={lateDays > 0 ? 'warn' : 'default'} sub="workdays, after the shift start and grace period" />
             <StatCard label="No time out" value={openEntries} tone={openEntries > 0 ? 'warn' : 'default'} />
             <StatCard label="Pending corrections" value={requests.filter((r) => r.status === 'pending').length} />
@@ -221,6 +222,7 @@ export default function MyAttendance() {
                 entries={entries}
                 schedule={employee.work_schedule}
                 graceMinutes={graceMinutes}
+                standardHoursPerDay={standardHoursPerDay}
                 holidays={holidays}
                 leaves={leaves}
                 from={monthStart}

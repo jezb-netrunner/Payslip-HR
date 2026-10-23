@@ -18,6 +18,7 @@ import { fmtDate, fmtDateTime, fmtHours, fullName, plural } from '../../lib/form
 import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import { notifyPendingChanged } from '../../lib/pending'
 
 export default function Timesheets() {
   const { entity } = useEntity()
@@ -873,6 +874,7 @@ function Corrections({ entity }: { entity: Entity }) {
     if (error) toast('error', errorMessage(error, 'Review failed'))
     else {
       toast('success', approve ? 'Correction applied.' : 'Request rejected.')
+      notifyPendingChanged()
       await load()
     }
   }

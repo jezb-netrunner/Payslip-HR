@@ -54,7 +54,7 @@
   --color-slate-200: #e6e6ed;
   --color-slate-300: #d4d5de;
   --color-slate-400: #9fa1ae;
-  --color-slate-500: #767888;
+  --color-slate-500: #6b6d7c; /* 5.1:1 on white, 4.6:1 on the canvas: secondary text passes WCAG AA */
   --color-slate-600: #5a5c6b;
   --color-slate-700: #41434f;
   --color-slate-800: #2b2c38;
@@ -66,7 +66,7 @@
   --color-work: #1d6fb1;
   --color-break: #2fae98;
   --color-overtime: #e8760f;
-  --color-late: #d9472b;
+  --color-late: #c43e24; /* white labels 5.2:1 */
   --color-dayoff: #eda100;
 }
 

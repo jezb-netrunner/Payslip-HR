@@ -6,7 +6,7 @@ import { Avatar, Button, Card, Donut, EmptyState, LoadFailed, Modal, Spinner, St
 import { useAuth } from '../../lib/auth'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, TimeEntry } from '../../lib/db'
-import { fmtDate, fmtDateTime, fmtHours, fullName, money } from '../../lib/format'
+import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
 import { leaveDaysInYear, showsBalance } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -95,7 +95,7 @@ export default function MyDashboard() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Avatar name={fullName(employee)} size="lg" />
+        <Avatar name={fullName(employee)} initials={personInitials(employee)} size="lg" />
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-ink-900 sm:text-[28px]">Hello, {employee.first_name}!</h1>
           <p className="text-sm text-slate-500">{entity?.name} · {fmtDate(today)}</p>

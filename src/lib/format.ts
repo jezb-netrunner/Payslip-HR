@@ -74,6 +74,11 @@ export function fullName(e: {
   return [e.first_name, e.middle_name, e.last_name, e.suffix].filter(Boolean).join(' ')
 }
 
+/** First and last name initials ("Jose Miguel Santos Dela Cruz" → "JD"). */
+export function personInitials(e: { first_name: string; last_name: string }): string {
+  return `${e.first_name.trim()[0] ?? ''}${e.last_name.trim()[0] ?? ''}`.toUpperCase()
+}
+
 export function initials(name: string): string {
   return name
     .split(/\s+/)

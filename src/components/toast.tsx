@@ -35,11 +35,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={push}>
       {children}
-      <div aria-live="polite" className="fixed right-4 top-3 z-[100] flex w-[min(26rem,calc(100vw-2rem))] flex-col gap-2">
+      {/* below the 64px top bar: over it, toasts hid the client switcher, Quick add and Account for 5 s */}
+      <div role="status" aria-live="polite" className="fixed right-4 top-[4.5rem] z-[100] flex w-[min(26rem,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}
-            role={t.kind === 'error' ? 'alert' : 'status'}
             className="flex items-center gap-3 rounded-xl bg-ink-900 py-2.5 pl-2.5 pr-2 text-white shadow-xl ring-1 ring-white/10"
           >
             <span className={`w-1 self-stretch rounded-full ${looks[t.kind].stripe}`} />

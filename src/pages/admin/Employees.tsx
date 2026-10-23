@@ -26,7 +26,7 @@ import { getEmployees, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import type { Employee, EmploymentStatus, Entity, PaymentMethod } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fullName, money } from '../../lib/format'
+import { fmtDate, fullName, money, personInitials } from '../../lib/format'
 import {
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
@@ -222,7 +222,7 @@ function EmployeeList({ entity }: { entity: Entity }) {
                 <tr key={e.id} className="cursor-pointer" onClick={() => navigate(`/admin/employees/${e.id}`)}>
                   <Td>
                     <div className="flex items-center gap-3">
-                      <Avatar name={fullName(e)} size="sm" />
+                      <Avatar name={fullName(e)} initials={personInitials(e)} size="sm" />
                       <div>
                         {/* a real link: keyboard and screen-reader users can open the record too */}
                         <Link
@@ -318,7 +318,7 @@ function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen
         {e.is_minimum_wage_earner && <Badge tone="orange" dot={false}>MWE</Badge>}
       </div>
       <div className="mt-3 flex flex-col items-center text-center">
-        <Avatar name={fullName(e)} size="xl" />
+        <Avatar name={fullName(e)} initials={personInitials(e)} size="xl" />
         <p className="mt-3 font-bold text-ink-900">{fullName(e)}</p>
         <p className="text-sm text-slate-500">{e.position || 'No position yet'}</p>
       </div>

@@ -1,6 +1,13 @@
 import { Inbox, X } from 'lucide-react'
 import { createContext, useContext, useEffect, useId } from 'react'
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
+import type {
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+} from 'react'
 import { useEntity } from '../lib/entity'
 import { initials } from '../lib/format'
 
@@ -16,11 +23,12 @@ export function LogoMark({ className = 'size-7' }: { className?: string }) {
   )
 }
 
-export function Logo({ dark = false, className = '' }: { dark?: boolean; className?: string }) {
+/** `compact` drops the wordmark on the narrowest phones (the mark stays). */
+export function Logo({ dark = false, compact = false, className = '' }: { dark?: boolean; compact?: boolean; className?: string }) {
   return (
     <span className={`inline-flex items-center gap-2 ${className}`}>
       <LogoMark />
-      <span className={`text-lg font-extrabold tracking-tight ${dark ? 'text-ink-900' : 'text-white'}`}>
+      <span className={`text-lg font-extrabold tracking-tight ${dark ? 'text-ink-900' : 'text-white'} ${compact ? 'hidden min-[380px]:inline' : ''}`}>
         payslip<span className="text-accent-500">hr</span>
       </span>
     </span>
@@ -53,7 +61,7 @@ export function Button({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: keyof typeof buttonSizes }) {
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 focus-visible:ring-offset-1 disabled:cursor-not-allowed ${buttonSizes[size]} ${variantClasses[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed ${buttonSizes[size]} ${variantClasses[variant]} ${className}`}
       {...props}
     />
   )
@@ -267,8 +275,22 @@ const avatarSizes = {
   xl: 'size-20 text-2xl',
 }
 
-/** Initials on a soft colour picked from the name, so a person keeps one colour everywhere. */
-export function Avatar({ name, size = 'md', className = '' }: { name: string; size?: keyof typeof avatarSizes; className?: string }) {
+/**
+ * Initials on a soft colour picked from the name, so a person keeps one colour
+ * everywhere. Pass `initials` when first and last name are known: the first
+ * two words of a full name are often first and middle name.
+ */
+export function Avatar({
+  name,
+  initials: given,
+  size = 'md',
+  className = '',
+}: {
+  name: string
+  initials?: string
+  size?: keyof typeof avatarSizes
+  className?: string
+}) {
   let h = 0
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0
   return (
@@ -276,7 +298,7 @@ export function Avatar({ name, size = 'md', className = '' }: { name: string; si
       aria-hidden="true"
       className={`inline-flex shrink-0 items-center justify-center rounded-full font-bold ${avatarSizes[size]} ${avatarTones[h % avatarTones.length]} ${className}`}
     >
-      {initials(name) || '?'}
+      {(given || initials(name)).toUpperCase() || '?'}
     </span>
   )
 }
@@ -291,7 +313,7 @@ const badgeTones: Record<string, { chip: string; dot: string }> = {
   blue: { chip: 'bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-200/70', dot: 'bg-work' },
   orange: { chip: 'bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200/70', dot: 'bg-overtime' },
   violet: { chip: 'bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200/70', dot: 'bg-violet-500' },
-  solid: { chip: 'bg-leaf-400 text-white', dot: 'bg-white' },
+  solid: { chip: 'bg-leaf-700 text-white', dot: 'bg-leaf-200' },
   dark: { chip: 'bg-ink-900 text-white', dot: 'bg-accent-400' },
 }
 
@@ -363,11 +385,19 @@ export function Field({
 }
 
 const inputClass =
-  'rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder-slate-400 shadow-xs transition-colors focus:border-brand-500 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-slate-500'
+  'rounded-lg border px-3 py-2 text-sm text-ink-900 placeholder-slate-400 shadow-xs transition-colors focus:border-brand-500 focus:outline-none focus:ring-3 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-slate-500'
 
-/** Full width unless the caller sets a width (CSS order, not class order, decides between two widths). */
+/**
+ * Defaults the caller didn't set: full width, a grey border, a white field.
+ * CSS order, not class order, decides between two utilities for the same
+ * property, so a caller's width or colours only win if the default is left out.
+ */
 function controlClass(className?: string): string {
-  return `${inputClass} ${/(^|\s)w-/.test(className ?? '') ? '' : 'w-full '}${className ?? ''}`
+  const c = className ?? ''
+  const width = /(^|\s)w-/.test(c) ? '' : 'w-full '
+  const border = /(^|\s)border-[a-z]+-\d/.test(c) ? '' : 'border-slate-200 '
+  const bg = /(^|\s)bg-/.test(c) ? '' : 'bg-white '
+  return `${inputClass} ${width}${border}${bg}${c}`
 }
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
@@ -483,6 +513,30 @@ export function EmptyState({ title, sub }: { title: string; sub?: string }) {
   )
 }
 
+/**
+ * Keyboard model of ARIA tabs and radio groups: only the selected option is in
+ * the tab order; arrows move to and pick the next/previous one, Home/End the
+ * ends.
+ */
+function arrowSelect(e: ReactKeyboardEvent<HTMLElement>, keys: string[], current: string, pick: (k: string) => void) {
+  const i = keys.indexOf(current)
+  const n = keys.length
+  const j =
+    e.key === 'ArrowRight' || e.key === 'ArrowDown'
+      ? (i + 1) % n
+      : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+        ? (i - 1 + n) % n
+        : e.key === 'Home'
+          ? 0
+          : e.key === 'End'
+            ? n - 1
+            : -1
+  if (j < 0 || n === 0) return
+  e.preventDefault()
+  pick(keys[j])
+  e.currentTarget.querySelectorAll<HTMLElement>('[data-option]')[j]?.focus()
+}
+
 /** Underlined section tabs with optional icons and counts. */
 export function Tabs({
   tabs,
@@ -494,7 +548,18 @@ export function Tabs({
   onChange: (key: string) => void
 }) {
   return (
-    <div role="tablist" className="no-scrollbar mb-6 flex gap-2 overflow-x-auto border-b border-slate-200">
+    <div
+      role="tablist"
+      onKeyDown={(e) =>
+        arrowSelect(
+          e,
+          tabs.map((t) => t.key),
+          active,
+          onChange,
+        )
+      }
+      className="mb-6 flex flex-wrap gap-x-2 border-b border-slate-200"
+    >
       {tabs.map((t) => {
         const on = active === t.key
         return (
@@ -502,7 +567,9 @@ export function Tabs({
             key={t.key}
             type="button"
             role="tab"
+            data-option
             aria-selected={on}
+            tabIndex={on ? 0 : -1}
             onClick={() => onChange(t.key)}
             className={`-mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-[3px] px-2.5 pb-3 pt-1.5 text-sm transition-colors [&>svg]:size-4 ${
               on ? 'border-ink-900 font-semibold text-ink-900' : 'border-transparent font-medium text-slate-500 hover:text-ink-900'
@@ -533,13 +600,27 @@ export function Segmented<K extends string>({
   label: string
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-xl bg-slate-100 p-1">
+    <div
+      role="radiogroup"
+      aria-label={label}
+      onKeyDown={(e) =>
+        arrowSelect(
+          e,
+          options.map((o) => o.key),
+          value,
+          (k) => onChange(k as K),
+        )
+      }
+      className="inline-flex rounded-xl bg-slate-100 p-1"
+    >
       {options.map((o) => (
         <button
           key={o.key}
           type="button"
           role="radio"
+          data-option
           aria-checked={value === o.key}
+          tabIndex={value === o.key ? 0 : -1}
           onClick={() => onChange(o.key)}
           className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-colors [&>svg]:size-4 ${
             value === o.key ? 'bg-ink-900 text-white shadow-sm' : 'text-slate-500 hover:text-ink-900'

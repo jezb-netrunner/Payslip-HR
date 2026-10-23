@@ -26,8 +26,9 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
 import { useEntity } from '../lib/entity'
-import { fullName, initials } from '../lib/format'
+import { fullName, initials, personInitials } from '../lib/format'
 import { ROLE_LABELS } from '../lib/labels'
+import { onPendingChanged } from '../lib/pending'
 import { supabase } from '../lib/supabase'
 import ChangePassword from './ChangePassword'
 import { Avatar, Logo, Modal } from './ui'
@@ -176,7 +177,7 @@ function EntitySwitcher({ variant }: { variant: 'bar' | 'drawer' }) {
           onChange={(e) => setEntityId(e.target.value)}
           className={`w-full appearance-none truncate rounded-xl py-2 pl-9 pr-8 text-sm font-semibold focus:outline-none focus:ring-2 ${
             bar
-              ? 'max-w-[15rem] bg-ink-800 text-white hover:bg-ink-700 focus:ring-accent-400 [&_optgroup]:bg-white [&_optgroup]:text-ink-900 [&_option]:bg-white [&_option]:text-ink-900'
+              ? 'max-w-[13rem] bg-ink-800 text-white hover:bg-ink-700 focus:ring-accent-400 [&_optgroup]:bg-white [&_optgroup]:text-ink-900 [&_option]:bg-white [&_option]:text-ink-900'
               : 'border border-slate-200 bg-white text-ink-900 focus:ring-brand-200'
           }`}
         >
@@ -199,13 +200,19 @@ function EntitySwitcher({ variant }: { variant: 'bar' | 'drawer' }) {
           className={`pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 ${bar ? 'text-white/60' : 'text-slate-400'}`}
         />
       </span>
-      {entity && !entity.is_active && (
-        <span
-          className={`whitespace-nowrap text-[11px] font-semibold ${bar ? 'rounded-md bg-amber-400/15 px-2 py-1 text-amber-300' : 'mt-1 block text-amber-600'}`}
-        >
-          Archived — its entity admins are locked out
-        </span>
-      )}
+      {entity &&
+        !entity.is_active &&
+        (bar ? (
+          // short in the bar: the full sentence pushed Quick add and Account off narrower screens
+          <span
+            title="Archived client — its entity admins are locked out"
+            className="shrink-0 rounded-md bg-amber-400/15 px-2 py-1 text-[11px] font-semibold text-amber-300"
+          >
+            Archived
+          </span>
+        ) : (
+          <span className="mt-1 block text-[11px] font-semibold text-amber-600">Archived — its entity admins are locked out</span>
+        ))}
     </label>
   )
 }
@@ -220,7 +227,8 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   const [accountOpen, setAccountOpen] = useState(false)
   const [changingPw, setChangingPw] = useState(false)
   const [employerName, setEmployerName] = useState('')
-  const [counts, setCounts] = useState<Record<Counter, number>>({ corrections: 0, leaves: 0 })
+  const [counts, setCounts] = useState<{ entityId: string; corrections: number; leaves: number } | null>(null)
+  const [countsTick, setCountsTick] = useState(0)
   const quickRef = useDismiss(quickOpen, () => setQuickOpen(false))
   const accountRef = useDismiss(accountOpen, () => setAccountOpen(false))
 
@@ -239,9 +247,10 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
       .then(({ data }) => setEmployerName((data?.name as string) ?? ''))
   }, [mode, employee])
 
-  // requests waiting on an admin in the selected client; refreshed on every
-  // navigation so approving one elsewhere clears the badge soon after
+  // requests waiting on an admin in the selected client: refreshed on every
+  // navigation and whenever a page approves, rejects or files one
   const entityId = mode === 'admin' ? entity?.id : undefined
+  useEffect(() => onPendingChanged(() => setCountsTick((n) => n + 1)), [])
   useEffect(() => {
     if (!entityId) return
     let stale = false
@@ -249,18 +258,19 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
       supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entityId).eq('status', 'pending'),
       supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entityId).eq('status', 'pending'),
     ]).then(([corr, leaves]) => {
-      if (!stale) setCounts({ corrections: corr.count ?? 0, leaves: leaves.count ?? 0 })
+      if (!stale) setCounts({ entityId, corrections: corr.count ?? 0, leaves: leaves.count ?? 0 })
     })
     return () => {
       stale = true
     }
-  }, [entityId, pathname])
+  }, [entityId, pathname, countsTick])
 
   const displayName =
     mode === 'employee' && employee ? fullName(employee) : profile?.full_name || profile?.email || '?'
+  const avatarInitials = mode === 'employee' && employee ? personInitials(employee) : undefined
   const roleLabel =
     mode === 'admin' ? ROLE_LABELS[profile?.role ?? 'employee'] : employerName || 'Employee'
-  const count = (n: NavItem) => (n.counter && entityId ? counts[n.counter] : 0)
+  const count = (n: NavItem) => (n.counter && counts && counts.entityId === entityId ? counts[n.counter] : 0)
   const orgBadge = mode === 'admin' ? (entity?.code ?? '—').slice(0, 3) : initials(employerName || 'PH')
   const orgTitle = mode === 'admin' ? (entity ? `${entity.name} (${entity.code})` : 'No client selected') : employerName
 
@@ -279,7 +289,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
             to={n.to}
             end={n.end}
             className={({ isActive: on }) =>
-              `flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3.5 py-2 text-sm font-medium transition-colors ${
+              `flex shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
                 on ? 'bg-ink-800 text-white' : 'text-white/55 hover:text-white'
               }`
             }
@@ -305,8 +315,8 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
           >
             <Menu className="size-5" />
           </button>
-          <Link to={mode === 'admin' ? '/admin' : '/me'} aria-label="Home" className="shrink-0">
-            <Logo />
+          <Link to={mode === 'admin' ? '/admin' : '/me'} aria-label="Payslip HR home" className="shrink-0">
+            <Logo compact />
           </Link>
           {mode === 'admin' && (
             // phones have no room for the client switcher: always show which client is open
@@ -314,7 +324,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
               type="button"
               onClick={() => setDrawer(true)}
               title={entity ? `Working on ${entity.name} (${entity.code}) — tap to switch` : 'No client selected'}
-              className="max-w-[7rem] truncate rounded-lg bg-ink-800 px-2.5 py-1.5 text-xs font-bold text-accent-400 sm:hidden"
+              className="max-w-[7rem] shrink-0 truncate rounded-lg bg-ink-800 px-2.5 py-1.5 text-xs font-bold text-accent-400 sm:hidden"
             >
               {entity?.code ?? 'No client'}
             </button>
@@ -322,7 +332,8 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
           <span className="hidden h-6 w-px shrink-0 bg-white/15 sm:block" />
           <h2 className="hidden shrink-0 text-lg font-bold sm:block">{current.title}</h2>
           {current.items.length > 1 && (
-            <nav aria-label={current.title} className="no-scrollbar ml-4 hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto md:flex">
+            // inline only where every section's pills fit; narrower screens get their own row below
+            <nav aria-label={current.title} className="no-scrollbar ml-4 hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto xl:flex">
               {pills}
             </nav>
           )}
@@ -336,7 +347,6 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
               <button
                 type="button"
                 aria-label="Quick add"
-                aria-haspopup="menu"
                 aria-expanded={quickOpen}
                 title="Quick add"
                 onClick={() => setQuickOpen((o) => !o)}
@@ -345,11 +355,10 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
                 <Plus className="size-5" strokeWidth={2.5} />
               </button>
               {quickOpen && (
-                <div role="menu" className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-slate-200 bg-white p-1.5 text-ink-900 shadow-xl">
+                <div className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-slate-200 bg-white p-1.5 text-ink-900 shadow-xl">
                   {quickActions[mode].map((q) => (
                     <Link
                       key={q.to}
-                      role="menuitem"
                       to={q.to}
                       onClick={() => setQuickOpen(false)}
                       className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-100"
@@ -366,17 +375,16 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
               <button
                 type="button"
                 aria-label="Account"
-                aria-haspopup="menu"
                 aria-expanded={accountOpen}
                 onClick={() => setAccountOpen((o) => !o)}
                 className="flex items-center rounded-full ring-2 ring-white/15 transition hover:ring-white/40"
               >
-                <Avatar name={displayName} size="md" />
+                <Avatar name={displayName} initials={avatarInitials} size="md" />
               </button>
               {accountOpen && (
-                <div role="menu" className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-slate-200 bg-white p-1.5 text-ink-900 shadow-xl">
+                <div className="absolute right-0 top-12 z-50 w-64 rounded-xl border border-slate-200 bg-white p-1.5 text-ink-900 shadow-xl">
                   <div className="flex items-center gap-3 px-3 py-2.5">
-                    <Avatar name={displayName} size="sm" />
+                    <Avatar name={displayName} initials={avatarInitials} size="sm" />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold">{displayName}</p>
                       <p className="truncate text-xs text-slate-500">{roleLabel}</p>
@@ -386,7 +394,6 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
                   {mode === 'admin' && (
                     <button
                       type="button"
-                      role="menuitem"
                       onClick={() => {
                         setAccountOpen(false)
                         setChangingPw(true)
@@ -398,7 +405,6 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
                   )}
                   <button
                     type="button"
-                    role="menuitem"
                     onClick={doSignOut}
                     className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"
                   >
@@ -410,7 +416,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
           </div>
         </div>
         {current.items.length > 1 && (
-          <nav aria-label={`${current.title} pages`} className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 md:hidden">
+          <nav aria-label={`${current.title} pages`} className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 sm:px-5 xl:hidden">
             {pills}
           </nav>
         )}
@@ -438,7 +444,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
                     aria-label={n.label}
                     className={({ isActive: on }) =>
                       `relative flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                        on ? 'bg-slate-100 text-ink-900' : 'text-slate-400 hover:bg-slate-50 hover:text-ink-900'
+                        on ? 'bg-slate-100 text-ink-900' : 'text-slate-500 hover:bg-slate-50 hover:text-ink-900'
                       }`
                     }
                   >
@@ -456,7 +462,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
                 title="Change password"
                 aria-label="Change password"
                 onClick={() => setChangingPw(true)}
-                className="flex size-10 items-center justify-center rounded-xl text-slate-400 hover:bg-slate-50 hover:text-ink-900"
+                className="flex size-10 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-50 hover:text-ink-900"
               >
                 <KeyRound className={ic} />
               </button>
@@ -528,7 +534,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
               ))}
             </nav>
             <div className="flex items-center gap-3 border-t border-slate-100 p-4">
-              <Avatar name={displayName} size="sm" />
+              <Avatar name={displayName} initials={avatarInitials} size="sm" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-ink-900">{displayName}</p>
                 <p className="truncate text-xs text-slate-500">{roleLabel}</p>

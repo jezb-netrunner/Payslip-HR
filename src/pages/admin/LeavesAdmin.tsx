@@ -12,6 +12,7 @@ import { leaveDaysInYear, leaveWorkdays, showsBalance } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { useQuickAction } from '../../lib/quickAction'
+import { notifyPendingChanged } from '../../lib/pending'
 
 type RequestFull = LeaveRequest & { employees: Employee; leave_types: LeaveType }
 
@@ -92,6 +93,7 @@ function Leaves({ entity }: { entity: Entity }) {
       toast('error', errorMessage(err, 'Review failed'))
     } finally {
       setBusyId(null)
+      notifyPendingChanged()
       await load()
     }
   }
@@ -115,6 +117,7 @@ function Leaves({ entity }: { entity: Entity }) {
       toast('error', errorMessage(err, 'Could not revoke the leave'))
     } finally {
       setBusyId(null)
+      notifyPendingChanged()
       await load()
     }
   }
@@ -301,6 +304,7 @@ function Leaves({ entity }: { entity: Entity }) {
           onClose={() => setFiling(false)}
           onFiled={async () => {
             setFiling(false)
+            notifyPendingChanged()
             await load()
           }}
         />
