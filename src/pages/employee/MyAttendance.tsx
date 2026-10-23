@@ -180,7 +180,8 @@ export default function MyAttendance() {
             <Input
               type="month"
               value={monthStr}
-              onChange={(e) => setMonthStr(e.target.value)}
+              // a cleared field would query "-01" dates
+              onChange={(e) => e.target.value && setMonthStr(e.target.value)}
               className="w-40"
             />
             <Button variant="secondary" onClick={() => openCorrection(null)}>

@@ -60,6 +60,7 @@ import type {
   TimeEntry,
 } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
+import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
 import {
   ALLOWANCE_BASIS_LABELS,
@@ -146,6 +147,8 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
       .then((rows) => setSiblings(rows.filter((r) => r.id === id || isActiveOn(r, today)).map((r) => r.id)))
       .catch(() => setSiblings([]))
   }, [entityId, id])
+
+  useRecordClient(employee?.entity_id, '/admin/employees')
 
   if (loading) return <Spinner />
   if (!employee) return <p className="text-sm text-slate-500">Employee not found.</p>
@@ -333,7 +336,10 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
             <ChevronRight className="size-4" />
           </IconButton>
         </div>
-        <Link to="/admin/timesheets" className="inline-flex items-center gap-1.5 rounded-lg bg-ink-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-ink-800">
+        {/* opens this employee's sheet for the month shown (up to today) */}
+        <Link
+          to={`/admin/timesheets?employee=${employee.id}&from=${start}&to=${end < today || start > today ? end : today}`}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-ink-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-ink-800">
           <Clock className="size-4" /> Edit time in / out
         </Link>
       </div>

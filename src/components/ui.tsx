@@ -1,5 +1,5 @@
 import { Inbox, X } from 'lucide-react'
-import { createContext, useContext, useEffect, useId } from 'react'
+import { createContext, useContext, useEffect, useId, useRef } from 'react'
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -9,6 +9,7 @@ import type {
   TextareaHTMLAttributes,
 } from 'react'
 import { useEntity } from '../lib/entity'
+import { useFocusTrap } from '../lib/focus'
 import { initials } from '../lib/format'
 
 // ---------- brand ----------
@@ -40,12 +41,13 @@ export function Logo({ dark = false, compact = false, className = '' }: { dark?:
 type ButtonVariant = 'primary' | 'dark' | 'secondary' | 'accent' | 'danger' | 'ghost'
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-brand-700 text-white hover:bg-brand-800 disabled:bg-brand-200',
-  dark: 'bg-ink-900 text-white hover:bg-ink-800 disabled:bg-slate-300',
-  accent: 'bg-accent-400 text-ink-900 hover:bg-accent-300 disabled:bg-accent-100 disabled:text-slate-400',
+  // disabled: a grey that still reads (white on the pale brand tint was 1.5:1)
+  primary: 'bg-brand-700 text-white hover:bg-brand-800 disabled:bg-slate-200 disabled:text-slate-500',
+  dark: 'bg-ink-900 text-white hover:bg-ink-800 disabled:bg-slate-200 disabled:text-slate-500',
+  accent: 'bg-accent-400 text-ink-900 hover:bg-accent-300 disabled:bg-slate-200 disabled:text-slate-500',
   secondary:
     'bg-white text-ink-900 border border-slate-200 shadow-xs hover:bg-slate-50 disabled:text-slate-400',
-  danger: 'bg-rose-600 text-white hover:bg-rose-700 disabled:bg-rose-300',
+  danger: 'bg-rose-600 text-white hover:bg-rose-700 disabled:bg-slate-200 disabled:text-slate-500',
   ghost: 'text-brand-700 hover:bg-brand-50 disabled:text-slate-400',
 }
 
@@ -457,6 +459,8 @@ export function Modal({
   wide?: boolean
 }) {
   const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useFocusTrap(open, dialogRef)
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -469,10 +473,12 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-900/40 p-4">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`modal-glow mt-8 w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} rounded-2xl bg-white shadow-2xl sm:mt-16`}
+        tabIndex={-1}
+        className={`modal-glow mt-8 w-full focus:outline-none ${wide ? 'max-w-4xl' : 'max-w-lg'} rounded-2xl bg-white shadow-2xl sm:mt-16`}
       >
         <div className="flex items-start justify-between gap-3 px-6 pb-2 pt-5">
           <h3 id={titleId} className="text-lg font-bold text-ink-900">{title}</h3>

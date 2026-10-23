@@ -7,6 +7,7 @@
 // locked by the database.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { CalendarDays, Check, FilePen, Lock, Save, UserRound, Wand2, X } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, NoClient, PageHeader, Select, Spinner, TableShell, Tabs, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
@@ -20,10 +21,35 @@ import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { notifyPendingChanged } from '../../lib/pending'
 
+interface SheetPreset {
+  employeeId: string
+  from?: string
+  to?: string
+}
+
+const isDate = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined)
+
 export default function Timesheets() {
   const { entity } = useEntity()
   const { isCompanyAdmin } = useAuth()
-  const [tab, setTab] = useState('daily')
+  const [params, setParams] = useSearchParams()
+  // "Edit time in / out" on an employee's Attendance tab opens their sheet for that month
+  const [preset] = useState<SheetPreset | null>(() => {
+    const employeeId = params.get('employee')
+    return employeeId ? { employeeId, from: isDate(params.get('from')), to: isDate(params.get('to')) } : null
+  })
+  const [tab, setTab] = useState(preset ? 'employee' : 'daily')
+  useEffect(() => {
+    if (!preset) return
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        for (const k of ['employee', 'from', 'to']) next.delete(k)
+        return next
+      },
+      { replace: true },
+    )
+  }, [preset, setParams])
   // unsaved edits in the open sheet: switching tabs or closing the page asks first
   const dirty = useRef(0)
   const onDirty = useCallback((n: number) => {
@@ -58,7 +84,7 @@ export default function Timesheets() {
         }}
       />
       {tab === 'daily' && <DailySheet key={entity.id} entity={entity} onDirty={onDirty} />}
-      {tab === 'employee' && <EmployeeSheet key={entity.id} entity={entity} onDirty={onDirty} />}
+      {tab === 'employee' && <EmployeeSheet key={entity.id} entity={entity} onDirty={onDirty} preset={preset} />}
       {tab === 'corrections' && <Corrections key={entity.id} entity={entity} />}
     </div>
   )
@@ -615,12 +641,20 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
 
 // ---------- per-employee sheet: one employee, a date range ----------
 
-function EmployeeSheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) => void }) {
+function EmployeeSheet({
+  entity,
+  onDirty,
+  preset,
+}: {
+  entity: Entity
+  onDirty: (n: number) => void
+  preset?: SheetPreset | null
+}) {
   const toast = useToast()
   const [employees, setEmployees] = useState<Employee[]>([])
-  const [employeeId, setEmployeeId] = useState('')
-  const [from, setFrom] = useState(addDays(todayManila(), -14))
-  const [to, setTo] = useState(todayManila())
+  const [employeeId, setEmployeeId] = useState(preset?.employeeId ?? '')
+  const [from, setFrom] = useState(preset?.from ?? addDays(todayManila(), -14))
+  const [to, setTo] = useState(preset?.to ?? todayManila())
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')

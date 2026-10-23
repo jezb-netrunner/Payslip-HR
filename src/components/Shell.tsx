@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
+import { useFocusTrap } from '../lib/focus'
 import { useEntity } from '../lib/entity'
 import { fullName, initials, personInitials } from '../lib/format'
 import { ROLE_LABELS } from '../lib/labels'
@@ -111,7 +112,7 @@ const quickActions = {
   ],
   employee: [
     { to: '/me/leaves?new=leave', label: 'File a leave', icon: <Palmtree className="size-4" /> },
-    { to: '/me/attendance?new=correction', label: 'Request a time correction', icon: <ClipboardList className="size-4" /> },
+    { to: '/me/attendance?new=correction', label: 'Report a missing time entry', icon: <ClipboardList className="size-4" /> },
   ],
 }
 
@@ -120,21 +121,34 @@ function isActive(item: NavItem, pathname: string) {
 }
 
 /** Closes a popover on an outside click or Escape. */
+/**
+ * Closes a popover on an outside click, on Escape (focus goes back to its
+ * button) and when keyboard focus moves on past it.
+ */
 function useDismiss(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!open) return
+    const box = ref.current
+    if (!open || !box) return
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close()
+      if (!box.contains(e.target as Node)) close()
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close()
+      if (e.key !== 'Escape') return
+      close()
+      box.querySelector<HTMLElement>('button')?.focus()
+    }
+    // a click on plain text inside moves focus nowhere (relatedTarget null): stay open
+    const onFocusOut = (e: FocusEvent) => {
+      if (e.relatedTarget instanceof Node && !box.contains(e.relatedTarget)) close()
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
+    box.addEventListener('focusout', onFocusOut)
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
+      box.removeEventListener('focusout', onFocusOut)
     }
   }, [open, close])
   return ref
@@ -230,6 +244,16 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   const [counts, setCounts] = useState<{ entityId: string; corrections: number; leaves: number } | null>(null)
   const [countsTick, setCountsTick] = useState(0)
   const quickRef = useDismiss(quickOpen, () => setQuickOpen(false))
+  const drawerRef = useRef<HTMLElement>(null)
+  useFocusTrap(drawer, drawerRef)
+  useEffect(() => {
+    if (!drawer) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawer(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [drawer])
   const accountRef = useDismiss(accountOpen, () => setAccountOpen(false))
 
   const groups = (mode === 'admin' ? adminGroups : employeeGroups)
@@ -423,56 +447,44 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* icon rail */}
-        <aside className="hidden w-[76px] shrink-0 flex-col items-center border-r border-slate-200/70 bg-white lg:flex">
-          <div className="no-scrollbar flex w-full min-h-0 flex-1 flex-col items-center overflow-y-auto py-4">
-            <div
-              title={orgTitle}
-              className="mb-3 flex size-11 shrink-0 items-center justify-center rounded-xl bg-ink-900 text-sm font-extrabold uppercase tracking-tight text-accent-400 shadow-sm"
-            >
-              {orgBadge}
-            </div>
-            {groups.map((g, gi) => (
-              <div key={g.title} className="flex flex-col items-center gap-0.5">
-                {gi > 0 && <span className="my-1.5 h-px w-8 bg-slate-200" />}
-                {g.items.map((n) => (
-                  <NavLink
-                    key={n.to}
-                    to={n.to}
-                    end={n.end}
-                    title={n.label}
-                    aria-label={n.label}
-                    className={({ isActive: on }) =>
-                      `relative flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                        on ? 'bg-slate-100 text-ink-900' : 'text-slate-500 hover:bg-slate-50 hover:text-ink-900'
-                      }`
-                    }
-                  >
-                    {n.icon}
-                    {count(n) > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-rose-500 ring-2 ring-white" />}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
+        {/* icon rail: one column, compact on short screens, with a visible thin scrollbar when it still overflows */}
+        <aside className="scroll-thin hidden w-[76px] shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden border-r border-slate-200/70 bg-white py-3 lg:flex">
+          <div
+            title={orgTitle}
+            className="mb-2 flex size-11 shrink-0 items-center justify-center rounded-xl bg-ink-900 text-sm font-extrabold uppercase tracking-tight text-accent-400 shadow-sm [@media(max-height:820px)]:size-10"
+          >
+            {orgBadge}
           </div>
-          <div className="flex shrink-0 flex-col items-center gap-1 border-t border-slate-100 py-3">
-            {mode === 'admin' && (
-              <button
-                type="button"
-                title="Change password"
-                aria-label="Change password"
-                onClick={() => setChangingPw(true)}
-                className="flex size-10 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-50 hover:text-ink-900"
-              >
-                <KeyRound className={ic} />
-              </button>
-            )}
+          {groups.map((g, gi) => (
+            <div key={g.title} className="flex flex-col items-center gap-0.5 [@media(max-height:820px)]:gap-0">
+              {gi > 0 && <span className="my-1.5 h-px w-8 bg-slate-200 [@media(max-height:820px)]:my-1" />}
+              {g.items.map((n) => (
+                <NavLink
+                  key={n.to}
+                  to={n.to}
+                  end={n.end}
+                  title={n.label}
+                  aria-label={n.label}
+                  className={({ isActive: on }) =>
+                    `relative flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors [@media(max-height:820px)]:size-9 ${
+                      on ? 'bg-slate-100 text-ink-900' : 'text-slate-500 hover:bg-slate-50 hover:text-ink-900'
+                    }`
+                  }
+                >
+                  {n.icon}
+                  {count(n) > 0 && <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-rose-500 ring-2 ring-white" />}
+                </NavLink>
+              ))}
+            </div>
+          ))}
+          <div className="mt-auto flex shrink-0 flex-col items-center pt-3">
+            <span className="mb-2 h-px w-8 bg-slate-200" />
             <button
               type="button"
               title="Sign out"
               aria-label="Sign out"
               onClick={doSignOut}
-              className="flex size-10 items-center justify-center rounded-full bg-ink-900 text-white hover:bg-ink-800"
+              className="flex size-10 items-center justify-center rounded-full bg-ink-900 text-white hover:bg-ink-800 [@media(max-height:820px)]:size-9"
             >
               <LogOut className="size-4.5" />
             </button>
@@ -490,7 +502,13 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
       {drawer && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-ink-900/50" onClick={() => setDrawer(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-[19rem] max-w-[85vw] flex-col bg-white shadow-2xl">
+          <aside
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu"
+            className="absolute inset-y-0 left-0 flex w-[19rem] max-w-[85vw] flex-col bg-white shadow-2xl"
+          >
             <div className="flex h-16 shrink-0 items-center justify-between bg-ink-900 px-4">
               <Logo />
               <button

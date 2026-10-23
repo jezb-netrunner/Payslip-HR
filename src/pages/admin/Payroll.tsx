@@ -26,7 +26,7 @@ import { getEmployees, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, PayrollRun, RunType } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { fmtDate, fmtMonth, fullName, money, plural } from '../../lib/format'
+import { fmtDate, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
 import { FREQUENCY_LABELS, RUN_TYPE_LABELS } from '../../lib/labels'
 import { addDays, todayManila } from '../../lib/manila'
 import { slotFor, suggestPeriod } from '../../lib/payPeriods'
@@ -88,12 +88,25 @@ function RunList({ entity }: { entity: Entity }) {
     load()
   }, [load])
 
-  const q = query.trim().toLowerCase()
+  // search what each row shows; dashes typed as "-" match the "–" in date ranges
+  const norm = (v: string) => v.toLowerCase().replace(/[\u2010-\u2015]/g, '-').replace(/\s+/g, ' ')
+  const q = norm(query.trim())
   const shown = runs.filter(
     (r) =>
       (!frequency || r.pay_frequency === frequency || (frequency === 'thirteenth' && r.run_type === 'thirteenth_month')) &&
       (!status || r.status === status) &&
-      (!q || `${runLabel(r)} ${fmtDate(r.pay_date)} ${fmtMonth(r.period_month)}`.toLowerCase().includes(q)),
+      (!q ||
+        norm(
+          [
+            runLabel(r),
+            fmtPeriod(r.period_start, r.period_end),
+            RUN_TYPE_LABELS[r.run_type],
+            r.pay_frequency ? FREQUENCY_LABELS[r.pay_frequency] : '',
+            STATUS_LOOK[r.status].label,
+            fmtDate(r.pay_date),
+            fmtMonth(r.period_month),
+          ].join(' '),
+        ).includes(q)),
   )
   const counts = (Object.keys(STATUS_LOOK) as PayrollRun['status'][])
     .map((k) => ({ label: STATUS_LOOK[k].label, dot: STATUS_LOOK[k].dot, count: runs.filter((r) => r.status === k).length }))
@@ -366,7 +379,12 @@ function NewRunModal({
         .select('id')
         .single()
       if (error) throw error
-      toast('success', 'Run created — enter any one-time adjustments, then compute the draft.')
+      toast(
+        'success',
+        runType === 'thirteenth_month'
+          ? 'Run created — compute the draft to see each 13th month amount.'
+          : 'Run created — enter any one-time adjustments, then compute the draft.',
+      )
       onCreated(data.id)
     } catch (err) {
       const msg = errorMessage(err, 'Failed to create run')

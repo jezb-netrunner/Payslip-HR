@@ -35,12 +35,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={push}>
       {children}
-      {/* below the 64px top bar: over it, toasts hid the client switcher, Quick add and Account for 5 s */}
-      <div role="status" aria-live="polite" className="fixed right-4 top-[4.5rem] z-[100] flex w-[min(26rem,calc(100vw-2rem))] flex-col gap-2">
+      {/* bottom centre, clear of a sticky action bar: at the top they covered the top bar's and the
+          page header's controls; only the toasts themselves catch the pointer */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed bottom-24 left-1/2 z-[100] flex w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-2"
+      >
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="flex items-center gap-3 rounded-xl bg-ink-900 py-2.5 pl-2.5 pr-2 text-white shadow-xl ring-1 ring-white/10"
+            className="pointer-events-auto flex items-center gap-3 rounded-xl bg-ink-900 py-2.5 pl-2.5 pr-2 text-white shadow-xl ring-1 ring-white/10"
           >
             <span className={`w-1 self-stretch rounded-full ${looks[t.kind].stripe}`} />
             <span className="shrink-0">{looks[t.kind].icon}</span>

@@ -183,6 +183,24 @@ login, My Attendance timeline. Quick-add links open create forms through
 `?new=<key>` (`src/lib/quickAction.ts`). Timeline geometry in
 `src/lib/timeline.ts` (+5 tests, 152 total).
 
+### 2026-10-23 — Revamp bug hunt (owner: "check for errors from the revamp, fix them all")
+
+**Did:** two independent code reviews (shell/components, pages) and a browser
+QA pass over every route × 3 roles × 1440/1024/768/390 px on the local stack;
+every verified finding fixed and re-checked in the browser. Worst: employee
+prev/next kept the previous employee's forms mounted — Save wrote one
+person's pay/profile onto the next and a fresh login code showed (and
+printed) under the next name (see lesson). Others: pay-run rows unreadable
+at 768–1279 px (now container-query layouts), warnings below the payslips on
+smaller screens, per-employee deductions dropped from pay-run rows, timeline
+late/overtime/hours disagreeing with payroll, toasts and the archived note
+covering top-bar controls, hidden section pills / rail items, stale pending
+counts, record pages not following the client switcher, contrast (secondary
+grey, "Active" badge, focus ring, disabled buttons), focus handling in
+dialogs/drawer/menus, 13th-month runs shown with hours. Older bugs fixed on
+the way: the timesheet's unsaved-change highlight never showed; a cleared
+month field on My Attendance sent invalid queries. Tests 153 → 156.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -653,9 +671,12 @@ action — were logged with no actor. Tested in `11_audit_fixes_tests.sql`.
 Why it mattered: an admin clicking "Employees (required)" silently
 selected someone for a final-pay run.
 
-### Two Tailwind width classes on one element: stylesheet order wins
+### Two Tailwind classes for one property: stylesheet order wins, not class order
 
-> `Input`/`Select` always added `w-full`; a caller's `w-44` lost or won depending on CSS order, not class order — controls rendered full-width. `controlClass()` adds `w-full` only when the caller gave no `w-*`.
+> A caller's class can't reliably override a component's base class for the same property (`w-44` vs `w-full`, `px-3` vs `px-4`, `size-8` vs `size-9`, `border-accent-400` vs `border-slate-200`). Components take variants as props (`Button size`, `IconButton size`) and `controlClass()` drops its default width / border colour / background when the caller sets one.
+
+Why it mattered: controls rendered full-width, small buttons rendered large,
+and the timesheet's unsaved-change highlight never showed — all silently.
 
 ### Monthly contributions: never deduct beyond what the month still owes
 
@@ -705,3 +726,18 @@ another segment and carry a stripe texture plus a label. Re-run
 `validate_palette.js` (dataviz skill) before adding a series colour. Why it
 mattered: eyeballed brand colours gave pairs that colour-blind — and even
 full-vision — readers could not tell apart.
+
+### Same route, new id: the page stays mounted — key record pages by id
+
+> React Router keeps `/admin/employees/A` mounted when you go to `/admin/employees/B`; tabs that copy the record into form state keep A's values, and Save writes them onto B. `EmployeeDetail` renders `<EmployeeRecord key={id}>` (the open tab is lifted out so it survives prev/next).
+
+Why it mattered: the revamp's prev/next buttons made this reachable — QA
+reproduced A's ₱68,000 rate and bank account saved onto B, and a freshly
+issued login code shown and printed under the next employee's name.
+
+### Attendance visuals must use payroll's own day computation
+
+> The timeline's late, overtime and hours come from `computeAttendance` for the day (`src/lib/timeline.ts`): payroll waives lateness when the standard day is completed, counts overtime as net minutes beyond the standard day after the unpaid break, and charges no tardiness on non-working holidays — edge-based "arrived after 9:00 / left after 18:00" bars contradicted all three.
+
+Why it mattered: employees would have seen lateness they weren't docked and
+overtime they wouldn't be paid.
