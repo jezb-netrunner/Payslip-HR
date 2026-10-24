@@ -374,24 +374,26 @@ schedules, per-payroll deductions, Insights, read-only statutory tables,
 the legal-accuracy fixes) is on `claude/affectionate-carson-hyuwes` and
 reaches the site only when merged.
 
-**2026-10-24 migrations — one live, three pending the owner's go-ahead.**
-`20261024112556 work_schedules` was applied through MCP (new tables, all
-with RLS; backward compatible with `main`); security advisors unchanged
-afterwards. The session's next live step was stopped by the auto-mode
-classifier as a production deploy, so these wait for the owner:
-`20261024120000 payroll_deduction_overrides`, `20261024120100
-statutory_tables_managed`, `20261024120200 legal_accuracy` (repo
-filenames are placeholders that keep the replay order; rename each to the
-version MCP records when it is applied, then re-run `fingerprint.sql`).
-Apply them in that order **together with merging the branch**:
+**2026-10-24 migrations (owner approved applying them and opening the PR).**
+Live through MCP: `20261024112556 work_schedules` and `20261024221511
+payroll_deduction_overrides` (new tables, all with RLS; backward compatible
+with `main`; advisors unchanged after the first). `statutory_tables_managed`
+timed out on the MCP confirmation prompt — the false positive in the lesson
+below: the `;` inside its legal-basis strings (`'RA 11199 (…2018); SSS…'`)
+split an UPDATE into a WHERE-less piece. Reworded (commas), not yet
+re-applied; `legal_accuracy` follows it. Repo filenames of the two pending
+ones (`20261024230000`, `20261024230100`) are placeholders that keep the
+replay order; rename each to the version MCP records, then re-run
+`fingerprint.sql`. Merge the branch only once both are live:
 `legal_accuracy`'s authorization trigger refuses company loans, HMO and
-"other" deductions without `authorized_on`, which `main`'s forms can't
-send, and the branch's screens write columns that only these migrations
-add. Live data checked first: no off-December annualize flags, no
-standard day above 8 hours, statutory rows identical to the replica.
+"other" deductions without `authorized_on`, which `main`'s forms can't send,
+and the branch's screens write columns only these migrations add. Live
+data checked first: no off-December annualize flags, no standard day above
+8 hours, statutory rows identical to the replica.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
-- **All 17 migrations applied** (18 with `work_schedules` on 2026-10-24). The 17th, `20261023105459
+- **All 17 migrations applied** (19 with `work_schedules` and
+  `payroll_deduction_overrides` on 2026-10-24). The 17th, `20261023105459
   cash_advance_hardening` (CREATE OR REPLACE of the three advance trigger
   functions), went through MCP; fingerprint re-matched (functions hash
   changed on both sides identically). The 16th, `20261023102637 cash_advances`

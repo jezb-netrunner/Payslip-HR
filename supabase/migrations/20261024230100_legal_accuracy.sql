@@ -4,12 +4,12 @@
 
 -- ---------- the year-end tax adjustment ----------
 -- The year's tax is trued up on the last payroll PAID in December (RR 2-98
--- as amended by RR 11-2018); the tax year follows the pay date, so a run
+-- as amended by RR 11-2018), the tax year follows the pay date, so a run
 -- paid in another month annualizing would settle the wrong year. An
 -- employee who separates is annualized on the payroll with the last day,
 -- whatever the month, without this flag. Earlier versions set the flag on
 -- every final pay and allowed it on any run: clear it outside December
--- first (finalized runs too — their payslips keep what they computed; a
+-- first (finalized runs too — their payslips keep what they computed, a
 -- final pay annualizes anyway).
 select set_config('payroll.lifecycle', 'on', false);
 update public.payroll_runs set annualize = false
@@ -19,7 +19,7 @@ alter table public.payroll_runs
   add constraint payroll_runs_annualize_december check (not annualize or extract(month from pay_date) = 12);
 
 -- ---------- normal hours of work: eight a day at most (Labor Code Art. 83) ----------
--- (a longer day is a compressed-workweek shift, valid_shift / valid_week_pattern;
+-- (a longer day is a compressed-workweek shift, valid_shift / valid_week_pattern,
 -- a client set above 8 had overtime starting too late)
 update public.entities set standard_hours_per_day = 8 where standard_hours_per_day > 8;
 alter table public.entities
@@ -62,7 +62,7 @@ revoke execute on function public.mark_payroll_drafts_stale(uuid, uuid, date, da
 -- The 105 days of full pay are the SSS maternity benefit the employer
 -- advances (within 30 days of the leave application, SSS Circular 2019-009)
 -- plus any salary differential up to full pay — not salary for the leave
--- days, which payroll no longer pays. Both are tax-exempt (RMC 105-2019);
+-- days, which payroll no longer pays. Both are tax-exempt (RMC 105-2019),
 -- the differential counts toward the 13th month and the SSS benefit does
 -- not (DOLE Labor Advisory 25-2023). They are one-time earnings classified
 -- other non-taxable, marked with which one they are.
@@ -73,7 +73,7 @@ alter table public.payroll_adjustments
     benefit is null or (kind = 'earning' and category = 'other_non_taxable'));
 
 -- ---------- PhilHealth: the government pays some employees' share ----------
--- Employed PWDs (RA 11228) and, from Sep 26, 2026, solo parents (RA 11861;
+-- Employed PWDs (RA 11228) and, from Sep 26, 2026, solo parents (RA 11861,
 -- PhilHealth Circular 2026-0015): the national government pays the
 -- employee share, the employer pays its own.
 alter table public.employees
@@ -86,7 +86,7 @@ alter table public.employees
     and (philhealth_ee_waiver_until is null or philhealth_ee_waiver_until >= philhealth_ee_waiver_from));
 
 -- ---------- deductions the law doesn't provide for need the employee's written authorization ----------
--- (Labor Code Art. 113; IRR Book III, Rule VIII, Sec. 10 as amended by DOLE
+-- (Labor Code Art. 113, IRR Book III, Rule VIII, Sec. 10 as amended by DOLE
 -- D.O. 195-18): company loans, HMO and insurance premiums, and any other
 -- deduction — recurring, or one-time in a payroll. Government loans, union
 -- dues and cash advances (their own authorization date) are outside this.

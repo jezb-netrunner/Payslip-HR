@@ -5,13 +5,13 @@
 -- Industry practice for payroll software: tax and contribution tables ship
 -- with the software. The maintainer verifies each version against the
 -- agency's published table, tests it, and releases it with its effective
--- date; users read the tables but cannot edit them. So:
---   * no API role writes statutory_versions any more; new versions arrive as
---     migrations (the table owner), reviewed and tested like code;
+-- date, users read the tables but cannot edit them. So:
+--   * no API role writes statutory_versions any more, new versions arrive as
+--     migrations (the table owner), reviewed and tested like code,
 --   * every version records its legal basis, its source and the date it was
---     last verified against that source;
+--     last verified against that source,
 --   * the database checks each version's shape and figures (a mistyped
---     bracket or a 50% rate is refused, whoever writes it);
+--     bracket or a 50% rate is refused, whoever writes it),
 --   * a version that a finalized payroll may have used is frozen — a real
 --     mistake in it is corrected deliberately (set statutory.correction = on
 --     in the correcting migration, then reopen the affected payrolls).
@@ -129,18 +129,18 @@ end
 $$;
 
 -- the five versions on file, documented (verified against their sources on
--- 2026-10-24; see MEMORY.md, Verified 2026 PH statutory figures)
+-- 2026-10-24, see MEMORY.md, Verified 2026 PH statutory figures)
 update public.statutory_versions
-  set legal_basis = 'RA 11199 (Social Security Act of 2018); SSS Circular 2024-006', verified_on = '2026-10-24'
+  set legal_basis = 'RA 11199 (Social Security Act of 2018), SSS Circular 2024-006', verified_on = '2026-10-24'
   where kind = 'sss' and effective_from = '2025-01-01';
 update public.statutory_versions
-  set legal_basis = 'RA 11223 (Universal Health Care Act), Sec. 10; PhilHealth Advisory 2025-0002', verified_on = '2026-10-24'
+  set legal_basis = 'RA 11223 (Universal Health Care Act), Sec. 10, PhilHealth Advisory 2025-0002', verified_on = '2026-10-24'
   where kind = 'philhealth' and effective_from = '2024-01-01';
 update public.statutory_versions
-  set legal_basis = 'RA 9679 (HDMF Law of 2009); HDMF Circular 460', verified_on = '2026-10-24'
+  set legal_basis = 'RA 9679 (HDMF Law of 2009), HDMF Circular 460', verified_on = '2026-10-24'
   where kind = 'pagibig' and effective_from = '2024-02-01';
 update public.statutory_versions
-  set legal_basis = 'RA 10963 (TRAIN), NIRC Sec. 24(A); RR 11-2018 Annex E (2023 onwards)', verified_on = '2026-10-24'
+  set legal_basis = 'RA 10963 (TRAIN), NIRC Sec. 24(A), RR 11-2018 Annex E (2023 onwards)', verified_on = '2026-10-24'
   where kind = 'bir_wht' and effective_from = '2023-01-01';
 update public.statutory_versions
   set legal_basis = 'RA 10963 (TRAIN), NIRC Sec. 24(A)(2) and 32(B)(7)(e)', verified_on = '2026-10-24'
