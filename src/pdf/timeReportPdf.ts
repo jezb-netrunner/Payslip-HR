@@ -39,7 +39,7 @@ type AutoTableDoc = jsPDF & { lastAutoTable: { finalY: number } }
 
 const hrs = (minutes: number) => (minutes ? hoursOf(minutes).toFixed(2) : '')
 
-function generatedAt(): string {
+export function generatedAt(): string {
   return `${shortDate(todayManila(), true)} ${clock12(manilaHHMM(new Date().toISOString()))}`
 }
 
@@ -52,7 +52,7 @@ function fitText(doc: jsPDF, text: string, maxW: number): string {
 }
 
 /** The dark band at the top of a report's first page: employer left, title and period right. */
-function drawHeader(doc: jsPDF, company: ReportCompany, title: string, period: string): void {
+export function drawHeader(doc: jsPDF, company: ReportCompany, title: string, period: string): void {
   const pageW = doc.internal.pageSize.getWidth()
   doc.setFillColor(...NAVY)
   doc.rect(0, 0, pageW, 26, 'F')

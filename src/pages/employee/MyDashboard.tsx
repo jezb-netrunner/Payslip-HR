@@ -8,7 +8,7 @@ import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, RecurringDeduction, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
-import { nextInstallment } from '../../lib/advances'
+import { repaymentText } from '../../lib/advances'
 import { eligibleFrom, leaveDaysInYear, showsBalance, usableOn } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -190,7 +190,7 @@ export default function MyDashboard() {
             value={money(advances.reduce((t, a) => t + Number(a.balance), 0))}
             sub={
               <Link to="/me/advances" className="font-semibold text-brand-600">
-                {money(nextInstallment(advances.filter((a) => !a.start_date || a.start_date <= today)))} per payroll · details
+                {repaymentText(advances.filter((a) => !a.start_date || a.start_date <= today))} · details
               </Link>
             }
             icon={<HandCoins className="size-5" />}

@@ -21,6 +21,7 @@ import { addDays, eachDate, hhmmToMinutes, manilaDateStr, manilaHHMM, manilaWall
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { FREQUENCY_LABELS } from '../../lib/labels'
+import { lockedKeys } from '../../lib/locks'
 import { notifyPendingChanged, onPendingChanged } from '../../lib/pending'
 import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
 import { shiftLabel } from '../../lib/shiftText'
@@ -185,33 +186,6 @@ function spanMinutes(timeIn: string, timeOut: string): number | null {
   let m = hhmmToMinutes(timeOut) - hhmmToMinutes(timeIn)
   if (m <= 0) m += 1440
   return m
-}
-
-async function lockedKeys(entityId: string, start: string, end: string): Promise<Set<string>> {
-  const { data: runs, error } = await supabase
-    .from('payroll_runs')
-    .select('id, period_start, period_end')
-    .eq('entity_id', entityId)
-    .in('status', ['finalized', 'paid'])
-    .in('run_type', ['regular', 'special', 'final_pay'])
-    .lte('period_start', end)
-    .gte('period_end', start)
-  if (error) throw error
-  const out = new Set<string>()
-  if (!runs?.length) return out
-  const { data: slips, error: slipErr } = await supabase
-    .from('payslips')
-    .select('employee_id, payroll_run_id')
-    .in('payroll_run_id', runs.map((r) => r.id))
-  if (slipErr) throw slipErr
-  for (const s of slips ?? []) {
-    const r = runs.find((x) => x.id === s.payroll_run_id)
-    if (!r) continue
-    for (const d of eachDate(r.period_start > start ? r.period_start : start, r.period_end < end ? r.period_end : end)) {
-      out.add(rowKey(s.employee_id as string, d))
-    }
-  }
-  return out
 }
 
 /** Approved leaves in a date range, by employee|date. */

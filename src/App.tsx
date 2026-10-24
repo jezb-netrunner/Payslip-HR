@@ -11,6 +11,7 @@ import Users from './pages/admin/Users'
 import Employees from './pages/admin/Employees'
 import EmployeeDetail from './pages/admin/EmployeeDetail'
 import Timesheets from './pages/admin/Timesheets'
+import Schedules from './pages/admin/Schedules'
 import LeavesAdmin from './pages/admin/LeavesAdmin'
 import Payroll from './pages/admin/Payroll'
 import PayrollRunDetail from './pages/admin/PayrollRunDetail'
@@ -137,6 +138,7 @@ export default function App() {
           <Route path="employees" element={<Employees />} />
           <Route path="employees/:id" element={<EmployeeDetail />} />
           <Route path="timesheets" element={<Timesheets />} />
+          <Route path="schedules" element={<Schedules />} />
           <Route path="leaves" element={<LeavesAdmin />} />
           <Route path="payroll" element={<Payroll />} />
           <Route path="payroll/:id" element={<PayrollRunDetail />} />

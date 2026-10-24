@@ -51,6 +51,7 @@ import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
 import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
+import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { round2 } from '../../payroll/types'
@@ -302,8 +303,8 @@ export default function PayrollRunDetail() {
       <>
         {stale && (
           <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            Attendance, adjustments, leave or pay settings changed since this draft was computed (or the last
-            computation did not finish). Recompute the draft before finalizing.
+            Attendance, schedules, adjustments, deduction amounts, leave or pay settings changed since this draft
+            was computed (or the last computation did not finish). Recompute the draft before finalizing.
           </p>
         )}
         {hasWarnings && (
@@ -611,6 +612,8 @@ export default function PayrollRunDetail() {
               )}
             </Card>
           )}
+
+          {!isThirteenth && <RunDeductionsCard run={run} covered={covered} slips={slips} onChanged={load} />}
 
           {computed && (
             <div className="grid gap-6 2xl:grid-cols-2">

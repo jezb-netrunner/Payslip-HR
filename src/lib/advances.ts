@@ -4,8 +4,19 @@
 // shows where every peso went.
 
 import type { AdvanceRepayment, Payslip, RecurringDeduction } from './db'
+import { money } from './format'
 import { manilaDateStr } from './manila'
 import { round2 } from '../payroll/types'
+
+/** Recurring deductions other than cash advances (those are recorded under Cash Advances). */
+export const DEDUCTION_CATEGORY_LABELS: Record<string, string> = {
+  sss_loan: 'SSS loan',
+  pagibig_loan: 'Pag-IBIG loan',
+  company_loan: 'Company loan',
+  hmo: 'HMO',
+  union_dues: 'Union dues (tax-exempt)',
+  other: 'Other',
+}
 
 export type AdvanceStatus = 'active' | 'scheduled' | 'paused' | 'paid'
 
@@ -113,4 +124,18 @@ export function nextInstallment(advances: Pick<RecurringDeduction, 'balance' | '
       .filter((a) => a.active && Number(a.balance ?? 0) > 0)
       .reduce((sum, a) => sum + Math.min(Number(a.amount_per_period), Number(a.balance)), 0),
   )
+}
+
+/** How one advance is repaid: "₱1,000.00 per payroll", or by amounts agreed each payroll (no fixed installment). */
+export function installmentText(perPayroll: number): string {
+  return perPayroll > 0 ? `${money(perPayroll)} per payroll` : 'amount agreed each payroll'
+}
+
+/** What payrolls deduct across these advances, counting those without a fixed installment. */
+export function repaymentText(advances: Pick<RecurringDeduction, 'balance' | 'amount_per_period' | 'active'>[]): string {
+  const open = advances.filter((a) => a.active && Number(a.balance ?? 0) > 0)
+  const fixed = nextInstallment(open)
+  const agreed = open.some((a) => !(Number(a.amount_per_period) > 0))
+  if (agreed && fixed === 0) return 'amount agreed each payroll'
+  return `${money(fixed)} per payroll${agreed ? ' + amounts agreed each payroll' : ''}`
 }

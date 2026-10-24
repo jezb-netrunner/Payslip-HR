@@ -76,3 +76,15 @@ export function resolversFor(employees: Pick<Employee, 'id' | 'work_schedule'>[]
     employees.map((e) => [e.id, makeResolver(e.work_schedule, versions.get(e.id) ?? [], overrides.get(e.id) ?? [])]),
   )
 }
+
+/** The client's shift templates, in their display order. */
+export async function fetchShiftTemplates(entityId: string): Promise<ShiftTemplate[]> {
+  const { data, error } = await supabase
+    .from('shift_templates')
+    .select('*')
+    .eq('entity_id', entityId)
+    .order('sort_order')
+    .order('name')
+  if (error) throw error
+  return (data ?? []) as ShiftTemplate[]
+}
