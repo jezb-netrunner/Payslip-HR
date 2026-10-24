@@ -1,4 +1,4 @@
--- Tests for 20261024100000_work_schedules.sql and 20261024100100_payroll_deduction_overrides.sql:
+-- Tests for the work_schedules and payroll_deduction_overrides migrations:
 -- shift validation, who may read and write schedules, paid days staying as they
 -- were paid, drafts going stale, and per-payroll deduction amounts.
 \set ON_ERROR_STOP 1

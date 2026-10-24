@@ -369,12 +369,29 @@ every new control at 1280 and 390 px.
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
 #5 (cash advances + audit fixes, merged and deployed 2026-10-23 11:11 UTC)
-are in `main` and live. The Time In/Out report (2026-10-24) is on
-`claude/affectionate-carson-hyuwes` and reaches the site only when merged; it
-needs no migration.
+are in `main` and live. Everything from 2026-10-24 (Time In/Out report,
+schedules, per-payroll deductions, Insights, read-only statutory tables,
+the legal-accuracy fixes) is on `claude/affectionate-carson-hyuwes` and
+reaches the site only when merged.
+
+**2026-10-24 migrations — one live, three pending the owner's go-ahead.**
+`20261024112556 work_schedules` was applied through MCP (new tables, all
+with RLS; backward compatible with `main`); security advisors unchanged
+afterwards. The session's next live step was stopped by the auto-mode
+classifier as a production deploy, so these wait for the owner:
+`20261024120000 payroll_deduction_overrides`, `20261024120100
+statutory_tables_managed`, `20261024120200 legal_accuracy` (repo
+filenames are placeholders that keep the replay order; rename each to the
+version MCP records when it is applied, then re-run `fingerprint.sql`).
+Apply them in that order **together with merging the branch**:
+`legal_accuracy`'s authorization trigger refuses company loans, HMO and
+"other" deductions without `authorized_on`, which `main`'s forms can't
+send, and the branch's screens write columns that only these migrations
+add. Live data checked first: no off-December annualize flags, no
+standard day above 8 hours, statutory rows identical to the replica.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
-- **All 17 migrations applied.** The 17th, `20261023105459
+- **All 17 migrations applied** (18 with `work_schedules` on 2026-10-24). The 17th, `20261023105459
   cash_advance_hardening` (CREATE OR REPLACE of the three advance trigger
   functions), went through MCP; fingerprint re-matched (functions hash
   changed on both sides identically). The 16th, `20261023102637 cash_advances`

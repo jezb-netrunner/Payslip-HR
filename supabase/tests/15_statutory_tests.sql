@@ -1,4 +1,4 @@
--- Tests for 20261024100200_statutory_tables_managed.sql: statutory tables are
+-- Tests for the statutory_tables_managed migration: statutory tables are
 -- read-only for every app role, versions shipped by the maintainer are checked
 -- for shape and figures, and a version finalized payrolls may have used is frozen.
 \set ON_ERROR_STOP 1

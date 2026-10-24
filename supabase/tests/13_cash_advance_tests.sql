@@ -141,7 +141,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :za, true);
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 250, 1000, 1000, '2026-11-03')$$, '%written authorization%');
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 250, 1000, 600, '2026-11-03', '2026-11-03')$$, '%balance equal to the amount released%');
--- (20261024100100: 0 = no fixed installment is allowed; a negative one never is)
+-- (payroll_deduction_overrides: 0 = no fixed installment is allowed; a negative one never is)
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', -1, 1000, 1000, '2026-11-03', '2026-11-03')$$, '%per payroll%');
 insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, start_date, released_on, release_method, authorized_on)
 values ('7000000f-0000-0000-0000-000000000001', '20000000-0000-0000-0000-0000000000a1', 'Cash advance (Nov 3, 2026)', 'cash_advance', 250, 1000, 1000, '2026-11-03', '2026-11-03', 'e_wallet', '2026-11-03');

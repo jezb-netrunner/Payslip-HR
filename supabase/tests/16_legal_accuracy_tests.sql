@@ -1,4 +1,4 @@
--- Tests for 20261024100300_legal_accuracy.sql: the December year-end
+-- Tests for the legal_accuracy migration: the December year-end
 -- adjustment, the 8-hour normal day, the compressed workweek, service
 -- requirements, written authorization for deductions, maternity pay and the
 -- PhilHealth waiver, holiday look-back staleness and the 2027 holidays.
