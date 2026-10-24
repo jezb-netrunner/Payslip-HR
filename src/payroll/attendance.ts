@@ -187,9 +187,10 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
     const worked = netMinutes > 0
     const leave = leaveFor(date)
 
-    // a time in inside the grace period is paid as if on time
+    // a time in inside the grace period is paid as if on time — up to the
+    // shift's own hours (time made up at the end is no shortfall)
     const lateBy = worked && dayType === 'regular' && shift && firstInMin !== null ? firstInMin - (schedStart + flex) : 0
-    const forgiven = lateBy > 0 && lateBy <= gracePeriodMinutes ? lateBy : 0
+    const forgiven = lateBy > 0 && lateBy <= gracePeriodMinutes ? Math.min(lateBy, Math.max(0, expectedMinutes - netMinutes)) : 0
     const payableMinutes = Math.min(netMinutes + forgiven, regularCap)
     const otMinutes = Math.max(0, netMinutes - regularCap)
 
@@ -258,6 +259,7 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       onUnpaidLeave: !worked && !!leave && !leave.paid,
       leaveType: !worked && leave ? leave.type_name : undefined,
       leaveCode: !worked && leave ? leave.type_code : undefined,
+      leaveStart: !worked && leave ? leave.start_date : undefined,
     })
   }
   return out

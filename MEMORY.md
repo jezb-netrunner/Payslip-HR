@@ -353,8 +353,14 @@ authorization date for company loan / HMO / other deductions; salary
 deductions capped at the period's salary; MWE/apprentice wage warnings;
 2316 order; NCR-28; 2027 holidays seeded. Code-review fixes from the
 session's own work (pauses survive reopen, guards don't leak other
-clients, insights edge cases, time-report fixes, PDF text). Tests 247 →
-278, SQL suite 16 added.
+clients, insights edge cases, time-report fixes, PDF text). An
+independent review of the legal batch found four more (migration aborting
+on old off-December annualize flags — now cleared first, standard hours
+clamped; grace minutes paid twice on short shifts; the maternity warning
+repeating; provisional SSS on zero-pay payrolls) plus a pre-existing one
+(regular holidays before the hire date or after the last day were paid) —
+all fixed with tests. Tests 247 → 282, SQL suite 16 added; browser QA of
+every new control at 1280 and 390 px.
 
 ---
 
@@ -1031,7 +1037,9 @@ have recomputed past drafts with the new hours.
   and so is a scheduled meal period under 60 minutes taken off the clock;
   a longer gap counts against the unpaid meal break, then as time not
   worked. A grace period is the client's policy: a time in inside it is
-  paid as on time (it used to come back as undertime).
+  paid as on time (it used to come back as undertime) — credited only up
+  to the shift's own hours, so a half day made up at the end isn't paid
+  twice.
 - A compressed workweek is fewer than six workdays and at most 48 normal
   hours (DA 02-04) — enforced on weekly patterns (`weekPatternProblem` /
   `valid_week_pattern`), not on single-date roster changes.
@@ -1069,7 +1077,8 @@ provisional share on the rate; the month's closing payroll (last slot, a
 separation, or any payroll computed after the closing one was final)
 deducts what the month's actual pay requires less what was already taken —
 a negative line refunds an over-deduction; a month with no compensation
-owes none. PhilHealth stays on the basic rate, Pag-IBIG on basic +
+owes none, and a payroll that paid no compensation (a period on maternity
+or unpaid leave) takes no provisional share. PhilHealth stays on the basic rate, Pag-IBIG on basic +
 allowances. Flow tests that expected a full rate-based month for mid-month
 hires/absences were wrong and were changed. Why it mattered: rate-based
 SSS under-remits for anyone with OT or allowances (SSS assesses
@@ -1084,7 +1093,8 @@ days with code `ML` from salary (monthly) or pays nothing for them (daily);
 the admin adds the two amounts as adjustments marked `benefit`
 (`sss_maternity` / `maternity_differential`, category other non-taxable,
 RMC 105-2019); the differential counts toward 13th month
-(`thirteenthBasis`). Why it mattered: paying full salary for the leave
+(`thirteenthBasis`); the review warning appears only in the payroll the
+leave starts in (`leaveStart`). Why it mattered: paying full salary for the leave
 days taxed exempt pay, overpaid exempt small employers who owe only the
 reimbursed SSS benefit, and missed the 30-day advance.
 

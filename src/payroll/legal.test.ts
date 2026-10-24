@@ -236,3 +236,84 @@ describe('Pag-IBIG on basic salary plus allowances', () => {
     expect(capped.pagibigEe).toBe(200)
   })
 })
+
+describe('review fixes (2026-10-24)', () => {
+  it('credits grace minutes only up to the shift\'s own hours', () => {
+    const halfDay = { start: '08:00', end: '12:00', break_minutes: 0 }
+    const sat = '2026-08-22'
+    const [d] = computeAttendance({
+      periodStart: sat,
+      periodEnd: sat,
+      schedule: { days: [6], ...halfDay },
+      standardHoursPerDay: 8,
+      gracePeriodMinutes: 15,
+      // Manila 08:10–12:10: the half day's four hours, worked in full
+      entries: [{ work_date: sat, clock_in: `${sat}T00:10:00Z`, clock_out: `${sat}T04:10:00Z` }],
+      holidays: [],
+      approvedLeaves: [],
+    })
+    expect(d.payableMinutes).toBe(240)
+    expect(d.lateMinutes).toBe(0)
+  })
+
+  it('warns about maternity pay only in the payroll the leave starts in', () => {
+    expect(pay(monthly, WORKDAYS.slice(0, 5), [maternity('2026-08-24')]).trace.warnings.some((w) => w.startsWith('Maternity leave from Aug 24'))).toBe(true)
+    // started in the previous payroll: no repeat
+    expect(pay(monthly, [], [maternity('2026-08-10')]).trace.warnings.some((w) => w.startsWith('Maternity leave from'))).toBe(false)
+  })
+
+  it('takes no provisional SSS from a payroll that paid no compensation', () => {
+    const slip = computePayslip({
+      employee: monthly,
+      settings,
+      period: { ...period, index: 1 },
+      tables: DEFAULT_TABLES,
+      days: computeAttendance({
+        periodStart: period.start,
+        periodEnd: period.end,
+        schedule: monthly.schedule,
+        standardHoursPerDay: 8,
+        gracePeriodMinutes: 0,
+        entries: [],
+        holidays: [],
+        approvedLeaves: [maternity('2026-08-10')],
+      }),
+      runType: 'regular',
+      monthContributions: {
+        already: { sssEe: 0, sssMpfEe: 0, philhealthEe: 0, pagibigEe: 0, sssEr: 0, sssMpfEr: 0, sssEcEr: 0, philhealthEr: 0, pagibigEr: 0 },
+        compensationAlready: 0,
+        closes: false,
+        opens: true,
+      },
+    })
+    expect([slip.sssEe, slip.sssMpfEe, slip.sssEr]).toEqual([0, 0, 0])
+    expect(slip.trace.notes).toContain("No SSS this payroll: it paid no compensation; the month's last payroll settles the month.")
+  })
+
+  it('pays no regular holiday before the hire date', () => {
+    const holiday = [{ holiday_date: '2026-08-21', name: 'Hypothetical Holiday', kind: 'regular' as const }]
+    const run = (employee: PayrollEmployeeInput) =>
+      computePayslip({
+        employee: { ...employee, hireDate: '2026-08-24' },
+        settings,
+        period,
+        tables: DEFAULT_TABLES,
+        days: computeAttendance({
+          periodStart: period.start,
+          periodEnd: period.end,
+          schedule: employee.schedule,
+          standardHoursPerDay: 8,
+          gracePeriodMinutes: 0,
+          entries: WORKDAYS.slice(5).map((d) => ({ work_date: d, clock_in: `${d}T01:00:00Z`, clock_out: `${d}T10:00:00Z` })),
+          holidays: holiday,
+          approvedLeaves: [],
+        }),
+        runType: 'regular',
+      })
+    expect(run(daily).earnings.find((l) => l.code === 'holiday')).toBeUndefined()
+    const m = run(monthly)
+    // Aug 17–20 are docked as absences; Aug 21, the holiday before the hire, as well
+    expect(m.earnings.find((l) => l.code === 'outside_employment')?.amount).toBe(-1379.31)
+    expect(m.trace.warnings.some((w) => w.startsWith('Regular holiday not paid'))).toBe(false)
+  })
+})

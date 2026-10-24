@@ -416,6 +416,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   let paidUnworkedHolidays = 0
   // monthly-paid: regular holidays inside the rate that are not paid
   let unpaidHolidayDays = 0
+  // monthly-paid: days before the hire date or after the last day that the
+  // rate covers and that aren't docked as absences (holidays, special days)
+  let outsideEmploymentDays = 0
   // maternity leave days, and those the monthly rate covers (in days' pay)
   const maternityDates: string[] = []
   let maternityPayDays = 0
@@ -466,8 +469,13 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // (no work already means no pay).
     if (d.onPaidLeave && d.dayType === 'regular') paidLeaveDays += 1
     // an unworked regular holiday is paid on the workday-before rule, even
-    // inside a leave without pay that starts on it
-    const holidayOk = holidayPaid.get(d.date) !== false
+    // inside a leave without pay that starts on it — never before the hire
+    // date or after the last day
+    const employedThen = employed(d.date)
+    const holidayOk = employedThen && holidayPaid.get(d.date) !== false
+    if (!worked && !employedThen && !d.absent && !d.onUnpaidLeave && employee.payType === 'monthly' && builtIn > 0) {
+      outsideEmploymentDays += 1
+    }
     if (d.onUnpaidLeave && !worked && !(isRegularHolidayType(d.dayType) && holidayOk)) {
       if (unpaidLeaveCharged(d.dayType, employee.payType, settings.workingDaysDivisor)) {
         unpaidLeaveDays += 1
@@ -500,7 +508,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         // paid: a covered day is deducted (on leave without pay over it, the
         // unpaid-leave rule above already did).
         if (holidayOk && builtIn === 0) holidayPremium += daily
-        else if (!holidayOk && builtIn > 0 && !d.onUnpaidLeave) unpaidHolidayDays += 1
+        else if (!holidayOk && builtIn > 0 && !d.onUnpaidLeave && employedThen) unpaidHolidayDays += 1
       }
     } else {
       // daily-paid: no work, no pay — each worked day is paid at its multiplier
@@ -540,12 +548,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       `Maternity leave, ${maternityDates.length} day/s (RA 11210): paid as the maternity benefit, not as salary — the SSS maternity benefit the company advances and any salary differential, both tax-exempt (RMC 105-2019).`,
     )
     // the leave starts in this payroll and no maternity pay is on it yet
-    const timeline = [...(params.daysBefore ?? []), ...days]
-    const first = timeline.findIndex((d) => d.date === maternityDates[0])
-    const startsHere = first <= 0 || timeline[first - 1].leaveCode !== MATERNITY_LEAVE_CODE
-    if (startsHere && !(employee.oneTimeEarnings ?? []).some((e) => e.benefit)) {
+    const leaveStart = days.find((d) => d.leaveCode === MATERNITY_LEAVE_CODE)?.leaveStart ?? maternityDates[0]
+    if (leaveStart >= period.start && !(employee.oneTimeEarnings ?? []).some((e) => e.benefit)) {
       warnings.push(
-        `Maternity leave from ${shortDate(maternityDates[0])}: add the SSS maternity benefit (advanced in full within 30 days of the leave application) and any salary differential up to full pay as adjustments — "SSS maternity benefit" and "Maternity salary differential". Retail and service businesses with 10 workers or fewer, micro-businesses and distressed establishments may be exempt from the differential.`,
+        `Maternity leave from ${shortDate(leaveStart)}: add the SSS maternity benefit (advanced in full within 30 days of the leave application) and any salary differential up to full pay as adjustments — "SSS maternity benefit" and "Maternity salary differential". Retail and service businesses with 10 workers or fewer, micro-businesses and distressed establishments may be exempt from the differential.`,
       )
     }
   }
@@ -583,6 +589,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     const unpaidHolidayDeduction = dock(unpaidHolidayDays * daily)
     if (unpaidHolidayDeduction > 0) {
       earn('holiday_unpaid', `Regular holiday not paid (${unpaidHolidayDays} day/s)`, -unpaidHolidayDeduction, 'basic')
+    }
+    const outsideDeduction = dock(outsideEmploymentDays * daily)
+    if (outsideDeduction > 0) {
+      earn('outside_employment', `Holidays before the hire date or after the last day (${outsideEmploymentDays} day/s)`, -outsideDeduction, 'basic')
     }
     const lateDeduction = dock(lateMin * perMinute)
     if (lateDeduction > 0) {
@@ -701,8 +711,11 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const monthCompensation = exactSss ? round2((mc?.compensationAlready ?? 0) + sssCompensation(earnings)) : 0
   const sssMonth: SssComputation = exactSss ? (monthCompensation > 0 ? computeSss(monthCompensation, tables.sss) : NO_SSS) : stat.sss
   const settle = (due: number, already: number | undefined) => round2(due - (already ?? 0))
+  // a payroll that paid no compensation (a period on maternity or unpaid
+  // leave) deducts no provisional SSS: the month's last payroll settles it
+  const noSssPay = !exactSss && !!mc && sssCompensation(earnings) <= 0
   const sssPart = (due: number, already: number | undefined, rate: number) =>
-    exactSss ? settle(due, already) : share(rate, already)
+    exactSss ? settle(due, already) : noSssPay ? 0 : share(rate, already)
   const sssEe = sssPart(sssMonth.ee, mc?.already.sssEe, stat.sss.ee)
   const sssMpfEe = sssPart(sssMonth.mpfEe, mc?.already.sssMpfEe, stat.sss.mpfEe)
   const sssEr = sssPart(sssMonth.er, mc?.already.sssEr, stat.sss.er)
@@ -753,6 +766,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         ? `SSS on the month's compensation ₱${monthCompensation.toLocaleString()} (MSC ₱${sssMonth.msc.toLocaleString()}${earlier > 0 ? `; ₱${earlier.toLocaleString()} of it paid by earlier payrolls this month` : ''}), less what earlier payrolls deducted.`
         : 'No SSS contribution: the month paid no compensation.',
     )
+  } else if (noSssPay && !extrasOnly) {
+    notes.push("No SSS this payroll: it paid no compensation; the month's last payroll settles the month.")
   } else if (!extrasOnly) {
     notes.push(
       mc && !mc.closes

@@ -7,12 +7,21 @@
 -- as amended by RR 11-2018); the tax year follows the pay date, so a run
 -- paid in another month annualizing would settle the wrong year. An
 -- employee who separates is annualized on the payroll with the last day,
--- whatever the month, without this flag.
+-- whatever the month, without this flag. Earlier versions set the flag on
+-- every final pay and allowed it on any run: clear it outside December
+-- first (finalized runs too — their payslips keep what they computed; a
+-- final pay annualizes anyway).
+select set_config('payroll.lifecycle', 'on', false);
+update public.payroll_runs set annualize = false
+  where annualize and extract(month from pay_date) <> 12;
+select set_config('payroll.lifecycle', '', false);
 alter table public.payroll_runs
   add constraint payroll_runs_annualize_december check (not annualize or extract(month from pay_date) = 12);
 
 -- ---------- normal hours of work: eight a day at most (Labor Code Art. 83) ----------
--- (a longer day is a compressed-workweek shift, valid_shift / valid_week_pattern)
+-- (a longer day is a compressed-workweek shift, valid_shift / valid_week_pattern;
+-- a client set above 8 had overtime starting too late)
+update public.entities set standard_hours_per_day = 8 where standard_hours_per_day > 8;
 alter table public.entities
   add constraint entities_standard_hours_max8 check (standard_hours_per_day <= 8);
 

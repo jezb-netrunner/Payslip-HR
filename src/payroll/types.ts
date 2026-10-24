@@ -164,6 +164,8 @@ export interface DayComputation {
   leaveType?: string
   /** the leave type's code, on a leave day not worked */
   leaveCode?: string
+  /** the first day of that leave */
+  leaveStart?: string
 }
 
 // ---------- payroll ----------
