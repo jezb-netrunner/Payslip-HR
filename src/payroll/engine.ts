@@ -70,6 +70,15 @@ function builtInFor(dayType: DayType, workingDaysDivisor: number): number {
   return workingDaysDivisor >= 365 ? 1 : 0
 }
 
+/**
+ * Whether a day of unpaid leave costs pay: for monthly-paid, every day the
+ * monthly rate covers (regular days, holidays, and rest days under divisor
+ * 365); for daily-paid, ordinary workdays (no work is already no pay).
+ */
+export function unpaidLeaveCharged(dayType: DayType, payType: 'monthly' | 'daily', workingDaysDivisor: number): boolean {
+  return payType === 'monthly' ? builtInFor(dayType, workingDaysDivisor) > 0 : dayType === 'regular'
+}
+
 function isRegularHolidayType(dayType: DayType): boolean {
   return dayType === 'regular_holiday' || dayType === 'regular_holiday_rest'
 }
@@ -354,7 +363,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // (no work already means no pay).
     if (d.onPaidLeave && d.dayType === 'regular') paidLeaveDays += 1
     if (d.onUnpaidLeave && !worked) {
-      if (employee.payType === 'monthly' ? builtIn > 0 : d.dayType === 'regular') {
+      if (unpaidLeaveCharged(d.dayType, employee.payType, settings.workingDaysDivisor)) {
         unpaidLeaveDays += 1
         absencePayDays += dayShare(d)
       }

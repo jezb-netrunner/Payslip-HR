@@ -5,6 +5,7 @@
 // built-in PDF fonts can print (no peso sign, no narrow no-break spaces).
 
 import { computeAttendance } from '../payroll/attendance'
+import { unpaidLeaveCharged } from '../payroll/engine'
 import { sameShift } from '../payroll/schedule'
 import { round2, type DayType, type HolidayLite, type ScheduleResolver, type Shift, type WeekPattern } from '../payroll/types'
 import type { CsvValue } from './csv'
@@ -29,6 +30,8 @@ export type ReportEmployee = Pick<
   | 'separation_date'
   | 'pay_frequency'
   | 'work_schedule'
+  | 'pay_type'
+  | 'days_per_year'
 >
 
 export type ReportEntry = Pick<TimeEntry, 'employee_id' | 'work_date' | 'clock_in' | 'clock_out' | 'flags'>
@@ -68,14 +71,16 @@ export interface ReportDay {
   lateMinutes: number
   undertimeMinutes: number
   absent: boolean
-  /** approved leave charged on this workday */
+  /** approved leave charged on this day: paid leave on workdays, unpaid leave on the days payroll docks it */
   leave?: { name: string; paid: boolean }
   /** an entry without a time out: payroll doesn't count it */
   missingTimeOut: boolean
   /** an entry set by an approved correction request */
   corrected: boolean
-  /** after the report's "today": not yet worked, so never an absence */
+  /** after the report's "today": not yet worked, so never an absence, and not in the totals */
   upcoming: boolean
+  /** today without a finished entry, or a shift still clocked in: not an absence yet */
+  inProgress: boolean
   remarks: string[]
 }
 
@@ -115,6 +120,10 @@ export interface TimeReportParams {
   to: string
   /** days after this date are upcoming, not absences */
   today: string
+  /** now, for shifts still clocked in (default: the current time) */
+  now?: number
+  /** the client's working days a year (an employee's own days_per_year wins): which unpaid-leave days cost pay */
+  workingDaysDivisor: number
   employees: ReportEmployee[]
   entries: ReportEntry[]
   leaves: ReportLeave[]
@@ -165,7 +174,9 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
   const entriesBy = groupBy(p.entries)
   const leavesBy = groupBy(p.leaves)
   const out: EmployeeTimeReport[] = []
+  const now = p.now ?? Date.now()
   for (const employee of p.employees) {
+    const divisor = Number(employee.days_per_year ?? p.workingDaysDivisor) || 261
     // days before the hire or after the separation are not this job's days
     const from = employee.hire_date > p.from ? employee.hire_date : p.from
     const to = employee.separation_date && employee.separation_date < p.to ? employee.separation_date : p.to
@@ -199,21 +210,30 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
       }))
       const upcoming = d.date > p.today
       const missingTimeOut = list.some((e) => !e.clock_out)
+      // clocked in within the last day and not out yet: the shift is still on
+      const stillOn = list.some((e) => !e.clock_out && now - Date.parse(e.clock_in) < 86400000)
+      const finished = list.length > 0 && list.every((e) => e.clock_out)
+      const inProgress = !upcoming && (stillOn || (d.date === p.today && !finished))
       // review_time_correction flags the entries it changes or creates
       const corrected = list.some((e) => e.flags?.includes('corrected'))
-      const absent = d.absent && !upcoming
-      // leave is charged on workdays only (as payroll and the leave balances count it)
+      const absent = d.absent && !upcoming && !inProgress
+      // paid leave counts on workdays; unpaid leave on the days payroll docks it
       const leave =
-        (d.onPaidLeave || d.onUnpaidLeave) && d.dayType === 'regular'
-          ? { name: d.leaveType ?? 'Leave', paid: d.onPaidLeave }
-          : undefined
+        d.onPaidLeave && d.dayType === 'regular'
+          ? { name: d.leaveType ?? 'Leave', paid: true }
+          : d.onUnpaidLeave && d.workedMinutes === 0 && unpaidLeaveCharged(d.dayType, employee.pay_type, divisor)
+            ? { name: d.leaveType ?? 'Leave', paid: false }
+            : undefined
       const holiday = holidayByDate.get(d.date)
       const remarks: string[] = []
       if (holiday) remarks.push(`${HOLIDAY_KIND_LABELS[holiday.kind]}: ${holiday.name}`)
       if (!d.scheduled) remarks.push('Rest day')
       if (leave) remarks.push(leave.paid ? leave.name : `${leave.name} (unpaid)`)
       if (absent) remarks.push(missingTimeOut ? 'Absent: time in without a time out' : 'Absent')
+      else if (stillOn) remarks.push('Clocked in, no time out yet')
       else if (missingTimeOut) remarks.push('Entry without a time out (not counted)')
+      else if (inProgress && d.scheduled && !leave) remarks.push('Today: no time in yet')
+      if (upcoming && list.length) remarks.push('Future date: not counted')
       if (corrected) remarks.push('Corrected on request')
       return {
         date: d.date,
@@ -230,17 +250,20 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
         undertimeMinutes: d.undertimeMinutes,
         absent,
         leave,
-        missingTimeOut,
+        missingTimeOut: missingTimeOut && !stillOn,
         corrected,
         upcoming,
+        inProgress,
         remarks,
       }
     })
 
     const totals = emptyTotals()
     for (const d of days) {
+      // time entered ahead for future dates is not worked yet
+      if (d.upcoming) continue
       const worked = d.workedMinutes > 0
-      if (d.dayType === 'regular' && !d.upcoming) totals.workdays += 1
+      if (d.dayType === 'regular' && !(d.inProgress && !worked)) totals.workdays += 1
       if (worked) totals.daysWorked += 1
       if (d.absent) totals.absences += 1
       if (d.leave?.paid) totals.paidLeaveDays += 1
@@ -344,7 +367,9 @@ export function summaryCsv(reports: EmployeeTimeReport[]): CsvValue[][] {
 
 export function detailCsv(reports: EmployeeTimeReport[]): CsvValue[][] {
   // one row per day; a split shift adds "Time in 2 / Time out 2" columns
-  const maxPairs = Math.max(1, ...reports.flatMap((r) => r.days.map((d) => d.pairs.length)))
+  // a loop, not Math.max(...): a year of a large client is too many arguments
+  let maxPairs = 1
+  for (const r of reports) for (const d of r.days) if (d.pairs.length > maxPairs) maxPairs = d.pairs.length
   const pairHeads = Array.from({ length: maxPairs }, (_, i) =>
     i === 0 ? ['Time in', 'Time out'] : [`Time in ${i + 1}`, `Time out ${i + 1}`],
   ).flat()

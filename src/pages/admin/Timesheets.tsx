@@ -35,7 +35,9 @@ interface SheetPreset {
   to?: string
 }
 
-const isDate = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined)
+// a real calendar date (2026-02-30 is not)
+const isDate = (v: string | null) =>
+  v && /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v ? v : undefined
 const isFrequency = (v: string | null) => (v && Object.keys(FREQUENCY_LABELS).includes(v) ? (v as PayFrequency) : undefined)
 
 export default function Timesheets() {
@@ -53,12 +55,17 @@ export default function Timesheets() {
     const t = params.get('tab')
     return t === 'corrections' || t === 'report' ? t : null
   })
-  const [reportPreset] = useState<ReportPreset | null>(() =>
+  const [reportPreset, setReportPreset] = useState<ReportPreset | null>(() =>
     linkedTab === 'report'
       ? { from: isDate(params.get('from')), to: isDate(params.get('to')), frequency: isFrequency(params.get('frequency')) }
       : null,
   )
   const [tab, setTab] = useState(linkedTab ?? (preset ? 'employee' : 'daily'))
+  // the link's dates and frequency belong to the client it was opened for
+  const linkedClient = useRef(entity?.id)
+  useEffect(() => {
+    if (entity?.id !== linkedClient.current) setReportPreset(null)
+  }, [entity?.id])
   useEffect(() => {
     if (!preset && !linkedTab) return
     setParams(
@@ -132,6 +139,8 @@ export default function Timesheets() {
           if (t === tab) return
           if (dirty.current > 0 && !window.confirm(`Discard ${plural(dirty.current, 'unsaved change')}?`)) return
           dirty.current = 0
+          // a pay run's link opens the report once; coming back shows the current cutoff
+          if (tab === 'report') setReportPreset(null)
           setTab(t)
         }}
       />

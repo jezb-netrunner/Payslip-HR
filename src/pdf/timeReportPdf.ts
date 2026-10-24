@@ -4,8 +4,9 @@
 // table. The built-in PDF fonts are WinAnsi only: keep every string ASCII
 // or Latin-1 (timeReport.ts formats dates and times itself for that reason).
 
-import { jsPDF } from 'jspdf'
+import type { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { safeDoc } from './text'
 import { fmtPeriod, fmtTin, fullName, plural } from '../lib/format'
 import { FREQUENCY_LABELS } from '../lib/labels'
 import { manilaHHMM, todayManila } from '../lib/manila'
@@ -223,7 +224,7 @@ export async function buildDtrDoc(
   company: ReportCompany,
   onProgress?: (done: number) => void,
 ): Promise<jsPDF> {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  const doc = safeDoc({ unit: 'mm', format: 'a4' })
   const generated = generatedAt()
   for (let i = 0; i < reports.length; i++) {
     if (i > 0) doc.addPage()
@@ -238,7 +239,7 @@ export async function buildDtrDoc(
 
 /** The whole report as one table: a row per employee and the totals (landscape). */
 export function buildTimeSummaryDoc(reports: EmployeeTimeReport[], company: ReportCompany, from: string, to: string): jsPDF {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' })
+  const doc = safeDoc({ unit: 'mm', format: 'a4', orientation: 'landscape' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
   drawHeader(doc, company, 'TIME IN / OUT SUMMARY', fmtPeriod(from, to))

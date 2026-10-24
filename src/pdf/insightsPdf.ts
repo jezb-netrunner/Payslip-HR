@@ -2,9 +2,10 @@
 // stands out, and every table of the report (the charts' numbers are in the
 // tables). The built-in fonts are WinAnsi: the peso sign prints as "PHP".
 
-import { jsPDF } from 'jspdf'
+import type { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { cellText, type Report } from '../lib/insights'
+import { pdfText, safeDoc } from './text'
 import { drawHeader, generatedAt, type ReportCompany } from './timeReportPdf'
 
 const NAVY: [number, number, number] = [18, 45, 85]
@@ -14,19 +15,9 @@ const MARGIN = 14
 
 type AutoTableDoc = jsPDF & { lastAutoTable: { finalY: number } }
 
-/** WinAnsi-safe text: the peso sign and the few symbols the fonts lack. */
-export function pdfText(s: string): string {
-  return s
-    .replace(/₱\s?/g, 'PHP ')
-    .replace(/[≥]/g, '>=')
-    .replace(/[≤]/g, '<=')
-    .replace(/[−]/g, '-')
-    .replace(/[^\x20-\x7e -ÿ–—‘’“”•…\n]/g, '')
-}
-
 export function generateInsightsPdf(company: ReportCompany, title: string, period: string, report: Report): void {
   const wide = report.tables.some((t) => t.columns.length > 7)
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: wide ? 'landscape' : 'portrait' })
+  const doc = safeDoc({ unit: 'mm', format: 'a4', orientation: wide ? 'landscape' : 'portrait' })
   const pageW = doc.internal.pageSize.getWidth()
   drawHeader(doc, company, pdfText(title), pdfText(period))
   let y = 34

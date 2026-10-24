@@ -29,6 +29,8 @@ function emp(id: string, over: Partial<ReportEmployee> = {}): ReportEmployee {
     separation_date: null,
     pay_frequency: 'semi_monthly',
     work_schedule: dayShift,
+    pay_type: 'daily',
+    days_per_year: null,
     ...over,
   }
 }
@@ -47,6 +49,9 @@ const base: Omit<TimeReportParams, 'employees' | 'entries'> = {
   from: '2026-10-01',
   to: '2026-10-13',
   today: '2026-10-12',
+  // after the range: no shift is still on
+  now: Date.parse('2026-10-14T00:00:00+08:00'),
+  workingDaysDivisor: 261,
   leaves: [{ employee_id: 'a', start_date: '2026-10-06', end_date: '2026-10-06', name: 'Vacation Leave', paid: true }],
   holidays: [{ holiday_date: '2026-10-09', name: 'Company Day', kind: 'special_non_working' }],
   standardHoursPerDay: 8,
@@ -122,8 +127,32 @@ describe('time in/out report', () => {
       ['a', '2026-10-01', '2026-10-06'],
       ['b', '2026-10-08', '2026-10-13'],
     ])
-    // b has no time in/out at all: every past workday is an absence, the holiday is not
-    expect(reports[1].totals).toMatchObject({ workdays: 2, absences: 2, daysWorked: 0 }) // Oct 8 and 12
+    // b has no time in/out at all: every past workday is an absence, the holiday is not, and
+    // today (Oct 12) is still in progress
+    expect(reports[1].totals).toMatchObject({ workdays: 1, absences: 1, daysWorked: 0 }) // Oct 8
+    expect(reports[1].days.find((d) => d.date === '2026-10-12')).toMatchObject({ inProgress: true, absent: false, remarks: ['Today: no time in yet'] })
+  })
+
+  it('keeps a shift still clocked in and time entered ahead out of the totals', () => {
+    const [r] = buildTimeReport({
+      ...base,
+      now: Date.parse('2026-10-12T10:00:00+08:00'),
+      employees: [emp('a')],
+      entries: [entry('a', '2026-10-12', '08:00', null), entry('a', '2026-10-13', '08:00', '17:00')],
+    })
+    expect(r.days.find((d) => d.date === '2026-10-12')).toMatchObject({ inProgress: true, absent: false, missingTimeOut: false, remarks: ['Clocked in, no time out yet'] })
+    expect(r.days.find((d) => d.date === '2026-10-13')).toMatchObject({ upcoming: true, remarks: ['Future date: not counted'] })
+    expect(r.totals).toMatchObject({ daysWorked: 0, workedMinutes: 0, missingTimeOut: 0 })
+  })
+
+  it('counts unpaid leave on the days payroll docks it', () => {
+    // Oct 9 is a special non-working day in this fixture; unpaid leave Oct 8–9
+    const leaves = [{ employee_id: 'm', start_date: '2026-10-08', end_date: '2026-10-09', name: 'Leave without pay', paid: false }]
+    const monthly = buildTimeReport({ ...base, leaves, employees: [emp('m', { pay_type: 'monthly' })], entries: [] })[0]
+    const daily = buildTimeReport({ ...base, leaves, employees: [emp('m')], entries: [] })[0]
+    // the monthly rate covers the special day too (divisor 261), so payroll docks both days
+    expect(monthly.totals.unpaidLeaveDays).toBe(2)
+    expect(daily.totals.unpaidLeaveDays).toBe(1)
   })
 
   it('marks the next-day half of an overnight shift', () => {

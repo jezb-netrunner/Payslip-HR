@@ -4,7 +4,7 @@
 // implementing rules as amended by DOLE D.O. 195-2018).
 // Built-in PDF fonts have no peso sign, so amounts print as "PHP".
 
-import { jsPDF } from 'jspdf'
+import { safeDoc } from './text'
 
 export interface AdvanceFormData {
   employer: { name: string; address?: string | null; tin?: string | null }
@@ -23,7 +23,7 @@ const longDate = (d: string) =>
   new Date(`${d}T00:00:00`).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })
 
 export function generateAdvanceForm(f: AdvanceFormData): void {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  const doc = safeDoc({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 20
   const width = pageW - margin * 2

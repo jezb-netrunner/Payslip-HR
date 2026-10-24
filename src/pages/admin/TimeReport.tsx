@@ -89,9 +89,24 @@ function employedBetween(e: Employee, from: string, to: string): boolean {
   return e.hire_date <= to && (!e.separation_date || e.separation_date >= from)
 }
 
-/** The pay period being worked on: the one after the client's last regular run of its usual frequency. */
+/**
+ * The pay period being worked on: the regular run covering today (a draft
+ * being prepared included), else the period after the last one that ended
+ * before today — stepped forward past any periods nobody ran.
+ */
 function currentCutoff(runs: RunPick[], frequency: PayFrequency, today: string): { start: string; end: string } {
-  return suggestPeriod(frequency, runs.filter((r) => r.run_type === 'regular' && r.pay_frequency === frequency), today)
+  const regular = runs
+    .filter((r) => r.run_type === 'regular' && r.pay_frequency === frequency)
+    .sort((a, b) => b.period_end.localeCompare(a.period_end))
+  const covering = regular.find((r) => r.period_start <= today && r.period_end >= today)
+  if (covering) return { start: covering.period_start, end: covering.period_end }
+  let previous: { period_end: string }[] = regular.filter((r) => r.period_end < today)
+  let next = suggestPeriod(frequency, previous, today)
+  for (let i = 0; i < 60 && next.end < today; i++) {
+    previous = [{ period_end: next.end }, ...previous]
+    next = suggestPeriod(frequency, previous, today)
+  }
+  return next
 }
 
 export default function TimeReport({
@@ -269,9 +284,10 @@ export default function TimeReport({
             schedules: resolversFor(inRange, current.schedules),
             standardHoursPerDay: Number(entity.standard_hours_per_day) || 8,
             gracePeriodMinutes: Number(entity.grace_period_minutes) || 0,
+            workingDaysDivisor: Number(entity.working_days_divisor) || 261,
           })
         : [],
-    [current, from, to, today, employeeId, inRange, entity.standard_hours_per_day, entity.grace_period_minutes],
+    [current, from, to, today, employeeId, inRange, entity.standard_hours_per_day, entity.grace_period_minutes, entity.working_days_divisor],
   )
   const totals = sumTotals(reports)
   const single = employeeId ? (reports[0] ?? null) : null
@@ -281,6 +297,8 @@ export default function TimeReport({
   if (!employees) return <Spinner />
 
   const missing = reports.filter((r) => r.totals.missingTimeOut > 0)
+  // a finalized payroll keeps what it paid; this report recomputes with today's settings
+  const paidRuns = runs.filter((r) => (r.status === 'finalized' || r.status === 'paid') && r.period_start <= to && r.period_end >= from)
 
   return (
     <div className="space-y-6">
@@ -394,6 +412,13 @@ export default function TimeReport({
             <StatCard label="No time out" value={totals.missingTimeOut} sub="not counted by payroll" tone={totals.missingTimeOut ? 'warn' : 'default'} />
           </StatGroup>
 
+          {paidRuns.length > 0 && (
+            <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+              Part of this range was paid in finalized payrolls. This report recomputes it with today's holidays, grace
+              period and leave settings; each payslip keeps what was actually paid. If a setting changed since, the two can
+              differ.
+            </p>
+          )}
           {missing.length > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               <p className="font-bold">Time in without a time out</p>

@@ -19,6 +19,8 @@ function emp(id: string, name: string): ReportEmployee {
     separation_date: null,
     pay_frequency: 'semi_monthly',
     work_schedule: { days: [1, 2, 3, 4, 5, 6], start: '08:00', end: '17:00', break_minutes: 60 },
+    pay_type: 'daily',
+    days_per_year: null,
   }
 }
 
@@ -40,6 +42,8 @@ const report = (employees: ReportEmployee[]) =>
     from: '2026-10-01',
     to: '2026-10-31',
     today: '2026-10-31',
+    now: Date.parse('2026-11-02T00:00:00+08:00'),
+    workingDaysDivisor: 261,
     employees,
     entries: employees.flatMap((e) => month(e.id)),
     leaves: [],
