@@ -278,18 +278,38 @@ sidebar stays expanded — the owner disliked the icon rail). Also fixed a
 pre-existing PDF quirk: a spilled table printed its total under page 1's
 partial list (`showFoot: 'lastPage'`). Tests 189 → 191.
 
+### 2026-10-24 — Time In/Out report; "how do we fix a paid payroll?" (branch `claude/affectionate-carson-hyuwes`)
+
+**Asked:** a report for the Time In/Out; how the user remedies an over/under-
+withholding or another error found after the cut-off and the pay run.
+
+**Did (front end only, no schema/RPC change):** Time In/Out → **Report** tab
+(`src/pages/admin/TimeReport.tsx`): period presets (current cutoff from
+`suggestPeriod`, this/last month, the last 24 pay runs), pay-frequency and
+employee filters, a summary per employee and each one's DTR; downloads as
+PDF (`src/pdf/timeReportPdf.ts`: a DTR page per employee with certification
+and signature lines, or a landscape summary) or CSV (summary, or one row per
+employee-day with extra pair columns for split shifts). Figures come from
+`src/lib/timeReport.ts` → `computeAttendance`. "Edit" links open the
+employee's sheet for the range; each pay run's tip box links to the report
+for its period (`/admin/timesheets?tab=report&from&to&frequency`). Quick
+Guide: the report and "Fixing a mistake after payday". Tests 191 → 202.
+Browser QA on a rebuilt local stack at 1440/1280/1024/768/390/360 px: no page
+errors or failed calls, no table or page overflow (the DTR is a list on
+phones; secondary columns fold under the hours below xl). Researched the
+BIR/DOLE correction rules and answered from the code (see the lesson
+*Correcting a payroll after payday*); the gaps found were reported, not built.
+
 ---
 
 ## Current deployed state (update when it changes)
 
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
-(multi-client), #2 (UI revamp), #3 (Quick Guide) and #4 (test-round fixes,
-merged and deployed 2026-10-23 09:23) are in `main` and live. The cash-advance
-work and the audit fixes are on `claude/cool-cannon-jmj2oz` (fast-forwarded
-to `main` after #4 merged), open as PR #5, and reach the site only when
-merged; their migrations are ALREADY live, so until then the deployed Pay-tab form can't add
-a "Cash advance" recurring deduction (the guard wants release and
-authorization dates — the new Cash Advances page records them).
+(multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
+#5 (cash advances + audit fixes, merged and deployed 2026-10-23 11:11 UTC)
+are in `main` and live. The Time In/Out report (2026-10-24) is on
+`claude/affectionate-carson-hyuwes` and reaches the site only when merged; it
+needs no migration.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
 - **All 17 migrations applied.** The 17th, `20261023105459
@@ -351,7 +371,8 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
 Known-open items (deliberate scope cuts, also in README disclaimers):
 unworked regular-holiday qualification simplified (pays unless on unpaid
 leave that day); BIR DAT file not generated (CSV for the BIR Alphalist
-module instead).
+module instead); no tax-only or reversal adjustment for correcting a paid
+payroll (see *Correcting a payroll after payday*).
 
 ---
 
@@ -760,6 +781,14 @@ Why it mattered: the walkthrough found what unit tests and SQL tests
 couldn't — wrong-date saves, mislabeled controls, phone overflow, a
 double-click that duplicated loans.
 
+Rebuilt 2026-10-24 in ~5 minutes for the Time report QA (no edge function
+needed for pages that don't manage logins): the Postgres data directory
+can't live under `/tmp/claude-0` (root-only 700) — use
+`/var/lib/postgresql/phrdata`; seeding through plain SQL as the superuser works
+(`guard_time_entry` fills `entity_id`); Playwright's `getByLabel` on a
+`<label>`-wrapped `<select>` includes the option text in the name — use
+`locator('label', { hasText }).locator('select')`.
+
 Rebuilt again 2026-10-23 (second session, ~10 minutes): binaries from
 GitHub releases `postgrest-v12.2.12-linux-static-x86-64.tar.xz` and
 `supabase/auth` `auth-v2.180.0-x86.tar.gz` (its `migrations/` dir is
@@ -860,7 +889,10 @@ issued login code shown and printed under the next employee's name.
 > The timeline's late, overtime and hours come from `computeAttendance` for the day (`src/lib/timeline.ts`): payroll waives lateness when the standard day is completed, counts overtime as net minutes beyond the standard day after the unpaid break, and charges no tardiness on non-working holidays — edge-based "arrived after 9:00 / left after 18:00" bars contradicted all three.
 
 Why it mattered: employees would have seen lateness they weren't docked and
-overtime they wouldn't be paid.
+overtime they wouldn't be paid. The Time In/Out report (`src/lib/timeReport.ts`)
+follows the same rule for every figure, clips the range to the hire and
+separation dates (like the engine's absence warning), and treats days after
+today as upcoming — never absences, not counted as workdays.
 
 ### Sign out this device only — edge functions see revoked sessions, PostgREST doesn't
 
@@ -920,6 +952,50 @@ separation — that payroll warns what is still owed instead. Repayments take th
 payroll advisory lock first (same order as finalize). Why it mattered: a
 balance edited by hand loses where the money went — the owner asked for
 "accurately".
+
+### Approved corrections are marked in `time_entries.flags`, not `source`
+
+> `review_time_correction` appends `'corrected'` to the flags of an entry it changes; only an entry it creates also gets `source = 'correction'`. Detect corrections by the flag.
+
+Why it mattered: the report's first version checked `source` and would have
+shown most corrected days (edits of existing entries) as never corrected.
+
+### Correcting a payroll after payday (researched 2026-10-24)
+
+> Finalized runs are corrected by reopening (only sound while nothing later is finalized for those people) or in the next payroll: one-time earnings for underpayments, a balance deduction with written consent for overpayments after reopening, and the year-end annualization for withholding that was off. Tax-only and reversal adjustments do not exist yet.
+
+In the app (written up for admins in `docs/USER_GUIDE.md`): **Reopen as draft**
+restores loan/advance balances and rounding carries, but later finalized
+payslips are not recomputed (only a carried rounding blocks it), so reopen
+latest-first and finalize oldest-first. Underpaid → one-time *Earning* in the
+next run, in the original BIR bucket (basic counts for the 13th month).
+Overpaid → reopen and correct (so taxable pay is right), then a Pay-tab
+deduction with a balance; a one-time *Deduction* is after tax and leaves the
+excess in taxable pay. Withholding off but taxable pay right → the
+annualizing run (December, or final pay) withholds the shortfall or refunds
+the excess; the alphalist flags who is under/over-withheld. Annualization
+reads the STORED payslip lines, so a misclassified earning or a wrong MWE
+flag is only fixed by recomputing those payrolls.
+Verified via search extracts (≥ 2 sources unless noted; .gov.ph unreachable):
+- RR 2-98 §2.79(B)(5) as amended by RR 11-2018: a year-end deficiency is
+  withheld from the December pay (last pay if separated); an excess is
+  refunded by January 25 of the next year. No rule found for or against a
+  mid-year correction (unverified either way).
+- BIR 1601-C (Jan 2018 ENCS) Item 26 "Adjustment of Taxes Withheld from
+  Previous Month/s" (Part IV Schedule 1); an amended return is allowed within
+  3 years absent an audit notice; no BIR rule found on adjustment vs
+  amendment. Late/short remittance: 25% surcharge (50% willful), 12% a year
+  interest, compromise; micro/small taxpayers 10% and half interest (RR 6-2024).
+- Overpayment recovery from wages needs the employee's written authorization
+  and no pecuniary benefit to the employer (IRR Book III Rule VIII §10 as
+  amended by D.O. 195-2018); TSPIC v. TSPIC Employees Union (G.R. 163419, 2008)
+  upheld staggered recovery of a payroll-error overpayment (2 digests).
+- SSS / PhilHealth / Pag-IBIG corrections after remittance: unverified.
+Gaps offered to the owner (not built): a withholding-tax adjustment line for
+mid-year corrections, a negative (reversal) earning adjustment, and a guard
+or warning on reopening a run that later finalized payslips depend on. Why it
+mattered: the honest answer to "how do we fix it" depended on what the code
+really does, and the overpayment path silently over-taxed the employee.
 
 ### Product direction (owner review 2026-10-23)
 

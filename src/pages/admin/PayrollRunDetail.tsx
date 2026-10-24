@@ -674,6 +674,14 @@ export default function PayrollRunDetail() {
           <div className="rounded-xl bg-slate-200/50 p-4">
             <p className="text-sm font-semibold text-ink-900">{tip.title}</p>
             <p className="mt-1 text-sm text-slate-600">{tip.body}</p>
+            {!isThirteenth && (
+              <Link
+                to={`/admin/timesheets?tab=report&from=${run.period_start}&to=${run.period_end}${run.pay_frequency ? `&frequency=${run.pay_frequency}` : ''}`}
+                className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline"
+              >
+                <Clock className="size-4" /> Time report for this period
+              </Link>
+            )}
           </div>
           {notices && <div className="hidden space-y-4 xl:block">{notices}</div>}
           <dl className="space-y-3 rounded-xl border border-slate-200/80 bg-white p-4 text-sm">

@@ -4,11 +4,12 @@
 // shift adds pairs to the day. Times are Manila wall time; an out time
 // earlier than the in time is the next morning (overnight shift). Approved
 // leaves and holidays are shown and skipped by Fill. Paid periods are
-// locked by the database.
+// locked by the database. The Report tab (TimeReport.tsx) summarizes and
+// prints the attendance of a period.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { CalendarDays, Check, FilePen, Lock, Save, UserRound, Wand2, X } from 'lucide-react'
+import { CalendarDays, Check, FileChartColumn, FilePen, Lock, Save, UserRound, Wand2, X } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, NoClient, PageHeader, Select, Spinner, TableShell, Tabs, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
@@ -19,7 +20,10 @@ import { fmtDate, fmtDateTime, fmtHours, fullName, plural } from '../../lib/form
 import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import { FREQUENCY_LABELS } from '../../lib/labels'
 import { notifyPendingChanged, onPendingChanged } from '../../lib/pending'
+import type { PayFrequency } from '../../payroll/types'
+import TimeReport, { type ReportPreset } from './TimeReport'
 
 interface SheetPreset {
   employeeId: string
@@ -28,6 +32,7 @@ interface SheetPreset {
 }
 
 const isDate = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined)
+const isFrequency = (v: string | null) => (v && Object.keys(FREQUENCY_LABELS).includes(v) ? (v as PayFrequency) : undefined)
 
 export default function Timesheets() {
   const { entity } = useEntity()
@@ -38,20 +43,35 @@ export default function Timesheets() {
     const employeeId = params.get('employee')
     return employeeId ? { employeeId, from: isDate(params.get('from')), to: isDate(params.get('to')) } : null
   })
-  // ?tab=corrections (the dashboard's "corrections pending") opens the review queue
-  const [linkedTab] = useState(() => (params.get('tab') === 'corrections' ? 'corrections' : null))
+  // ?tab=corrections (the dashboard's "corrections pending") opens the review queue;
+  // ?tab=report&from&to&frequency (a pay run's "time report") the report for its period
+  const [linkedTab] = useState(() => {
+    const t = params.get('tab')
+    return t === 'corrections' || t === 'report' ? t : null
+  })
+  const [reportPreset] = useState<ReportPreset | null>(() =>
+    linkedTab === 'report'
+      ? { from: isDate(params.get('from')), to: isDate(params.get('to')), frequency: isFrequency(params.get('frequency')) }
+      : null,
+  )
   const [tab, setTab] = useState(linkedTab ?? (preset ? 'employee' : 'daily'))
   useEffect(() => {
     if (!preset && !linkedTab) return
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev)
-        for (const k of ['employee', 'from', 'to', 'tab']) next.delete(k)
+        for (const k of ['employee', 'from', 'to', 'tab', 'frequency']) next.delete(k)
         return next
       },
       { replace: true },
     )
   }, [preset, linkedTab, setParams])
+  // the report's "edit" links open an employee's sheet: a new sheet for each jump
+  const [sheet, setSheet] = useState({ preset, n: 0 })
+  const openSheet = useCallback((employeeId: string, from: string, to: string) => {
+    setSheet((s) => ({ preset: { employeeId, from, to }, n: s.n + 1 }))
+    setTab('employee')
+  }, [])
   // pending correction requests, shown on their tab (the menu's red count lands on the daily sheet)
   const [pendingCount, setPendingCount] = useState<{ entityId: string; n: number } | null>(null)
   const [pendingTick, setPendingTick] = useState(0)
@@ -101,6 +121,7 @@ export default function Timesheets() {
             icon: <FilePen />,
             count: pendingCount && pendingCount.entityId === entityId ? pendingCount.n : 0,
           },
+          { key: 'report', label: 'Report', icon: <FileChartColumn /> },
         ]}
         active={tab}
         onChange={(t) => {
@@ -111,8 +132,9 @@ export default function Timesheets() {
         }}
       />
       {tab === 'daily' && <DailySheet key={entity.id} entity={entity} onDirty={onDirty} />}
-      {tab === 'employee' && <EmployeeSheet key={entity.id} entity={entity} onDirty={onDirty} preset={preset} />}
+      {tab === 'employee' && <EmployeeSheet key={`${entity.id}:${sheet.n}`} entity={entity} onDirty={onDirty} preset={sheet.preset} />}
       {tab === 'corrections' && <Corrections key={entity.id} entity={entity} />}
+      {tab === 'report' && <TimeReport key={entity.id} entity={entity} preset={reportPreset} onEditTimes={openSheet} />}
     </div>
   )
 }
@@ -693,7 +715,10 @@ function EmployeeSheet({
     try {
       const emps = await getEmployees(entity.id)
       setEmployees(emps)
-      setEmployeeId((cur) => cur || emps.find((e) => isActiveOn(e, todayManila()))?.id || '')
+      // a linked employee of another client (the client was switched since) falls back too
+      setEmployeeId((cur) =>
+        cur && emps.some((e) => e.id === cur) ? cur : emps.find((e) => isActiveOn(e, todayManila()))?.id || '',
+      )
     } catch (err) {
       setLoadError(errorMessage(err, 'Failed to load employees'))
     }

@@ -15,6 +15,7 @@ Always pick the client first in the client selector at the top.
 
 1. **Employees** → add employees (201 file, government IDs, pay rate, pay frequency, schedule) and generate each one's **login code**.
 2. **Time In / Out** → key in attendance (daily sheet for the team, or per-employee for a period). **Fill** pre-loads scheduled days.
+   The **Report** tab shows a period's attendance — totals per employee and each one's daily time record (DTR), with the hours, overtime, lateness and absences payroll will use — and **Download**s it as a PDF (to print and sign) or CSV. A pay run links to the report for its period.
 3. **Leaves** → approve/reject leave requests; **Time In / Out → Correction requests** → review employees' missing-time reports (red counts show what's pending).
 4. **Pay Runs** → **New pay run** (frequency + period) → add adjustments if any → **Compute draft** → review → **Finalize**.
    Finalizing publishes payslips to employees and locks the period's attendance. **Reopen** if you need to fix something (audit-logged), then recompute and finalize again.
@@ -23,6 +24,13 @@ Always pick the client first in the client selector at the top.
 6. **Cash Advances** → **Record advance** when you release one (or **Requests** → **Approve…** an employee's request): amount, deduction per payroll, release and first-deduction dates. Print the **agreement**, have the employee sign it, and tick *Signed by the employee on* — an advance can't be saved without it. Each finalized payroll deducts the installment (never more than the net pay); the payroll that includes a separation takes the rest (a paused advance shows up in that payroll's review warnings instead). **Details** shows the history; record a **repayment** made outside payroll there, pause deductions, or change the installment.
 7. **BIR & Reports** → 1601-C, 1604-C alphalist, 2316, SSS / PhilHealth / Pag-IBIG reports.
 8. **Announcements** → post notices to employees.
+
+## Fixing a mistake after payday
+- **Not paid out yet** → open the run → **Reopen as draft** → fix it → recompute → finalize. A reopen doesn't recompute later payslips: if later payrolls of the same people are finalized, reopen those first (latest first) and finalize again oldest first.
+- **Underpaid** (missed overtime, a day docked by mistake) → next pay run → **Add adjustment** → *Earning* with the matching classification (e.g. Overtime, Basic pay) and a label naming the period. It is taxed, and counts toward the 13th month, like the original pay.
+- **Overpaid** → reopen the paid run and correct it so the taxable pay is right, then on the employee's **Pay** tab add a deduction (*Other*, amount per payroll, balance = the excess) — only with the employee's written consent. A one-time deduction alone would leave the excess in taxable pay.
+- **Tax withheld wrong, pay right** → fix the cause (e.g. a wrong tax table version) for future payrolls. The year's last payroll with **Annualize** ticked (or the final pay) then withholds what is short or refunds what is over. **BIR & Reports → Alphalist** lists who is under- or over-withheld. If the *taxable amount* was wrong (an earning classified non-taxable, the minimum-wage flag), annualization can't see it: reopen and recompute the payrolls involved.
+- **That month's 1601-C is already filed** → report the difference on a later 1601-C (adjustment of taxes withheld from previous months; record it under **1601-C remittances → Adjustment**) or amend the return. Interest and penalties may apply, so check with your accountant.
 
 ## Employees
 - **Dashboard** — latest take-home pay, deductions, leave balances.

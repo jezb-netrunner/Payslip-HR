@@ -45,7 +45,10 @@ are refused; the Generate button makes random ones.
   scheduled days from each employee's shift; Fill skips approved leaves and
   non-working holidays), split shifts as extra in/out pairs, with rest days,
   holidays and approved leaves shown; employees can only *request*
-  corrections. Attendance is locked once it has been paid in a finalized run
+  corrections. Attendance is locked once it has been paid in a finalized run.
+  A **Report** tab gives any period's totals per employee and each one's
+  daily time record (DTR), computed as payroll computes them, as PDF (with
+  signature lines) or CSV
 - Leaves: per-client leave types (seeded from statutory templates),
   per-employee credits, approvals that feed payroll, leaves filed by HR for
   an employee, and revoking an approved leave (until its days are paid).
