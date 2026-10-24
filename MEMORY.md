@@ -441,8 +441,12 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   YTD basic ÷ 12, due Dec 24.
 - **2026 holidays**: Proclamation 1006 (+1189 Eid'l Fitr Mar 20, +1264 Eid'l
   Adha May 27) — 12 regular, 8 special non-working, Feb 25 special *working*.
-- **NCR minimum wage reference**: ₱755/day non-agri (WO NCR-27, eff. Jul 25,
-  2026); it's an admin setting, not hardcoded.
+- **NCR minimum wage reference** (corrected 2026-10-24): ₱755/day non-agri
+  under **WO NCR-28, eff. Sep 26, 2026** (single ₱60 increase from ₱695);
+  ₱718 for agriculture, retail/service with ≤15 workers and manufacturing
+  with <10. WO NCR-27 (the earlier "₱755 from Jul 25" and its ₱780 Jan 2027
+  tranche) was enjoined by a Pasig RTC and never took effect, so NCR pay
+  from Jul 25 to Sep 25 stayed ₱695. It's an admin setting, not hardcoded.
 - **De minimis** (RR 29-2025, eff. Jan 6, 2026): rice ₱2,500/mo, uniform
   ₱8,000/yr, laundry ₱400/mo, medical assistance ₱12,000/yr, gifts ₱6,000/yr,
   CBA+productivity ₱12,000/yr, OT meal 30% of regional minimum wage,
@@ -450,8 +454,8 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   non-taxable allowances — ceilings are the admin's responsibility.
 
 Re-verify on these triggers: every January (agency announcements, new BIR
-RRs); wage orders per region (NCR 2nd tranche **₱780 on Jan 20, 2027** —
-admin must update the setting); each ~Aug–Oct for next year's holiday
+RRs); wage orders per region (NCR-28 has no second tranche; watch the
+Supreme Court petitions on NCR-27 — admin must update the setting); each ~Aug–Oct for next year's holiday
 proclamation (Eid dates arrive by separate proclamations only weeks ahead);
 pending bills (13th-month cap increases, PhilHealth premium cuts).
 

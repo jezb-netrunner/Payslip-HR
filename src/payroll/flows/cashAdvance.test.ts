@@ -115,7 +115,7 @@ describe('cash advances in payroll', () => {
     const owed = adv.balance
     expect(owed).toBeGreaterThan(0)
     // final pay with a converted leave settles the rest
-    const fp = addRun(ent, { run_type: 'final_pay', period_start: '2026-11-01', period_end: '2026-11-15', pay_date: '2026-11-20', employee_ids: [emp.id], annualize: true })
+    const fp = addRun(ent, { run_type: 'final_pay', period_start: '2026-11-01', period_end: '2026-11-15', pay_date: '2026-11-20', employee_ids: [emp.id] })
     db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: fp.id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'SIL conversion', amount: 10000, category: 'other_taxable' })
     await computeRun(fp as never, ent as never)
     finalize(fp.id)

@@ -172,8 +172,8 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :sa, true);
 insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, released_on, release_method, authorized_on)
 values ('7000000e-0000-0000-0000-000000000001', '20000000-0000-0000-0000-0000000000b1', 'Cash advance (Nov 2, 2026)', 'cash_advance', 0, 2000, 2000, '2026-11-02', 'cash', '2026-11-02');
-insert into recurring_deductions (id, employee_id, label, category, amount_per_period, balance, total_amount)
-values ('7000000e-0000-0000-0000-000000000002', '20000000-0000-0000-0000-0000000000b1', 'Company loan', 'company_loan', 500, 3000, 3000);
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, balance, total_amount, authorized_on)
+values ('7000000e-0000-0000-0000-000000000002', '20000000-0000-0000-0000-0000000000b1', 'Company loan', 'company_loan', 500, 3000, 3000, '2026-11-02');
 select pg_temp.computed('3000000e-0000-0000-0000-000000000001');
 insert into payroll_deduction_overrides (id, payroll_run_id, deduction_id, amount, note) values
   ('5400000e-0000-0000-0000-000000000001', '3000000e-0000-0000-0000-000000000001', '7000000e-0000-0000-0000-000000000001', 750, 'agreed on payday'),
@@ -234,12 +234,12 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :sa, true);
 -- a paused loan that this payroll pays off through an amount set for it
-insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, active)
-values ('7000000e-0000-0000-0000-000000000003', '20000000-0000-0000-0000-0000000000b1', 'Paused loan', 'company_loan', 200, 600, 600, false);
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, active, authorized_on)
+values ('7000000e-0000-0000-0000-000000000003', '20000000-0000-0000-0000-0000000000b1', 'Paused loan', 'company_loan', 200, 600, 600, false, '2026-11-02');
 insert into payroll_deduction_overrides (payroll_run_id, deduction_id, amount) values ('3000000e-0000-0000-0000-000000000001', '7000000e-0000-0000-0000-000000000003', 600);
 -- an active loan its installment pays off
-insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, active)
-values ('7000000e-0000-0000-0000-000000000004', '20000000-0000-0000-0000-0000000000b1', 'Last installment', 'company_loan', 300, 300, 300, true);
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, active, authorized_on)
+values ('7000000e-0000-0000-0000-000000000004', '20000000-0000-0000-0000-0000000000b1', 'Last installment', 'company_loan', 300, 300, 300, true, '2026-11-02');
 update payslips set deductions = '[{"code":"other:company_loan","label":"Paused loan","amount":600,"meta":"7000000e-0000-0000-0000-000000000003"},{"code":"other:company_loan","label":"Last installment","amount":300,"meta":"7000000e-0000-0000-0000-000000000004"}]', total_deductions = 900, net_pay = 3630
   where payroll_run_id = '3000000e-0000-0000-0000-000000000001';
 select pg_temp.computed('3000000e-0000-0000-0000-000000000001');

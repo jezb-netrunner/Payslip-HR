@@ -151,8 +151,8 @@ select pg_temp.expect_error($$update recurring_deductions set released_on = null
 select pg_temp.expect_error($$update recurring_deductions set start_date = '2026-11-02' where id = '7000000f-0000-0000-0000-000000000001'$$, '%can''t come before the release%');
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, start_date, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 250, 1000, 1000, '2026-11-01', '2026-11-03', '2026-11-03')$$, '%can''t come before the release%');
 -- other deductions can't be turned into advances (that would skip the checks above)
-insert into recurring_deductions (id, employee_id, label, category, amount_per_period)
-values ('7000000f-0000-0000-0000-000000000009', '20000000-0000-0000-0000-0000000000a1', 'Uniform', 'other', 100);
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, authorized_on)
+values ('7000000f-0000-0000-0000-000000000009', '20000000-0000-0000-0000-0000000000a1', 'Uniform', 'other', 100, '2026-11-01');
 select pg_temp.expect_error($$update recurring_deductions set category = 'cash_advance' where id = '7000000f-0000-0000-0000-000000000009'$$, '%Cash Advances%');
 commit;
 

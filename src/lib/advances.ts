@@ -18,6 +18,14 @@ export const DEDUCTION_CATEGORY_LABELS: Record<string, string> = {
   other: 'Other',
 }
 
+/**
+ * Deductions the law doesn't provide for: the employee's written
+ * authorization comes first (Labor Code Art. 113; the database's
+ * guard_deduction_authorization). Government loans and union dues are
+ * outside it; cash advances carry their own authorization date.
+ */
+export const AUTHORIZED_DEDUCTIONS = ['company_loan', 'hmo', 'other']
+
 export type AdvanceStatus = 'active' | 'scheduled' | 'paused' | 'paid'
 
 export function advanceStatus(a: Pick<RecurringDeduction, 'balance' | 'active' | 'start_date'>, today: string): AdvanceStatus {

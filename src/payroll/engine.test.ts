@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { computeAttendance } from './attendance'
 import { DEFAULT_TABLES } from './defaults'
-import { allocateMonthly, computePayslip } from './engine'
+import { allocateMonthly, computePayslip, unworkedHolidaysPaid } from './engine'
 import { round2 } from './types'
 import type {
   DayComputation,
@@ -632,5 +632,110 @@ describe('payslip: cash advances', () => {
     const short = run([advance({ amount: 50000, balance: 50000, settlement: true })])
     expect(short.netPay).toBe(0)
     expect(short.trace.warnings[0]).toMatch(/of the balance could not be deducted \(not enough net pay\) and is still owed — collect it outside payroll\.$/)
+  })
+})
+
+describe('regular holiday pay needs the workday before (IRR Book III, Rule IV, Secs. 6 and 10)', () => {
+  const heroes: HolidayLite[] = [{ holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' }]
+  const dailyEmployee: PayrollEmployeeInput = { ...monthlyEmployee, id: 'e4', payType: 'daily', monthlyRate: 0, dailyRate: 700 }
+  const pay = (employee: PayrollEmployeeInput, days: DayComputation[], daysBefore?: DayComputation[]) =>
+    computePayslip({ employee, settings, period, tables: DEFAULT_TABLES, days, daysBefore, runType: 'regular' })
+  // absent Friday Aug 28, the workday before Monday's holiday
+  const absentFriday = WORKDAYS.filter((d) => d !== '2026-08-28' && d !== '2026-08-31').map((d) => entry(d))
+
+  it('withholds it from a daily-paid employee absent the workday before', () => {
+    const slip = pay(dailyEmployee, attendance(absentFriday, heroes))
+    expect(slip.earnings.find((l) => l.code === 'holiday')).toBeUndefined()
+    expect(slip.trace.warnings.some((w) => w.startsWith('Regular holiday not paid (National Heroes Day, '))).toBe(true)
+  })
+
+  it('deducts it from a monthly-paid employee absent the workday before', () => {
+    const slip = pay(monthlyEmployee, attendance(absentFriday, heroes))
+    expect(slip.earnings.find((l) => l.code === 'absence')?.amount).toBe(-1379.31) // Aug 28
+    expect(slip.earnings.find((l) => l.code === 'holiday_unpaid')?.amount).toBe(-1379.31) // Aug 31
+  })
+
+  it('pays it when a leave without pay starts on the holiday', () => {
+    const lwop = (employee: PayrollEmployeeInput) =>
+      computeAttendance({
+        periodStart: period.start,
+        periodEnd: period.end,
+        schedule: employee.schedule,
+        standardHoursPerDay: 8,
+        gracePeriodMinutes: 0,
+        entries: WORKDAYS.filter((d) => d !== '2026-08-31').map((d) => entry(d)),
+        holidays: heroes,
+        approvedLeaves: [{ start_date: '2026-08-31', end_date: '2026-09-04', paid: false, type_name: 'LWOP' }],
+      })
+    expect(pay(dailyEmployee, lwop(dailyEmployee)).earnings.find((l) => l.code === 'holiday')?.amount).toBe(700)
+    const monthly = pay(monthlyEmployee, lwop(monthlyEmployee))
+    expect(monthly.earnings.find((l) => l.code === 'absence')).toBeUndefined()
+    expect(monthly.grossPay).toBe(15000)
+  })
+
+  it('pays it after paid leave on the workday before', () => {
+    const days = computeAttendance({
+      periodStart: period.start,
+      periodEnd: period.end,
+      schedule: dailyEmployee.schedule,
+      standardHoursPerDay: 8,
+      gracePeriodMinutes: 0,
+      entries: absentFriday,
+      holidays: heroes,
+      approvedLeaves: [{ start_date: '2026-08-28', end_date: '2026-08-28', paid: true, type_name: 'Vacation Leave' }],
+    })
+    expect(pay(dailyEmployee, days).earnings.find((l) => l.code === 'holiday')?.amount).toBe(700)
+  })
+
+  it('looks back past the weekend into the days before the period', () => {
+    // Monday Aug 17 a holiday: the workday before is Friday Aug 14, last period
+    const monday: HolidayLite[] = [{ holiday_date: '2026-08-17', name: 'Hypothetical Holiday', kind: 'regular' }]
+    const before = (worked: string[]) =>
+      computeAttendance({
+        periodStart: '2026-08-07',
+        periodEnd: '2026-08-15',
+        schedule: dailyEmployee.schedule,
+        standardHoursPerDay: 8,
+        gracePeriodMinutes: 0,
+        entries: worked.map((d) => entry(d)),
+        holidays: [],
+        approvedLeaves: [],
+      })
+    const days = attendance(WORKDAYS.filter((d) => d !== '2026-08-17').map((d) => entry(d)), monday)
+    expect(pay(dailyEmployee, days, before(['2026-08-13'])).earnings.find((l) => l.code === 'holiday')).toBeUndefined()
+    expect(pay(dailyEmployee, days, before(['2026-08-14'])).earnings.find((l) => l.code === 'holiday')?.amount).toBe(700)
+    // nothing on record before the period: paid
+    expect(pay(dailyEmployee, days).earnings.find((l) => l.code === 'holiday')?.amount).toBe(700)
+  })
+
+  it('chains successive holidays: Holy Thursday and Good Friday', () => {
+    const holyWeek: HolidayLite[] = [
+      { holiday_date: '2026-04-02', name: 'Maundy Thursday', kind: 'regular' },
+      { holiday_date: '2026-04-03', name: 'Good Friday', kind: 'regular' },
+    ]
+    const week = (worked: string[]) =>
+      computeAttendance({
+        periodStart: '2026-03-30',
+        periodEnd: '2026-04-05',
+        schedule: dailyEmployee.schedule,
+        standardHoursPerDay: 8,
+        gracePeriodMinutes: 0,
+        entries: worked.map((d) => entry(d)),
+        holidays: holyWeek,
+        approvedLeaves: [],
+      })
+    const always = () => true
+    // absent Wednesday: neither holiday is paid
+    expect([...unworkedHolidaysPaid(week(['2026-03-30', '2026-03-31']), always)]).toEqual([
+      ['2026-04-02', false],
+      ['2026-04-03', false],
+    ])
+    // present Wednesday: both are
+    expect([...unworkedHolidaysPaid(week(['2026-04-01']), always)]).toEqual([
+      ['2026-04-02', true],
+      ['2026-04-03', true],
+    ])
+    // absent Wednesday but worked Thursday: Friday is paid
+    expect([...unworkedHolidaysPaid(week(['2026-04-02']), always)]).toEqual([['2026-04-03', true]])
   })
 })

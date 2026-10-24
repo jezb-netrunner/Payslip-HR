@@ -78,23 +78,40 @@ begin
 end
 $$;
 
--- Monday..Sunday: a shift snapshot, or null for a rest day
+-- Monday..Sunday: a shift snapshot, or null for a rest day. A week with a
+-- compressed day is a compressed workweek: fewer than six workdays and at
+-- most 48 hours of work (DOLE Department Advisory 02-04).
 create or replace function public.valid_week_pattern(p jsonb)
 returns boolean
 language plpgsql immutable set search_path = public
 as $$
 declare
   i int;
+  v_days int := 0;
+  v_minutes int := 0;
+  v_compressed boolean := false;
+  v_start int;
+  v_end int;
+  v_break int;
 begin
   if p is null or jsonb_typeof(p) <> 'array' or jsonb_array_length(p) <> 7 then
     return false;
   end if;
   for i in 0..6 loop
-    if jsonb_typeof(p->i) <> 'null' and not public.valid_shift(p->i) then
-      return false;
+    if jsonb_typeof(p->i) <> 'null' then
+      if not public.valid_shift(p->i) then
+        return false;
+      end if;
+      v_days := v_days + 1;
+      v_compressed := v_compressed or coalesce((p->i->>'compressed')::boolean, false);
+      v_start := split_part(p->i->>'start', ':', 1)::int * 60 + split_part(p->i->>'start', ':', 2)::int;
+      v_end := split_part(p->i->>'end', ':', 1)::int * 60 + split_part(p->i->>'end', ':', 2)::int;
+      v_break := (p->i->>'break_minutes')::int;
+      v_minutes := v_minutes + (case when v_end > v_start then v_end - v_start else v_end - v_start + 1440 end)
+                             - (case when v_break >= 60 then v_break else 0 end);
     end if;
   end loop;
-  return true;
+  return not v_compressed or (v_days <= 5 and v_minutes <= 2880);
 end
 $$;
 

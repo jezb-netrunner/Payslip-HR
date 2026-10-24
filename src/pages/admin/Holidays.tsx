@@ -83,7 +83,7 @@ export default function Holidays() {
     <div>
       <PageHeader
         title="Holidays"
-        subtitle={`National holidays apply to every client (2026 from Proclamations 1006, 1189 and 1264). Local holidays${entity ? ` apply to ${entity.name} only` : ' apply per client'}.`}
+        subtitle={`National holidays apply to every client (2026: Proclamations 1006, 1189 and 1264; 2027: Proclamation 1427 — Eid'l Fitr and Eid'l Adha are proclaimed later, add them when announced). Local holidays${entity ? ` apply to ${entity.name} only` : ' apply per client'} — e.g. Metro Manila's special non-working days of Nov 16–18, 2026 (Proclamation 1447) for NCR clients.`}
         actions={
           <>
             <Select value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-28">

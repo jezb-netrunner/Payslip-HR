@@ -1,8 +1,11 @@
 // Year-level consistency:
 //  - Dec 16-31 payroll paid Jan 5: Dec contributions, next year's BIR
 //  - weekly months with 4 and 5 cutoffs, mid-month hire, split/first/last
-//  - mid-month rate decrease under split / first_period: no negative, no duplicate
+//  - mid-month rate decrease under split / first_period: SSS settles on the
+//    month's pay (a refund when the first payroll took too much), the others
+//    never go negative or repeat
 //  - first_period re-hire within the month (same record)
+// SSS follows the month's actual compensation; PhilHealth and Pag-IBIG the rate.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSupabase, resetDb, addEntity, addEmployee, addAttendance, addRun, finalize, slipsOf, db } from './fakeSupabase'
 
@@ -63,7 +66,9 @@ describe('flows', () => {
     const sh = runs.flatMap((r) => slipsOf(r.id, h.id))
     expect(ee(sa)).toBe(2450)
     expect(er(sa)).toBe(3980)
-    expect(ee(sh)).toBe(2450)
+    // the hire's month paid ₱12,241.38 (Oct) / ₱12,482.76 (Aug, five cutoffs): SSS MSC 12,000 / 12,500,
+    // plus PhilHealth 750 and Pag-IBIG 200 on the rate
+    expect(ee(sh)).toBe(ym === '2026-10' ? 1550 : 1575)
   })
 
   it.each(['split', 'first_period'] as const)('%s: rate decrease mid-month — no negative, no duplicate', async (timing) => {
@@ -74,8 +79,11 @@ describe('flows', () => {
     emp.monthly_rate = 18000
     const { r: r2 } = await runAndFinalize(ent, { period_start: '2026-10-16', period_end: '2026-10-31', pay_date: '2026-11-05' })
     const p2 = slipsOf(r2.id)[0]
-    const cols = ['sss_ee', 'sss_mpf_ee', 'philhealth_ee', 'pagibig_ee', 'sss_er', 'sss_mpf_er', 'sss_ec_er', 'philhealth_er', 'pagibig_er']
+    const cols = ['philhealth_ee', 'pagibig_ee', 'philhealth_er', 'pagibig_er']
     for (const c of cols) expect(p2[c]).toBeGreaterThanOrEqual(0)
+    // October paid 20,000 + 9,000: SSS MSC 29,000 — EE 1,000 + MPF 450 over the month
+    const oct = db.t.payslips.filter((p) => p.period_month === '2026-10-01')
+    expect(Math.round(oct.reduce((s, p) => s + p.sss_ee + p.sss_mpf_ee, 0) * 100) / 100).toBe(1450)
   })
 
   it('first_period re-hire within the month (same record) — no duplicate month', async () => {
@@ -88,6 +96,7 @@ describe('flows', () => {
     addAttendance(emp, '2026-10-19', '2026-10-31')
     const { r: r2 } = await runAndFinalize(ent, { period_start: '2026-10-16', period_end: '2026-10-31', pay_date: '2026-11-05' })
     const oct = [...slipsOf(r1.id), ...slipsOf(r2.id)]
-    expect(ee(oct)).toBe(2450)
+    // SSS on October's pay (₱3,965.52 + ₱13,620.69 → MSC 17,500: 875), PhilHealth 750 and Pag-IBIG 200 once
+    expect(ee(oct)).toBe(1825)
   })
 })

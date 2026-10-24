@@ -319,8 +319,8 @@ select pg_temp.check((select rounding_balance from employees where id = '2000000
 update time_entries set clock_out = clock_out + interval '15 minutes';
 commit;
 -- a payslip's deduction line can only move its own employee's loan
-insert into recurring_deductions (id, employee_id, label, category, amount_per_period, balance)
-values ('40000000-0000-0000-0000-0000000000b1', '20000000-0000-0000-0000-0000000000e2', 'BETA loan', 'company_loan', 1000, 20000);
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, balance, authorized_on)
+values ('40000000-0000-0000-0000-0000000000b1', '20000000-0000-0000-0000-0000000000e2', 'BETA loan', 'company_loan', 1000, 20000, '2026-10-01');
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :ea, true);

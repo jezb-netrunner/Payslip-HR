@@ -70,9 +70,10 @@ import {
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
   PAYMENT_METHOD_LABELS,
+  philhealthWaiverProblem,
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
-import { DEDUCTION_CATEGORY_LABELS, repaymentText } from '../../lib/advances'
+import { AUTHORIZED_DEDUCTIONS, DEDUCTION_CATEGORY_LABELS, repaymentText } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
@@ -582,6 +583,9 @@ function PayTab({
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
     bank_account_no: employee.bank_account_no ?? '',
+    ph_waiver: employee.philhealth_ee_waiver ?? '',
+    ph_waiver_from: employee.philhealth_ee_waiver_from ?? '',
+    ph_waiver_until: employee.philhealth_ee_waiver_until ?? '',
   })
   const [busy, setBusy] = useState(false)
   const [listBusy, setListBusy] = useState(false)
@@ -592,6 +596,11 @@ function PayTab({
     const dpy = f.days_per_year ? Number(f.days_per_year) : null
     if (dpy !== null && !(dpy > 0 && dpy <= 366)) {
       toast('error', 'Days-per-year factor must be between 1 and 366 (or blank for the client default).')
+      return
+    }
+    const waiverProblem = philhealthWaiverProblem(f.ph_waiver, f.ph_waiver_from, f.ph_waiver_until)
+    if (waiverProblem) {
+      toast('error', waiverProblem)
       return
     }
     setBusy(true)
@@ -608,6 +617,9 @@ function PayTab({
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
           bank_account_no: f.bank_account_no || null,
+          philhealth_ee_waiver: f.ph_waiver || null,
+          philhealth_ee_waiver_from: f.ph_waiver ? f.ph_waiver_from : null,
+          philhealth_ee_waiver_until: f.ph_waiver ? f.ph_waiver_until || null : null,
         })
         .eq('id', employee.id)
       if (error) throw error
@@ -670,6 +682,10 @@ function PayTab({
       toast('error', 'The end date is before the start date.')
       return
     }
+    if (AUTHORIZED_DEDUCTIONS.includes(d.category) && !d.authorized) {
+      toast('error', 'Enter the date the employee signed the written authorization for this deduction (Labor Code Art. 113).')
+      return
+    }
     const row = {
       label: d.label.trim(),
       category: d.category,
@@ -677,6 +693,7 @@ function PayTab({
       balance,
       start_date: d.start || null,
       end_date: d.end || null,
+      authorized_on: d.authorized || null,
     }
     const done = await listWrite(
       () =>
@@ -757,6 +774,28 @@ function PayTab({
             </p>
           )}
         </div>
+        <div className="mt-4 space-y-3 rounded-lg bg-slate-50 p-3">
+          <Field
+            label="PhilHealth employee share"
+            hint="The national government pays it for an employed PWD (RA 11228) and, from Sep 26, 2026, a solo parent (RA 11861; PhilHealth Circular 2026-0015). The employer share is unchanged. Keep a copy of the PWD or Solo Parent ID."
+          >
+            <Select value={f.ph_waiver} onChange={(e) => setF({ ...f, ph_waiver: e.target.value as typeof f.ph_waiver })}>
+              <option value="">Deducted from pay</option>
+              <option value="pwd">Paid by the government — person with disability</option>
+              <option value="solo_parent">Paid by the government — solo parent</option>
+            </Select>
+          </Field>
+          {f.ph_waiver && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="From">
+                <Input type="date" value={f.ph_waiver_from} onChange={(e) => setF({ ...f, ph_waiver_from: e.target.value })} />
+              </Field>
+              <Field label="Until (optional)" hint="e.g. when the ID expires">
+                <Input type="date" value={f.ph_waiver_until} onChange={(e) => setF({ ...f, ph_waiver_until: e.target.value })} />
+              </Field>
+            </div>
+          )}
+        </div>
         <Button className="mt-4" disabled={busy} onClick={savePay}>
           {busy ? 'Saving…' : 'Save pay details'}
         </Button>
@@ -819,7 +858,7 @@ function PayTab({
         icon={<Receipt />}
         className="lg:col-span-2"
         actions={
-          <Button variant="secondary" onClick={() => setEditingDed({ label: '', category: 'other', amount: '', balance: '', start: '', end: '' })}>
+          <Button variant="secondary" onClick={() => setEditingDed({ label: '', category: 'other', amount: '', balance: '', start: '', end: '', authorized: '' })}>
             <Plus className="size-4" /> Add
           </Button>
         }
@@ -849,6 +888,7 @@ function PayTab({
                       balance: d.balance === null ? '' : String(d.balance),
                       start: d.start_date ?? '',
                       end: d.end_date ?? '',
+                      authorized: d.authorized_on ?? '',
                     })
                   }
                   className="text-xs font-semibold text-brand-600"
@@ -974,6 +1014,14 @@ function PayTab({
                 <Input type="date" value={editingDed.end} onChange={(e) => setEditingDed({ ...editingDed, end: e.target.value })} />
               </Field>
             </div>
+            {AUTHORIZED_DEDUCTIONS.includes(editingDed.category) && (
+              <Field
+                label="Employee's written authorization signed on"
+                hint="Required: a deduction the law doesn't provide for (a company loan, HMO or insurance premium, anything else) needs the employee's written authorization (Labor Code Art. 113). Keep the signed copy on file."
+              >
+                <Input type="date" value={editingDed.authorized} onChange={(e) => setEditingDed({ ...editingDed, authorized: e.target.value })} />
+              </Field>
+            )}
             <Button className="w-full" disabled={listBusy} onClick={() => saveDeduction(editingDed)}>
               {listBusy ? 'Saving…' : 'Save'}
             </Button>
@@ -1001,6 +1049,8 @@ interface DeductionForm {
   balance: string
   start: string
   end: string
+  /** date the written authorization was signed ('' = none) */
+  authorized: string
 }
 
 

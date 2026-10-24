@@ -996,10 +996,14 @@ export interface PaySettings {
 
 const employedOn = (e: PersonRow, d: string) => e.hire_date <= d && (!e.separation_date || e.separation_date >= d)
 
-/** Six months of probation are 180 days (Civil Code Art. 13; Mitsubishi Motors v. Chrysler Phils. Labor Union, G.R. 148738). */
+/**
+ * Six months of probation are 180 days, counted with the first day excluded
+ * (Civil Code Art. 13; Mitsubishi Motors v. Chrysler Phils. Labor Union,
+ * G.R. 148738: hired May 27, 1996, probation ended Nov 23, 1996).
+ */
 export const PROBATION_DAYS = 180
 /** The last day of a probationary period that started on the hire date. */
-export const probationEnds = (hire: string) => addDays(hire, PROBATION_DAYS - 1)
+export const probationEnds = (hire: string) => addDays(hire, PROBATION_DAYS)
 
 const yearsBetween = (a: string, b: string) => (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / (365.25 * 864e5)
 
@@ -1142,16 +1146,19 @@ export function headcountReport(all: PersonRow[], range: MonthRange, today: stri
   }
   const leaving = activeNow.filter((e) => e.separation_date && e.separation_date >= today && e.separation_date <= addDays(today, 30))
   if (leaving.length) {
-    insights.push({ tone: 'info', text: `Leaving within 30 days: ${names(leaving.map((e) => `${name(e)} (${fmtDate(e.separation_date)})`))} — plan their handover and final pay.` })
+    insights.push({
+      tone: 'info',
+      text: `Leaving within 30 days: ${names(leaving.map((e) => `${name(e)} (${fmtDate(e.separation_date)})`))} — plan their handover. Final pay is due within 30 days of the last day, and a certificate of employment within 3 days of a request (DOLE Labor Advisory 06-20).`,
+    })
   }
   if (pay.minimumWageDaily > 0) {
-    const below = activeNow.filter(
-      (e) => e.employment_status !== 'apprentice' && dailyEquivalent(e, pay.workingDaysPerYear) + 0.005 < pay.minimumWageDaily,
-    )
+    // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
+    const floorOf = (e: PersonRow) => pay.minimumWageDaily * (e.employment_status === 'apprentice' ? 0.75 : 1)
+    const below = activeNow.filter((e) => dailyEquivalent(e, pay.workingDaysPerYear) + 0.005 < floorOf(e))
     if (below.length) {
       insights.push({
         tone: 'warn',
-        text: `Paid below the client's minimum wage setting (${money(pay.minimumWageDaily)} a day${pay.minimumWageRegion ? `, ${pay.minimumWageRegion}` : ''}): ${names(below.map((e) => `${name(e)} (${money(dailyEquivalent(e, pay.workingDaysPerYear))})`))}. Check the rate, or the exemption that allows it. Apprentices and learners are not checked.`,
+        text: `Paid below the client's minimum wage setting (${money(pay.minimumWageDaily)} a day${pay.minimumWageRegion ? `, ${pay.minimumWageRegion}` : ''}; 75% of it for apprentices and learners): ${names(below.map((e) => `${name(e)} (${money(dailyEquivalent(e, pay.workingDaysPerYear))})`))}. Check the rate, or the exemption that allows it.`,
       })
     }
   }

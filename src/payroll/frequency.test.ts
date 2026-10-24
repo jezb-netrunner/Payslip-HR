@@ -316,3 +316,46 @@ describe('13th month pay installments and the shared ₱90,000 cap', () => {
     expect(slip.basicPay).toBe(0) // never feeds a later 13th month
   })
 })
+
+describe('bonuses beyond the yearly ₱90,000 exemption are taxed when paid', () => {
+  const withBonus = (amount: number, extra: Partial<Parameters<typeof computePayslip>[0]> = {}, emp = employee) =>
+    computePayslip({
+      employee: { ...emp, oneTimeEarnings: [{ id: 'b1', label: 'Mid-year bonus', amount, category: 'other_benefits' }] },
+      settings,
+      period,
+      tables: DEFAULT_TABLES,
+      days: fullAttendance,
+      runType: 'regular',
+      ...extra,
+    })
+
+  it('keeps a bonus within what is left of the exemption out of taxable pay', () => {
+    const slip = withBonus(50000, { benefitsExemptLeft: 90000 })
+    expect(slip.taxableIncome).toBe(13775) // 15,000 basic − 1,225 contributions
+  })
+
+  it('taxes the part beyond what is left with this payroll', () => {
+    const slip = withBonus(100000, { benefitsExemptLeft: 40000 })
+    expect(slip.taxableIncome).toBe(73775) // 13,775 + the 60,000 excess
+    expect(slip.withholdingTax).toBe(14381.2) // 4,270.70 + 25% of (73,775 − 33,333)
+    expect(slip.trace.notes.some((n) => n.startsWith('₱60,000 of this payroll'))).toBe(true)
+  })
+
+  it('assumes the whole cap is left when the caller passes nothing', () => {
+    expect(withBonus(100000).taxableIncome).toBe(23775)
+  })
+
+  it('taxes the excess for a minimum wage earner too', () => {
+    const slip = withBonus(20000, { benefitsExemptLeft: 0 }, { ...employee, isMinimumWageEarner: true })
+    expect(slip.taxableIncome).toBe(20000) // the minimum wage stays exempt
+    expect(slip.withholdingTax).toBe(1604.1) // 937.50 + 20% of (20,000 − 16,667)
+  })
+
+  it('leaves the cap to the year when the payroll annualizes', () => {
+    const slip = withBonus(100000, {
+      benefitsExemptLeft: 0,
+      annualization: { payMonth: '2026-12-01', ytd: [] },
+    })
+    expect(slip.trace.notes.some((n) => n.includes('of this payroll'))).toBe(false)
+  })
+})

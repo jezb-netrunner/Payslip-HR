@@ -340,6 +340,8 @@ export function addRun(entity: Row, over: Row & { period_start: string; period_e
     totals: {},
     ...over,
   }
+  // payroll_runs_annualize_december: the year-end adjustment is a December pay date's
+  if (r.annualize && String(r.pay_date).slice(5, 7) !== '12') throw new Error('payroll_runs_annualize_december')
   db.t.payroll_runs.push(r)
   return r
 }

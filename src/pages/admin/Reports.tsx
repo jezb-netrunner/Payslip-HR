@@ -258,7 +258,7 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
         )
       })}
       <p className="text-[11px] text-slate-400">
-        Layout follows the 1604-C alphalist (RMC 73-2019 / RMC 160-2022): Schedule 1 employees, Schedule 2 minimum
+        Layout follows the 1604-C alphalist (RMC 73-2019): Schedule 1 employees, Schedule 2 minimum
         wage earners, each figure as declared on BIR Form 2316. Key or import the CSV figures into the BIR Alphalist
         Data Entry and Validation Module (it generates the DAT file for eSubmission). Balance = tax due − tax withheld.
       </p>
@@ -283,8 +283,9 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
         ['Tax due', s.taxDue],
         ['Taxes withheld — present employer (as adjusted)', s.withheldAsAdjusted],
         ['Taxes withheld — previous employer', s.prevTaxWithheld],
-        ['5% tax credit (PERA Act of 2008)', s.peraCredit],
         ['Total amount of taxes withheld as adjusted', s.withheldAsAdjusted + s.prevTaxWithheld],
+        ['5% tax credit (PERA Act of 2008)', s.peraCredit],
+        ['Total taxes withheld', s.withheldAsAdjusted + s.prevTaxWithheld + s.peraCredit],
       ],
     ],
     [

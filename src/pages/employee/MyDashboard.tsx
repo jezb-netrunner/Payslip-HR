@@ -96,7 +96,7 @@ export default function MyDashboard() {
 
   const used: Record<string, number> = {}
   for (const r of leaves) {
-    const d = leaveDaysInYear(r, Number(year), yearSchedule.resolve ?? employee.work_schedule, holidays)
+    const d = leaveDaysInYear(r, Number(year), yearSchedule.resolve ?? employee.work_schedule, holidays, types.find((t) => t.id === r.leave_type_id))
     if (d > 0) used[r.leave_type_id] = (used[r.leave_type_id] ?? 0) + d
   }
   const balances = types

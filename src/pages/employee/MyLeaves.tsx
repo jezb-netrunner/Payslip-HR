@@ -7,7 +7,7 @@ import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Holiday, LeaveRequest, LeaveType } from '../../lib/db'
 import { fmtDate, plural } from '../../lib/format'
-import { eligibleFrom, leaveDaysInYear, leaveWorkdays, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
+import { countsCalendarDays, eligibleFrom, leaveDays, leaveDaysInYear, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
@@ -78,10 +78,10 @@ export default function MyLeaves() {
     load()
   }, [load])
 
-  /** Leave days charged: scheduled workdays that aren't holidays. */
+  /** Leave days charged: scheduled workdays that aren't holidays (maternity leave: calendar days). */
   function workdayCount(start: string, end: string): number {
     if (!employee) return 0
-    return leaveWorkdays(start, end, formSchedule.resolve ?? employee.work_schedule, holidays)
+    return leaveDays(types.find((t) => t.id === form.type), start, end, formSchedule.resolve ?? employee.work_schedule, holidays)
   }
 
   /** Why the picked type can't start on the picked date yet, if it can't. */
@@ -164,7 +164,7 @@ export default function MyLeaves() {
   const usedByType: Record<string, number> = {}
   for (const r of requests) {
     if (r.status !== 'approved') continue
-    const d = leaveDaysInYear(r, year, yearSchedule.resolve ?? employee.work_schedule, holidays)
+    const d = leaveDaysInYear(r, year, yearSchedule.resolve ?? employee.work_schedule, holidays, types.find((t) => t.id === r.leave_type_id))
     if (d > 0) usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + d
   }
 
@@ -321,7 +321,7 @@ export default function MyLeaves() {
             </p>
           ) : (
             <p className="text-xs text-slate-500">
-              Working days requested: <b>{workdayCount(form.start, form.end)}</b>
+              {countsCalendarDays(picked) ? 'Calendar days' : 'Working days'} requested: <b>{workdayCount(form.start, form.end)}</b>
               {picked && showsBalance(picked, entitlements[picked.id]) && (
                 <> · {balanceLeft(picked) > 0 ? `${plural(balanceLeft(picked), 'day')} left this year` : 'no days left this year'}</>
               )}

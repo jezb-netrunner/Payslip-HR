@@ -60,6 +60,25 @@ function workdayTest(schedule: Workdays): (date: string) => boolean {
   return (d) => resolve(d).shift !== null
 }
 
+/** Leaves that run in calendar days, rest days and holidays included: maternity leave (RA 11210, 105 days). */
+const CALENDAR_DAY_LEAVE_CODES = ['ML']
+
+export function countsCalendarDays(t: Pick<LeaveType, 'code'> | undefined): boolean {
+  return !!t && CALENDAR_DAY_LEAVE_CODES.includes(t.code)
+}
+
+/** Days a leave of this type takes in [start, end]: calendar days, or the scheduled workdays. */
+export function leaveDays(
+  t: Pick<LeaveType, 'code'> | undefined,
+  start: string,
+  end: string,
+  schedule: Workdays,
+  holidays: HolidayLite[] = [],
+): number {
+  if (end < start) return 0
+  return countsCalendarDays(t) ? eachDate(start, end).length : leaveWorkdays(start, end, schedule, holidays)
+}
+
 /** Scheduled workdays in [start, end], not counting non-working holidays (already paid days off). */
 export function leaveWorkdays(start: string, end: string, schedule: Workdays, holidays: HolidayLite[] = []): number {
   if (end < start) return 0
@@ -74,10 +93,11 @@ export function leaveDaysInYear(
   year: number,
   schedule: Workdays,
   holidays: HolidayLite[] = [],
+  type?: Pick<LeaveType, 'code'>,
 ): number {
   const y0 = `${year}-01-01`
   const y1 = `${year}-12-31`
   if (r.end_date < y0 || r.start_date > y1) return 0
   if (r.start_date >= y0 && r.end_date <= y1) return Number(r.days)
-  return leaveWorkdays(r.start_date > y0 ? r.start_date : y0, r.end_date < y1 ? r.end_date : y1, schedule, holidays)
+  return leaveDays(type, r.start_date > y0 ? r.start_date : y0, r.end_date < y1 ? r.end_date : y1, schedule, holidays)
 }

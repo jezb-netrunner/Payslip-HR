@@ -3,7 +3,7 @@ import { manilaWallToIso } from '../lib/manila'
 import { computeAttendance } from './attendance'
 import { DEFAULT_TABLES } from './defaults'
 import { computePayslip } from './engine'
-import { makeResolver, patternFromWorkSchedule, sameShift, shiftWorkMinutes } from './schedule'
+import { makeResolver, patternFromWorkSchedule, sameShift, shiftWorkMinutes, weekPatternProblem } from './schedule'
 import type { PayrollEmployeeInput, PayrollSettingsInput, ScheduleSource, Shift, TimeEntryLite, WeekPattern } from './types'
 
 const day: Shift = { start: '08:00', end: '17:00', break_minutes: 60 }
@@ -237,5 +237,64 @@ describe('short shifts with an unpaid break', () => {
     expect(day('13:00')).toMatchObject({ expectedMinutes: 240, workedMinutes: 240, payableMinutes: 240, undertimeMinutes: 0, otMinutes: 0 })
     // left at noon: four hours worked, no lunch taken — the shift's four hours of work
     expect(day('12:00')).toMatchObject({ workedMinutes: 240, undertimeMinutes: 0 })
+  })
+})
+
+describe('grace period, rest periods and shorter meal periods', () => {
+  const week: WeekPattern = [day, day, day, day, day, null, null]
+  const mon = '2026-11-02'
+  const one = (entries: TimeEntryLite[], grace = 0, pattern = week) =>
+    attend(makeResolver(base, [{ effective_from: '2026-01-01', pattern }]), entries, mon, mon, grace)[0]
+
+  it('pays a time in inside the grace period as on time', () => {
+    const d = one([e(mon, '08:10', '17:00')], 15)
+    expect(d.lateMinutes).toBe(0)
+    expect(d.undertimeMinutes).toBe(0)
+    expect(d.payableMinutes).toBe(480)
+    expect(d.workedMinutes).toBe(470)
+  })
+
+  it('docks the whole lateness past the grace period', () => {
+    const d = one([e(mon, '08:20', '17:00')], 15)
+    expect(d.lateMinutes).toBe(20)
+    expect(d.payableMinutes).toBe(460)
+  })
+
+  it('counts a rest of 20 minutes or less as worked', () => {
+    // a 15-minute coffee break off the clock, the hour's lunch on it
+    const d = one([e(mon, '08:00', '10:00'), e(mon, '10:15', '17:00')])
+    expect(d.payableMinutes).toBe(480)
+    expect(d.undertimeMinutes).toBe(0)
+  })
+
+  it('still deducts the unpaid lunch taken off the clock, and docks a longer gap', () => {
+    const lunch = one([e(mon, '08:00', '12:00'), e(mon, '13:00', '17:00')])
+    expect(lunch.payableMinutes).toBe(480)
+    // a longer gap is taken as the lunch: 90 minutes off is half an hour short
+    const long = one([e(mon, '08:00', '10:00'), e(mon, '11:30', '17:00')])
+    expect(long.payableMinutes).toBe(450)
+    expect(long.undertimeMinutes).toBe(30)
+  })
+
+  it('credits a scheduled meal period shorter than an hour', () => {
+    const paidMeal: Shift = { start: '08:00', end: '16:00', break_minutes: 30 }
+    const d = one([e(mon, '08:00', '12:00'), e(mon, '12:30', '16:00')], 0, [paidMeal, null, null, null, null, null, null])
+    expect(d.payableMinutes).toBe(480)
+    expect(d.undertimeMinutes).toBe(0)
+  })
+})
+
+describe('compressed workweek patterns', () => {
+  const cww: Shift = { start: '07:00', end: '18:00', break_minutes: 60, compressed: true } // 10h of work
+  it('allows up to five days and 48 hours', () => {
+    expect(weekPatternProblem([cww, cww, cww, cww, null, null, null])).toBe('')
+    expect(weekPatternProblem([cww, cww, cww, cww, { ...day, end: '15:00' }, null, null])).toBe('') // 40 + 6 = 46h
+  })
+  it('refuses a sixth workday or more than 48 hours', () => {
+    expect(weekPatternProblem([cww, cww, cww, cww, cww, halfDay, null])).toMatch(/five workdays/)
+    expect(weekPatternProblem([cww, cww, cww, cww, cww, null, null])).toMatch(/48 hours/) // 50h
+  })
+  it('leaves an ordinary week alone', () => {
+    expect(weekPatternProblem(sixDay)).toBe('')
   })
 })

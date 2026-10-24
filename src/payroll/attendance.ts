@@ -33,6 +33,9 @@ export interface AttendanceParams {
   approvedLeaves: LeaveLite[]
 }
 
+/** Rest periods ("coffee breaks") of 5 to 20 minutes are hours worked (IRR Book III, Rule I, Sec. 7). */
+export const REST_PERIOD_MINUTES = 20
+
 /** Overlap in minutes between [aStart, aEnd) and [bStart, bEnd) (epoch ms). */
 function overlapMinutes(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
   const start = Math.max(aStart, bStart)
@@ -128,7 +131,8 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
     const overnight = !!shift && hhmmToMinutes(shift.end) <= schedStart
     const flex = shift?.flex_minutes ?? 0
     // only a meal break of an hour or more is unpaid (a shorter one is paid time)
-    const breakMinutes = unpaidBreak(shift ? shift.break_minutes : restDayBreakMinutes)
+    const scheduledBreak = shift ? shift.break_minutes : restDayBreakMinutes
+    const breakMinutes = unpaidBreak(scheduledBreak)
     // Regular time is the standard day, or a longer compressed-workweek
     // shift; the shift expects its own hours up to that (a half day, 4).
     const shiftMinutes = shift ? shiftWorkMinutes(shift) : 0
@@ -137,7 +141,7 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
 
     let rawMinutes = 0
     let ndMinutes = 0
-    let gapMinutes = 0 // off-the-clock gaps between same-day entries
+    const gaps: number[] = [] // off-the-clock gaps between same-day entries, in minutes
     let prevOutMs: number | null = null
     let firstInMin: number | null = null
     let lastOutMin: number | null = null
@@ -148,7 +152,7 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       const outMs = new Date(e.clock_out as string).getTime()
       if (outMs <= inMs) continue
       intervals.push({ inMs, outMs })
-      if (prevOutMs !== null && inMs > prevOutMs) gapMinutes += (inMs - prevOutMs) / 60000
+      if (prevOutMs !== null && inMs > prevOutMs) gaps.push((inMs - prevOutMs) / 60000)
       prevOutMs = Math.max(prevOutMs ?? outMs, outMs)
       rawMinutes += (outMs - inMs) / 60000
       ndMinutes += nightDiffMinutesFor(date, inMs, outMs)
@@ -163,10 +167,16 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       if (lastOutMin === null || outMin > lastOutMin) lastOutMin = outMin
     }
 
-    // Deduct the unpaid break only to the extent it wasn't already taken
-    // off the clock (multiple entries with gaps = employee clocked out for
-    // the break themselves).
-    const effectiveBreak = Math.max(0, breakMinutes - gapMinutes)
+    // Time off the clock between entries. A rest of 20 minutes or less is
+    // hours worked, and so is a meal period shorter than an hour, up to the
+    // one scheduled (IRR Book III, Rule I, Sec. 7): both are credited. A
+    // longer gap is the unpaid meal break, taken off the clock (the break is
+    // deducted only for what it doesn't cover), or time not worked.
+    const shortRests = gaps.filter((g) => g <= REST_PERIOD_MINUTES).reduce((s, g) => s + g, 0)
+    const longGaps = gaps.filter((g) => g > REST_PERIOD_MINUTES)
+    const paidMeal = breakMinutes > 0 ? 0 : Math.min(scheduledBreak, Math.max(0, ...longGaps))
+    rawMinutes += shortRests + paidMeal
+    const effectiveBreak = Math.max(0, breakMinutes - longGaps.reduce((s, g) => s + g, 0))
     // the break is taken on a day of 6 hours or more — or on a shorter shift
     // that schedules one, once its span is worked (as its expected hours count it)
     const breakAfter = shift && breakMinutes > 0 ? Math.min(6 * 60, shiftSpan(shift)) : 6 * 60
@@ -177,7 +187,10 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
     const worked = netMinutes > 0
     const leave = leaveFor(date)
 
-    const payableMinutes = Math.min(netMinutes, regularCap)
+    // a time in inside the grace period is paid as if on time
+    const lateBy = worked && dayType === 'regular' && shift && firstInMin !== null ? firstInMin - (schedStart + flex) : 0
+    const forgiven = lateBy > 0 && lateBy <= gracePeriodMinutes ? lateBy : 0
+    const payableMinutes = Math.min(netMinutes + forgiven, regularCap)
     const otMinutes = Math.max(0, netMinutes - regularCap)
 
     // Night-diff minutes that fall inside the OVERTIME portion of the day
@@ -244,6 +257,7 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       onPaidLeave: !worked && !!leave && leave.paid,
       onUnpaidLeave: !worked && !!leave && !leave.paid,
       leaveType: !worked && leave ? leave.type_name : undefined,
+      leaveCode: !worked && leave ? leave.type_code : undefined,
     })
   }
   return out

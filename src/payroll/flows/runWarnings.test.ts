@@ -30,7 +30,7 @@ describe('run-level warnings', () => {
     // final pay released after the last day, Oct 16-20 never paid
     const fp = addRun(ent, {
       run_type: 'final_pay', period_start: '2026-11-01', period_end: '2026-11-15', pay_date: '2026-11-20',
-      employee_ids: [emp.id], annualize: true,
+      employee_ids: [emp.id],
     })
     db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: fp.id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'SIL conversion', amount: 2000, category: 'other_taxable' })
     const res = await computeRun(fp as never, ent as never)
@@ -44,7 +44,7 @@ describe('run-level warnings', () => {
     addAttendance(a, '2026-10-16', '2026-10-20')
     addAttendance(b, '2026-10-16', '2026-10-31')
     // Ana's final pay for her last days was finalized first
-    const fp = addRun(ent, { run_type: 'final_pay', period_start: '2026-10-16', period_end: '2026-10-20', pay_date: '2026-10-23', employee_ids: [a.id], annualize: true })
+    const fp = addRun(ent, { run_type: 'final_pay', period_start: '2026-10-16', period_end: '2026-10-20', pay_date: '2026-10-23', employee_ids: [a.id] })
     await computeRun(fp as never, ent as never)
     finalize(fp.id)
     // the regular run carries a bonus for Ana (e.g. unpaid OT from earlier)

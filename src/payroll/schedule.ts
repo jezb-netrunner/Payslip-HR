@@ -44,6 +44,20 @@ export function shiftWorkMinutes(s: Shift): number {
 
 /** A compressed-workweek day may run 12 hours at most (DOLE Department Advisory 02-04). */
 export const MAX_COMPRESSED_MINUTES = 720
+/** A compressed workweek has fewer than six workdays and keeps to 48 normal hours (same advisory). */
+export const MAX_COMPRESSED_WEEK_DAYS = 5
+export const MAX_COMPRESSED_WEEK_MINUTES = 48 * 60
+
+/** Why a weekly pattern can't be saved ('' = fine); mirrors the database's valid_week_pattern. */
+export function weekPatternProblem(p: WeekPattern): string {
+  if (!p.some((s) => s?.compressed)) return ''
+  const shifts = p.filter((s): s is Shift => !!s)
+  if (shifts.length > MAX_COMPRESSED_WEEK_DAYS) return 'A compressed workweek has five workdays at most (DOLE Department Advisory 02-04).'
+  if (shifts.reduce((sum, s) => sum + shiftWorkMinutes(s), 0) > MAX_COMPRESSED_WEEK_MINUTES) {
+    return 'A compressed workweek keeps to 48 hours of work a week (DOLE Department Advisory 02-04).'
+  }
+  return ''
+}
 
 export function patternFromWorkSchedule(ws: WorkSchedule): WeekPattern {
   return [1, 2, 3, 4, 5, 6, 7].map((d) =>

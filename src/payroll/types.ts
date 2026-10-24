@@ -128,6 +128,8 @@ export interface LeaveLite {
   end_date: string
   paid: boolean
   type_name: string
+  /** the leave type's code (ML = maternity leave, paid through the maternity benefit) */
+  type_code?: string
 }
 
 export type DayType =
@@ -160,6 +162,8 @@ export interface DayComputation {
   onPaidLeave: boolean
   onUnpaidLeave: boolean
   leaveType?: string
+  /** the leave type's code, on a leave day not worked */
+  leaveCode?: string
 }
 
 // ---------- payroll ----------
@@ -219,6 +223,14 @@ export interface PayrollEmployeeInput {
   monthlyRate: number
   dailyRate: number
   isMinimumWageEarner: boolean
+  /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
+  apprentice?: boolean
+  /**
+   * The national government pays the PhilHealth employee share for this
+   * period: employed PWDs (RA 11228) and solo parents (RA 11861, PhilHealth
+   * Circular 2026-0015). The employer share is unchanged.
+   */
+  philhealthEeWaiver?: 'pwd' | 'solo_parent'
   schedule: WorkSchedule
   allowances: AllowanceInput[]
   extraDeductions: ExtraDeductionInput[]
@@ -236,11 +248,19 @@ export interface AllowanceInput {
   basis: AllowanceBasis
 }
 
+/**
+ * RA 11210 maternity pay, paid as its own earnings (both tax-exempt, RMC
+ * 105-2019): the SSS maternity benefit the employer advances, and the
+ * salary differential up to full pay, which counts toward the 13th month.
+ */
+export type MaternityBenefit = 'sss_maternity' | 'maternity_differential'
+
 export interface OneTimeEarningInput {
   id?: string
   label: string
   amount: number
   category: BirBucket
+  benefit?: MaternityBenefit
 }
 
 export interface ExtraDeductionInput {
@@ -300,6 +320,8 @@ export interface PayLine {
   bir?: BirBucket
   hours?: number
   meta?: string
+  /** Earnings only: counts toward 13th month pay although not basic pay (the maternity salary differential). */
+  thirteenthBasis?: boolean
 }
 
 export interface SssComputation {

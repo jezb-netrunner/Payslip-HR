@@ -6,6 +6,7 @@ import type {
   AllowanceCategory,
   BirBucket,
   ContributionTiming,
+  MaternityBenefit,
   PayFrequency,
   RoundingMode,
   WorkSchedule,
@@ -118,6 +119,10 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
+  /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent) */
+  philhealth_ee_waiver?: 'pwd' | 'solo_parent' | null
+  philhealth_ee_waiver_from?: string | null
+  philhealth_ee_waiver_until?: string | null
   payment_method: PaymentMethod
   work_schedule: WorkSchedule
   bank_name: string | null
@@ -383,6 +388,10 @@ export interface PayrollAdjustment {
   label: string
   amount: number
   category: string
+  /** RA 11210 maternity pay (category other_non_taxable) */
+  benefit?: MaternityBenefit | null
+  /** date the employee signed the written authorization ('other' deductions, Labor Code Art. 113) */
+  authorized_on?: string | null
   created_at: string
 }
 

@@ -340,7 +340,11 @@ function NewRunModal({
   // the picker only applies to the run type showing it, and only to people eligible now
   const picked = runType === 'regular' ? [] : selected.filter((id) => eligible.some((e) => e.id === id))
   const needsSubset = runType === 'final_pay'
-  const lastOfYear = pay.slice(5, 7) === '12' && runType === 'regular'
+  // the year-end adjustment belongs to the last payroll PAID in December
+  // (year-end adjustment, RR 2-98 as amended by RR 11-2018): the tax year
+  // follows the pay date; payroll_runs_annualize_december enforces it
+  const decemberPay = pay.slice(5, 7) === '12'
+  const lastOfYear = decemberPay && runType === 'regular'
 
   async function create() {
     if (!start || !end || !pay || end < start) {
@@ -377,7 +381,7 @@ function NewRunModal({
           period_month: slot.month,
           period_index: runType === 'thirteenth_month' ? 1 : slot.index,
           periods_in_month: runType === 'thirteenth_month' ? 1 : slot.count,
-          annualize: runType === 'thirteenth_month' ? false : annualize,
+          annualize: runType !== 'thirteenth_month' && decemberPay && annualize,
           employee_ids: picked.length > 0 ? picked : null,
           status: 'draft',
         })
@@ -478,17 +482,18 @@ function NewRunModal({
             )}
           </div>
         )}
-        {runType !== 'thirteenth_month' && (
+        {runType !== 'thirteenth_month' && decemberPay && (
           <div className="rounded-lg border border-slate-200 p-3">
             <Toggle
               checked={annualize}
               onChange={setAnnualize}
-              label="Annualize withholding tax in this run (year-end / separation adjustment)"
+              label="Year-end tax adjustment: annualize withholding in this payroll"
             />
             <p className="mt-1 text-xs text-slate-500">
-              Withholding becomes the year's tax due less everything already withheld (refund if negative). Use it on
-              the last payroll of the year and on final pay.
-              {lastOfYear && !annualize && ' This looks like a December payroll — annualize it if it is the last one of the year.'}
+              Withholding becomes the year's tax due less everything already withheld (refund if negative). Only for
+              the last payroll paid in December (RR 11-2018); an employee who separates is annualized automatically on
+              the payroll that includes the last day.
+              {lastOfYear && !annualize && ' Turn it on if this is the last payroll paid this year.'}
             </p>
           </div>
         )}

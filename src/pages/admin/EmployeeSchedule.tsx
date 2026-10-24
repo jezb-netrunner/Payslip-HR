@@ -18,7 +18,7 @@ import { todayManila } from '../../lib/manila'
 import { fetchScheduleRows, fetchShiftTemplates, type ScheduleRows, type ScheduleVersionRow, type ShiftTemplate } from '../../lib/schedules'
 import { DAY_LABELS, DAY_NAMES, earliestScheduleChange, patternSummary, shiftDetail, shiftLabel } from '../../lib/shiftText'
 import { supabase } from '../../lib/supabase'
-import { patternFromWorkSchedule, patternOn } from '../../payroll/schedule'
+import { patternFromWorkSchedule, patternOn, weekPatternProblem } from '../../payroll/schedule'
 import type { WeekPattern } from '../../payroll/types'
 
 interface Loaded {
@@ -264,7 +264,7 @@ function ChangeScheduleModal({
         ? `That is after the last day of employment (${fmtDate(employee.separation_date)}).`
         : ''
   const dayProblem = pattern.map((s, i) => (s && shiftProblem(s) ? `${DAY_NAMES[i]}: ${shiftProblem(s)}` : '')).find(Boolean) ?? ''
-  const problem = dateProblem || dayProblem
+  const problem = dateProblem || dayProblem || weekPatternProblem(pattern)
   const setDay = (i: number, s: WeekPattern[number]) => setPattern(pattern.map((x, j) => (j === i ? s : x)))
 
   async function save() {
