@@ -369,13 +369,13 @@ every new control at 1280 and 390 px.
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
 #5 (cash advances + audit fixes, merged and deployed 2026-10-23 11:11 UTC)
-are in `main` and live. Everything from 2026-10-24 (Time In/Out report,
-schedules, per-payroll deductions, Insights, read-only statutory tables,
-the legal-accuracy fixes) is on `claude/affectionate-carson-hyuwes` and
-reaches the site only when merged.
+and #6 (2026-10-24: Time In/Out report, schedules, per-payroll deductions,
+Insights, read-only statutory tables, the legal-accuracy fixes — merged at
+the owner's request on 2026-10-24, deployed by the Pages workflow) are in
+`main` and live.
 
-**2026-10-24: all four migrations live (owner approved; PR #6 open,
-`claude/affectionate-carson-hyuwes` → `main`).** Through MCP
+**2026-10-24: all four migrations live (owner approved; shipped with PR
+#6).** Through MCP
 `apply_migration`: `20261024112556 work_schedules`, `20261024221511
 payroll_deduction_overrides`, `20261024225035 statutory_tables_managed`,
 `20261024225137 legal_accuracy` (repo files renamed to those versions).
@@ -385,10 +385,9 @@ reworded with commas, it applied on the retry. `fingerprint.sql` matches
 the replica on every kind (27 tables, 399 columns, 171 constraints, 77
 indexes, 58 policies, 51 functions, grants, 87 triggers); security
 advisors unchanged; live data: 5 documented statutory versions, 19 holidays
-for 2027, SPL/MCW at 6 months, no annualized runs. Until PR #6 is merged
-the live site runs `main`'s code against this schema: its deduction forms
-can't send `authorized_on`, so adding a company loan, HMO or "other"
-deduction there is refused — merge soon.
+for 2027, SPL/MCW at 6 months, no annualized runs. Between the migrations
+and the merge (minutes) the old forms couldn't send `authorized_on`; a DB
+rule the old front end can't meet should ship together with its front end.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
 - **All 21 migrations applied** (the four 2026-10-24 ones above; the
