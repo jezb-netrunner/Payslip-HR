@@ -329,6 +329,33 @@ per-payroll advance amount set and finalized, schedule flows, 390 px):
 fixed alphabetical chart legends, fractional count ticks, an overflowing
 KPI, an over-long schedule modal (compact day rows), ISO dates in findings.
 
+### 2026-10-24 — Legal-accuracy review, maintainer-managed statutory tables, bug check (same branch)
+
+**Asked:** an earlier session had to fix SIL being granted before 12 months
+of service — check every payroll/HR concept for current legal accuracy;
+replace manual "New version" statutory entry with the industry standard;
+comprehensively check this session's work for bugs.
+
+**Did:** statutory tables are now shipped data (migration
+`statutory_tables_managed`: read-only for API roles, CHECK validators,
+documented legal basis/source, frozen once used — see lesson). Five review
+agents (tax, contributions, labor, code review of the session, time report)
+plus my own source checks; fixes in migration `legal_accuracy` and the
+engine — bonuses over the ₱90k exemption taxed when paid; year-end
+annualization December-only; SSS on the month's actual compensation;
+Pag-IBIG on basic + allowances; PhilHealth employee share waived for PWDs
+and solo parents; regular-holiday pay needs the workday before (look-back
+into the previous period); grace minutes paid, short rests and shorter
+meal periods credited; CWW ≤ 5 days / 48 h; standard day ≤ 8 h; probation
+hire + 180; maternity leave in calendar days and paid as SSS benefit +
+salary differential (tax-exempt); SPL/MCW after 6 months; written
+authorization date for company loan / HMO / other deductions; salary
+deductions capped at the period's salary; MWE/apprentice wage warnings;
+2316 order; NCR-28; 2027 holidays seeded. Code-review fixes from the
+session's own work (pauses survive reopen, guards don't leak other
+clients, insights edge cases, time-report fixes, PDF text). Tests 247 →
+278, SQL suite 16 added.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -397,11 +424,13 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
   the owner 2026-08-24; the workflow token cannot enable it itself). Site:
   https://jezb-netrunner.github.io/Payslip-HR/
 
-Known-open items (deliberate scope cuts, also in README disclaimers):
-unworked regular-holiday qualification simplified (pays unless on unpaid
-leave that day); BIR DAT file not generated (CSV for the BIR Alphalist
-module instead); no tax-only or reversal adjustment for correcting a paid
-payroll (see *Correcting a payroll after payday*).
+Known-open items (deliberate scope cuts, also in README disclaimers): BIR
+DAT file not generated (CSV for the BIR Alphalist module instead); no
+tax-only or reversal adjustment for correcting a paid payroll (see
+*Correcting a payroll after payday*); the SSS maternity benefit and salary
+differential are entered by the admin, not computed; whether an MWE's
+rest-day/special-day premiums are tax-exempt is unverified (the app
+exempts them — accountant's call).
 
 ---
 
@@ -431,16 +460,49 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   from the start date (a shorter period counts if practice/contract says
   so); exempt: firms regularly employing < 10, those already giving ≥ 5 days
   paid VL, managerial/field personnel; unused SIL converts to cash. Bills to
-  raise it to 10 days were unenacted as far as search showed. NOT seeded:
-  Solo Parent Leave's 6-month service requirement (RA 11861) — reported by
-  research, unverified; set it under Leave types once checked.
+  raise it to 10 days were unenacted as far as search showed.
+- **Other leaves** (verified 2026-10-24): Solo Parent Leave 7 working days
+  after 6 months of service (RA 11861 Sec. 8); Special Leave for Women 2
+  months after 6 months' aggregate service in the last 12 (RA 9710 Sec.
+  18); maternity 105 calendar days (+15 solo parent) = SSS maternity benefit
+  advanced within 30 days of the application (SSS Circular 2019-009) +
+  salary differential (exempt: retail/service ≤ 10 workers, micro
+  businesses, distressed firms); both tax-exempt (RMC 105-2019); the
+  differential counts for 13th month, the SSS benefit doesn't (DOLE LA
+  25-2023).
 - **Labor standards**: OT +25% ordinary / day-rate ×1.30 otherwise
   (169/195/260/338%); ND +10% (22:00–06:00), stacks multiplicatively;
-  premiums 130/150/200/260%; unworked regular holiday 100% (presence on the
-  preceding workday condition); special days no-work-no-pay; 13th month =
-  YTD basic ÷ 12, due Dec 24.
+  premiums 130/150/200/260%; unworked regular holiday 100% if the employee
+  worked or was on paid leave on the workday before it (IRR Book III Rule IV
+  Secs. 6, 10 — rest days passed over, successive holidays chain); special
+  days no-work-no-pay; 13th month = YTD basic ÷ 12, due Dec 24; apprentices
+  and learners ≥ 75% of the minimum (Arts. 61, 73); final pay within 30
+  days, COE within 3 days of request (Labor Advisory 06-20); deductions
+  the law doesn't provide for need written authorization (Art. 113; DO
+  195-18).
+- **Contributions' bases** (verified 2026-10-24): SSS on actual monthly
+  compensation — all remuneration incl. OT, COLA, allowances; not 13th
+  month/bonuses/reimbursements (RA 11199 Sec. 8(f)); PhilHealth on monthly
+  basic salary; Pag-IBIG on basic + allowances up to ₱10,000 (secondary
+  sources only — circular text not reached). PhilHealth employee share is
+  paid by the national government for employed PWDs (RA 11228) and, from
+  Sep 26, 2026, solo parents (PhilHealth Circular 2026-0015). WISP is now
+  "MySSS Pension Booster (Mandatory)".
+- **Tax** (verified 2026-10-24): 13th month + other benefits beyond ₱90,000
+  are taxable compensation when paid — for MWEs too (Soriano v. Secretary
+  of Finance, G.R. 184450, 2017); year-end adjustment on the last payroll
+  paid in December, refunds by Jan 25 (RR 2-98 as amended); BIR 2316
+  items 26–28 = total withheld as adjusted, PERA credit, total.
+  Unverified, flagged to the owner: whether an MWE's rest-day/special-day
+  premiums are exempt like holiday pay (the app exempts them).
 - **2026 holidays**: Proclamation 1006 (+1189 Eid'l Fitr Mar 20, +1264 Eid'l
   Adha May 27) — 12 regular, 8 special non-working, Feb 25 special *working*.
+  NCR only: Nov 16–18, 2026 special non-working (Proclamation 1447) — a
+  client-local holiday, not seeded.
+- **2027 holidays** (Proclamation 1427, Sep 8, 2026; seeded in
+  `legal_accuracy`): 10 regular (Maundy Thursday Mar 25, Good Friday Mar
+  26, Heroes Aug 30), 8 special non-working, Feb 25 special working; the
+  Eids come by separate proclamations — add them when announced.
 - **NCR minimum wage reference** (corrected 2026-10-24): ₱755/day non-agri
   under **WO NCR-28, eff. Sep 26, 2026** (single ₱60 increase from ₱695);
   ₱718 for agriculture, retail/service with ≤15 workers and manufacturing
@@ -964,12 +1026,67 @@ have recomputed past drafts with the new hours.
   Motors v. Chrysler Phils. Labor Union, G.R. 148738, applying Civil Code
   Art. 13); an employee allowed to work past it is regular, and so is one
   whose standards were not made known at engagement.
+- Rest periods of 5–20 minutes are hours worked (IRR Book III Rule I §7):
+  an off-the-clock gap of ≤ 20 minutes is credited (`REST_PERIOD_MINUTES`),
+  and so is a scheduled meal period under 60 minutes taken off the clock;
+  a longer gap counts against the unpaid meal break, then as time not
+  worked. A grace period is the client's policy: a time in inside it is
+  paid as on time (it used to come back as undertime).
+- A compressed workweek is fewer than six workdays and at most 48 normal
+  hours (DA 02-04) — enforced on weekly patterns (`weekPatternProblem` /
+  `valid_week_pattern`), not on single-date roster changes.
 - Unused SIL converts to cash at the end of the year at the salary rate on
   the date of commutation (DOLE handbook) — the Insights leave report values
   it at the current daily rate.
 Why it mattered: two first-draft semantics were wrong against these rules —
 30-minute breaks were being deducted as unpaid, and compressed days had no
 12-hour ceiling.
+
+### Probation ends on hire date + 180 days, not + 179 (correction)
+
+Mitsubishi Motors v. Chrysler Phils. Labor Union (G.R. 148738) counts the
+six months as 180 days with the first day excluded (Civil Code Art. 13):
+hired May 27, 1996 → probation ended Nov 23, 1996. My first `probationEnds`
+returned hire + 179; the labor review caught it (`insights.ts`, test pins
+the case). Why it mattered: a day early tells HR to decide on
+regularization before the law's deadline is actually reached.
+
+### Bonuses past the ₱90,000 exemption are taxed when paid (correction)
+
+Regular payrolls used to classify every 13th-month/other-benefits line as
+non-taxable and left any excess to the December annualization. Now each
+regular payroll taxes what its benefits exceed of the tax year's remaining
+exemption (`benefitsExemptLeft`, from the tax-year payslips the service
+loads whenever a payroll pays a benefit), for MWEs too. Why it mattered: a
+June bonus of ₱150k under-withheld ~₱16.8k until December, and an
+employee who left before December was never trued up on it.
+
+### SSS follows the month's actual compensation; the closing payroll settles it (confirmed approach)
+
+RA 11199 Sec. 8(f): SSS compensation is all remuneration for the month
+(OT, COLA, allowances), not the rate. Earlier payrolls of a month deduct a
+provisional share on the rate; the month's closing payroll (last slot, a
+separation, or any payroll computed after the closing one was final)
+deducts what the month's actual pay requires less what was already taken —
+a negative line refunds an over-deduction; a month with no compensation
+owes none. PhilHealth stays on the basic rate, Pag-IBIG on basic +
+allowances. Flow tests that expected a full rate-based month for mid-month
+hires/absences were wrong and were changed. Why it mattered: rate-based
+SSS under-remits for anyone with OT or allowances (SSS assesses
+deficiencies with 2%/month penalties) and over-deducts partial months.
+
+### Maternity leave is paid as the SSS benefit + salary differential, never as salary (confirmed approach)
+
+RA 11210's 105 days of full pay are the SSS maternity benefit (advanced
+in full within 30 days of the application, reimbursed by SSS) plus the
+salary differential (unless the employer is exempt). Payroll docks leave
+days with code `ML` from salary (monthly) or pays nothing for them (daily);
+the admin adds the two amounts as adjustments marked `benefit`
+(`sss_maternity` / `maternity_differential`, category other non-taxable,
+RMC 105-2019); the differential counts toward 13th month
+(`thirteenthBasis`). Why it mattered: paying full salary for the leave
+days taxed exempt pay, overpaid exempt small employers who owe only the
+reimbursed SSS benefit, and missed the 30-day advance.
 
 ### Per-payroll deduction amounts are rows on the draft, not edits to the installment (confirmed approach)
 

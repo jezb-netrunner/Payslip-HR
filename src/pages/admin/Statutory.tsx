@@ -162,6 +162,10 @@ export default function Statutory() {
               )
             })()}
           </div>
+          <p className="mt-3 text-xs text-slate-500">
+            A month of basic pay only. Payroll takes SSS on the month's actual pay (overtime and allowances included,
+            settled on the month's last payroll) and Pag-IBIG on basic pay plus allowances.
+          </p>
         </Card>
 
         {KINDS.map((kind) => {

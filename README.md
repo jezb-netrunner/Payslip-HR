@@ -164,9 +164,10 @@ The app captures everything the annual information return needs:
   supplementary) so the 2316 / alphalist columns are summed, not guessed.
   Minimum wage earners' exempt package (basic, holiday, OT, ND, hazard) is
   kept separate, the ₱90,000 13th-month/other-benefits exemption is tracked
-  across the year, and an **annualizing run** (last payroll of the year, a
-  payroll that includes an employee's separation, or final pay) trues up
-  the year's tax
+  across the tax year (a bonus beyond what is left of it is taxed with the
+  payroll that pays it), and an **annualizing run** (the last payroll paid
+  in December, a payroll that includes an employee's separation, or final
+  pay) trues up the year's tax
 - 1601-C remittances (date, bank/agency, TRA/eROR/eAR, amounts) for the
   1604-C remittance schedule
 
@@ -181,19 +182,21 @@ key or import into the **BIR Alphalist Data Entry and Validation Module**,
 which produces the DAT file to submit; the return itself is filed through
 eBIRForms / eFPS.
 
-## Philippine statutory compliance (verified as of Aug 2026)
+## Philippine statutory compliance (verified Aug 2026, reviewed Oct 24, 2026)
 
 | Item | Basis | Implementation |
 |---|---|---|
 | Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward | Daily / weekly / semi-monthly / monthly tables + annual table for annualization, versioned in DB |
-| SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MPF/WISP above ₱20k; EC ₱10/₱30 | MSC bracket mapping + MPF split + EC, versioned in DB |
-| PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50 | Odd centavo carried by employer (official convention) |
-| Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | Capped computation |
-| 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap | Dedicated run type; cap tracked across the year |
-| OT / ND / premiums | Labor Code Arts. 86–94 | Per-day engine with computation trace |
-| Hours of work & schedules | Art. 83 (8 hours), Art. 85 + IRR Book III Rule I §7 (meal ≥ 60 min unpaid, shorter breaks paid), Art. 91 (weekly rest day), DOLE DA 02-04 (compressed workweek) | Each date measured against its own shift; compressed days regular up to the shift (max 12 h) |
-| Minimum wage | RA 6727 regional wage orders; MWE exemption RA 9504 | Per-client wage region and rate; MWE exempt package |
-| Holidays 2026 | Proclamations 1006 / 1189 / 1264 | National list + per-client local holidays |
+| SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MySSS Pension Booster (MPF) above ₱20k; EC ₱10/₱30; MSC on the month's actual compensation (Sec. 8(f)) | Earlier payrolls of a month deduct a provisional share on the rate; the month's closing payroll settles it on everything the month paid (OT, allowances), refunding any over-deduction |
+| PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50; employee share paid by the government for PWDs (RA 11228) and solo parents (RA 11861, Circular 2026-0015) | Odd centavo carried by employer (official convention); waiver per employee with dates |
+| Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | On basic salary plus allowances, capped |
+| 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap | Dedicated run type; cap tracked across the tax year; the excess taxed when paid |
+| OT / ND / premiums / holiday pay | Labor Code Arts. 86–94; IRR Book III Rule IV Secs. 6, 10 | Per-day engine with computation trace; an unworked regular holiday is paid after work or paid leave on the workday before it |
+| Hours of work & schedules | Art. 83 (8 hours), Art. 85 + IRR Book III Rule I §7 (meal ≥ 60 min unpaid; shorter meals and rests ≤ 20 min are hours worked), Art. 91 (weekly rest day), DOLE DA 02-04 (compressed workweek) | Each date measured against its own shift; compressed days regular up to the shift (max 12 h; ≤ 5 days and 48 h a week) |
+| Leaves | Art. 95 (SIL after 12 months), RA 11861 (solo parent, 6 months), RA 9710 (women, 6 months), RA 11210 (maternity 105 calendar days), RA 8187, RA 9262 | Service requirements enforced; maternity paid as the SSS benefit + salary differential (tax-exempt, RMC 105-2019), not as salary |
+| Deductions | Art. 113, IRR Book III Rule VIII §10 (DO 195-18) | Company loans, HMO and other deductions need the employee's written authorization date |
+| Minimum wage | RA 6727 regional wage orders (e.g. NCR-28, ₱755 from Sep 26, 2026); MWE exemption RA 9504; apprentices/learners 75% (Arts. 61, 73) | Per-client wage region and rate; MWE exempt package; payslip warnings when a rate is below the floor or an MWE is paid above the minimum |
+| Holidays | 2026: Proclamations 1006 / 1189 / 1264; 2027: Proclamation 1427 | National list + per-client local holidays |
 
 Statutory tables live in `statutory_versions`, **versioned by effective
 date**: payroll uses the version in force for each period (contributions)
@@ -329,9 +332,12 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
 
 - The BIR reports are working data for the BIR Alphalist module and
   eBIRForms; the app does not generate the DAT file or file returns.
-- Unworked regular-holiday pay qualification (presence on the preceding
-  workday) is simplified — the engine pays unless the employee is on unpaid
-  leave; see the computation trace notes.
+- The SSS maternity benefit and the salary differential are entered as
+  adjustments (the SSS figure comes from the SSS portal); payroll only stops
+  paying the leave days as salary and reminds you.
+- Whether a minimum wage earner's rest-day and special-day premiums are
+  tax-exempt like holiday pay is not settled in the sources checked; the app
+  treats them as exempt — confirm with your accountant.
 - De minimis ceilings are the admin's responsibility when classifying
   allowances as de minimis (current caps per RR 29-2025 are shown in the UI).
 - This software assists with compliance but is not legal advice — always

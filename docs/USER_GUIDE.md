@@ -24,6 +24,14 @@ Always pick the client first in the client selector at the top.
 5. Download the payroll register or cash payout sheet from the run. For payslips, tick employees (or **Select all**) → **Download payslips** → one PDF to print, or a ZIP with one file per employee.
    Before finalizing, read the review warnings: a workday with no time in/out and no leave is charged as an absence.
 6. **Cash Advances** → **Record advance** when you release one (or **Requests** → **Approve…** an employee's request): amount, deduction per payroll — or **No fixed installment** when you agree on the amount each payroll (set it in each draft; nothing is deducted until you do) — release and first-deduction dates. Print the **agreement**, have the employee sign it, and tick *Signed by the employee on* — an advance can't be saved without it. Each finalized payroll deducts the installment (never more than the net pay); the payroll that includes a separation takes the rest (a paused advance shows up in that payroll's review warnings instead). **Details** shows the history; record a **repayment** made outside payroll there, pause deductions, or change the installment.
+   Things payroll now handles by the rules (Oct 2026 review):
+   - **Holidays** — an unworked regular holiday is paid only if the employee worked or was on paid leave on the workday before it; the review warnings name any holiday not paid, so you can enter missing time first.
+   - **SSS** follows the month's actual pay: the month's last payroll settles it (overtime and allowances included) and refunds what an earlier cutoff over-deducted.
+   - **Year-end tax adjustment** — the switch appears only for a payroll paid in December; turn it on for the last one of the year. A separating employee's tax is settled automatically on the payroll that includes the last day.
+   - **Bonuses** beyond the ₱90,000 yearly exemption (with the 13th month) are taxed in the payroll that pays them.
+   - **Maternity leave** is not paid as salary: add the **SSS maternity benefit** (advance it in full within 30 days of the leave application) and any **maternity salary differential** as adjustments — both are under *Maternity leave* in the classification list and are tax-exempt.
+   - **Deductions** for a company loan, HMO or anything else the law doesn't provide for need the date the employee signed a written authorization (employee's **Pay** tab, or the adjustment form for a one-time *Other* deduction).
+   - **PhilHealth** — for an employee with a PWD or Solo Parent ID, set *PhilHealth employee share* on the **Pay** tab: the government pays the employee's half (solo parents from Sep 26, 2026); the employer half is unchanged.
 7. **BIR & Reports** → **Insights**: pick a report (payroll cost, overtime, attendance, headcount & turnover, leave, cash advances & loans, or a custom report of any payslip figures), the period, department and grouping; read **What stands out**, switch any chart to a table, and download **CSV** or **PDF**. The page link keeps the settings, so a report can be bookmarked or sent to a co-admin. The other tabs: 1601-C, 1604-C alphalist, 2316, SSS / PhilHealth / Pag-IBIG reports.
 8. **Announcements** → post notices to employees.
 
@@ -39,6 +47,6 @@ Always pick the client first in the client selector at the top.
 - **Dashboard** — latest take-home pay, deductions, leave balances.
 - **Payslips** — view/download finalized payslips.
 - **Attendance** — check records; **report a missing time entry** if something's wrong (HR fixes it).
-- **Leaves** — file leave requests. Service Incentive Leave becomes available after 12 months of service (the date shows on the card).
+- **Leaves** — file leave requests. Service Incentive Leave becomes available after 12 months of service, Solo Parent Leave and Special Leave for Women after 6 (the date shows on the card). Maternity leave counts calendar days.
 - **Cash Advances** — request an advance (amount and how much to deduct per payroll), see what you owe, what the next payroll deducts (or that the amount is agreed each payroll), and every deduction so far. Advances carry no interest; you sign an authorization before the money is released.
 - Lost your code? Ask HR for a new one.
