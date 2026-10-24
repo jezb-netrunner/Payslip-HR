@@ -374,7 +374,8 @@ schedules, per-payroll deductions, Insights, read-only statutory tables,
 the legal-accuracy fixes) is on `claude/affectionate-carson-hyuwes` and
 reaches the site only when merged.
 
-**2026-10-24 migrations (owner approved applying them and opening the PR).**
+**2026-10-24 migrations (owner approved applying them and opening the PR —
+draft PR #6, `claude/affectionate-carson-hyuwes` → `main`).**
 Live through MCP: `20261024112556 work_schedules` and `20261024221511
 payroll_deduction_overrides` (new tables, all with RLS; backward compatible
 with `main`; advisors unchanged after the first). `statutory_tables_managed`
