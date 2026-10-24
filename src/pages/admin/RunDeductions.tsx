@@ -86,6 +86,8 @@ export function RunDeductionsCard({
       const extrasOnly = run.run_type === 'final_pay' && !!employee.separation_date && employee.separation_date < run.period_start
       if (extrasOnly && d.category !== 'cash_advance') continue
       const set = setFor.get(d.id)
+      // an advance released after this payroll's pay date did not exist for it
+      if (!set && d.category === 'cash_advance' && d.released_on && d.released_on > run.pay_date) continue
       const owed = d.balance !== null && d.balance !== undefined ? Number(d.balance) > 0 : true
       const inPeriod = (!d.start_date || d.start_date <= run.period_end) && (!d.end_date || d.end_date >= run.period_start)
       // what this payroll takes or could take: an advance or loan still owed
@@ -101,7 +103,7 @@ export function RunDeductionsCard({
       })
     }
     return out.sort((a, b) => fullName(a.employee).localeCompare(fullName(b.employee)) || a.deduction.label.localeCompare(b.deduction.label))
-  }, [deductions, overrides, covered, slips, run.period_start, run.period_end, run.run_type])
+  }, [deductions, overrides, covered, slips, run.period_start, run.period_end, run.run_type, run.pay_date])
 
   if (loadError) return <LoadFailed message={loadError} onRetry={load} />
   if (!deductions) return <Spinner />
@@ -157,8 +159,10 @@ function DeductionRow({ row: r, run, onEdit }: { row: Row; run: PayrollRun; onEd
     <li className="flex flex-wrap items-center gap-x-4 gap-y-1.5 py-3">
       <div className="min-w-0 flex-1 basis-56">
         <p className="truncate text-sm font-semibold text-ink-900">{fullName(r.employee)}</p>
-        <p className="truncate text-xs text-slate-500">
-          {d.label} · {categoryLabel(d.category)} · usually {usualText(d)}
+        <p className="break-words text-xs text-slate-500">
+          {/* "Cash advance (Aug 3, 2026)" already says what it is */}
+          {d.label.toLowerCase().startsWith(categoryLabel(d.category).toLowerCase()) ? d.label : `${d.label} · ${categoryLabel(d.category)}`} · usually{' '}
+          {usualText(d)}
           {balance !== null && ` · ${money(balance)} owed`}
         </p>
         <div className="mt-0.5 flex flex-wrap gap-1">

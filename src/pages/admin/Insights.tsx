@@ -245,20 +245,20 @@ export default function Insights({ entity }: { entity: Entity }) {
     <div className="space-y-5">
       <Card>
         <div className="flex flex-wrap items-end gap-3">
-          <Field label="Report">
-            <Select value={report} onChange={(e) => set({ r: e.target.value, by: null })} className="w-56">
+          <Field label="Report" className="w-full sm:w-auto">
+            <Select value={report} onChange={(e) => set({ r: e.target.value, by: null })} className="w-full sm:w-56">
               {REPORT_KEYS.map((k) => (
                 <option key={k} value={k}>{REPORTS[k].label}</option>
               ))}
             </Select>
           </Field>
-          <Field label="Period">
+          <Field label="Period" className="w-full sm:w-auto">
             <Select
               value={preset}
               onChange={(e) =>
                 set(e.target.value === 'custom' ? { p: 'custom', from: range.from, to: range.to } : { p: e.target.value, from: null, to: null })
               }
-              className="w-44"
+              className="w-full sm:w-44"
             >
               {Object.entries(PRESETS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
@@ -277,8 +277,8 @@ export default function Insights({ entity }: { entity: Entity }) {
             </>
           )}
           {def.groups.length > 0 && (
-            <Field label="Group by">
-              <Select value={by} onChange={(e) => set({ by: e.target.value })} className="w-40">
+            <Field label="Group by" className="w-full sm:w-auto">
+              <Select value={by} onChange={(e) => set({ by: e.target.value })} className="w-full sm:w-40">
                 {def.groups.map((g) => (
                   <option key={g} value={g}>{GROUP_LABELS[g]}</option>
                 ))}
@@ -286,8 +286,8 @@ export default function Insights({ entity }: { entity: Entity }) {
             </Field>
           )}
           {departments.length > 1 && (
-            <Field label="Department">
-              <Select value={department} onChange={(e) => set({ dept: e.target.value })} className="w-44">
+            <Field label="Department" className="w-full sm:w-auto">
+              <Select value={department} onChange={(e) => set({ dept: e.target.value })} className="w-full sm:w-44">
                 <option value="">All departments</option>
                 {departments.map((d) => (
                   <option key={d} value={d}>{d}</option>
@@ -403,7 +403,7 @@ function ReportTable({ table: t }: { table: Table }) {
             {t.rows.map((r, i) => (
               <tr key={i}>
                 {t.columns.map((c, j) => (
-                  <Td key={c.key} className={`${right(c.kind) ? 'text-right tabular-nums' : ''} ${j === 0 ? 'font-semibold text-ink-900' : ''}`}>
+                  <Td key={c.key} className={`${right(c.kind) ? 'text-right tabular-nums' : ''} ${j === 0 ? 'whitespace-nowrap font-semibold text-ink-900' : ''}`}>
                     {cellText(r[c.key], c.kind)}
                   </Td>
                 ))}

@@ -533,15 +533,15 @@ export function costReport(all: SlipFact[], range: MonthRange, by: GroupBy): Rep
   const rows = ordered(group(facts, (f) => keyOf(f, by), costAgg, addCost), by, costOf)
   const columns: Column[] = [
     { key: 'label', label: GROUP_LABELS[by], kind: 'text' },
-    { key: 'employees', label: 'Employees paid', kind: 'number' },
+    { key: 'employees', label: 'Employees', kind: 'number' },
     { key: 'basic', label: 'Basic pay', kind: 'money' },
-    { key: 'ot', label: 'Overtime & premiums', kind: 'money' },
+    { key: 'ot', label: 'OT & premiums', kind: 'money' },
     { key: 'allowances', label: 'Allowances & other', kind: 'money' },
     { key: 'thirteenth', label: '13th month', kind: 'money' },
     { key: 'gross', label: 'Gross pay', kind: 'money' },
-    { key: 'er', label: 'Employer contributions', kind: 'money' },
+    { key: 'er', label: 'Employer share', kind: 'money' },
     { key: 'cost', label: 'Employer cost', kind: 'money' },
-    { key: 'perHead', label: 'Cost per employee a month', kind: 'money' },
+    { key: 'perHead', label: 'Per employee a month', kind: 'money' },
   ]
   const charts: Chart[] = []
   if (facts.length) {
@@ -571,7 +571,7 @@ export function costReport(all: SlipFact[], range: MonthRange, by: GroupBy): Rep
     { label: 'Employer cost', value: money(cost), sub: 'gross pay + employer contributions' },
     { label: 'Gross pay', value: money(total.gross), sub: `net pay ${money(total.net)}` },
     { label: 'Employer contributions', value: money(total.er), sub: total.gross ? `${pct(ratio(total.er, total.gross))} on top of gross pay` : undefined },
-    { label: 'Cost per employee', value: `${money(perHead)}/mo`, sub: plural(total.employees.size, 'employee') + ' paid' },
+    { label: 'Cost per employee a month', value: money(perHead), sub: plural(total.employees.size, 'employee') + ' paid' },
   ]
 
   const insights: Insight[] = []
@@ -1114,18 +1114,18 @@ export function headcountReport(all: PersonRow[], range: MonthRange, today: stri
   if (overdue.length) {
     insights.push({
       tone: 'warn',
-      text: `Still probationary after six months: ${names(overdue.map((p) => `${name(p.e)} (since ${p.e.hire_date})`))}. An employee allowed to work past the probationary period is a regular employee (Labor Code Art. 296) — update their status.`,
+      text: `Still probationary after six months: ${names(overdue.map((p) => `${name(p.e)} (since ${fmtDate(p.e.hire_date)})`))}. An employee allowed to work past the probationary period is a regular employee (Labor Code Art. 296) — update their status.`,
     })
   }
   if (dueSoon.length) {
     insights.push({
       tone: 'warn',
-      text: `Probation ends within 30 days for ${names(dueSoon.map((p) => `${name(p.e)} (${p.ends})`))}: evaluate them against the standards made known when they were hired (Labor Code Art. 296).`,
+      text: `Probation ends within 30 days for ${names(dueSoon.map((p) => `${name(p.e)} (${fmtDate(p.ends)})`))}: evaluate them against the standards made known when they were hired (Labor Code Art. 296).`,
     })
   }
   const leaving = activeNow.filter((e) => e.separation_date && e.separation_date >= today && e.separation_date <= addDays(today, 30))
   if (leaving.length) {
-    insights.push({ tone: 'info', text: `Leaving within 30 days: ${names(leaving.map((e) => `${name(e)} (${e.separation_date})`))} — plan their handover and final pay.` })
+    insights.push({ tone: 'info', text: `Leaving within 30 days: ${names(leaving.map((e) => `${name(e)} (${fmtDate(e.separation_date)})`))} — plan their handover and final pay.` })
   }
   if (pay.minimumWageDaily > 0) {
     const below = activeNow.filter(
@@ -1184,14 +1184,17 @@ export function headcountReport(all: PersonRow[], range: MonthRange, today: stri
           { key: 'department', label: 'Department', kind: 'text' },
           { key: 'hired', label: 'Hired', kind: 'date' },
           { key: 'ends', label: 'Six months end', kind: 'date' },
-          { key: 'left', label: 'Days left', kind: 'number' },
+          { key: 'left', label: 'Days left', kind: 'text' },
         ],
         rows: probation.map((p) => ({
           label: name(p.e),
           department: noDepartment(p.e.department.trim()),
           hired: p.e.hire_date,
           ends: p.ends,
-          left: Math.round((Date.parse(`${p.ends}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5),
+          left: (() => {
+            const d = Math.round((Date.parse(`${p.ends}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 864e5)
+            return d >= 0 ? plural(d, 'day') : `past, ${plural(-d, 'day')} ago`
+          })(),
         })),
         empty: 'No probationary employees.',
       },
@@ -1347,7 +1350,9 @@ export function leaveReport(
   else {
     const byType = group(taken, (r) => [r.leave_type_id, typeOf.get(r.leave_type_id)?.name ?? 'Leave'], lAgg, addL).sort((a, b) => b.agg.days - a.agg.days)
     insights.push({ tone: 'info', text: `${byType[0].label} is ${pct(ratio(byType[0].agg.days, total.days))} of leave days (${fmtNum(round2(byType[0].agg.days))} of ${fmtNum(round2(total.days))}).` })
-    if (total.unpaid > 0) insights.push({ tone: 'info', text: `${fmtNum(round2(total.unpaid))} of the ${fmtNum(round2(total.days))} leave days were unpaid.` })
+    if (total.unpaid > 0) {
+      insights.push({ tone: 'info', text: `${fmtNum(round2(total.unpaid))} of the ${fmtNum(round2(total.days))} leave days ${total.unpaid === 1 ? 'was' : 'were'} unpaid.` })
+    }
     const heavy = group(taken, (r) => [r.employee_id, fullName(staff.get(r.employee_id)!)], lAgg, addL).filter((p) => p.agg.days >= 10).sort((a, b) => b.agg.days - a.agg.days)
     if (heavy.length) insights.push({ tone: 'info', text: `10 days or more of leave: ${names(heavy.map((p) => `${p.label} (${fmtNum(round2(p.agg.days))})`))}.` })
   }
@@ -1568,6 +1573,13 @@ export function advancesReport(
   const paused = open.filter((a) => !a.active)
   if (paused.length) {
     insights.push({ tone: 'warn', text: `${plural(paused.length, 'paused advance')} (${money(sum(paused, (a) => n(a.balance)))}) ${paused.length === 1 ? 'is' : 'are'} not being collected.` })
+  }
+  const leavers = empRows.filter((r) => r.e.separation_date && r.e.separation_date <= addDays(today, 30))
+  if (leavers.length) {
+    insights.push({
+      tone: 'warn',
+      text: `Leaving or left with an advance still owed: ${names(leavers.map((r) => `${fullName(r.e)} (last day ${fmtDate(r.e.separation_date)}, ${money(r.owed)})`))}. The payroll that includes the last day takes the rest, as far as the pay allows; collect any shortfall directly.`,
+    })
   }
   const multi = empRows.filter((r) => r.list.length >= 2)
   if (multi.length) insights.push({ tone: 'info', text: `More than one advance open: ${names(multi.map((r) => `${fullName(r.e)} (${r.list.length})`))}.` })

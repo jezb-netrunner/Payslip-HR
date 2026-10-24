@@ -290,7 +290,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
                   formatter={(v, name) => [money(Number(v ?? 0)), String(name)]}
                   contentStyle={{ borderRadius: 12, border: '1px solid #e6e6ed', fontSize: 12 }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} formatter={(value) => <span style={{ color: '#41434f' }}>{value}</span>} />
+                <Legend itemSorter={null} wrapperStyle={{ fontSize: 12 }} formatter={(value) => <span style={{ color: '#41434f' }}>{value}</span>} />
                 <Bar dataKey="Net pay" stackId="a" fill={C.net} stroke="#ffffff" strokeWidth={2} maxBarSize={64} />
                 <Bar dataKey="Employee deductions" stackId="a" fill={C.ee} stroke="#ffffff" strokeWidth={2} maxBarSize={64} />
                 <Bar dataKey="Employer contributions" stackId="a" fill={C.er} stroke="#ffffff" strokeWidth={2} radius={[4, 4, 0, 0]} maxBarSize={64} />

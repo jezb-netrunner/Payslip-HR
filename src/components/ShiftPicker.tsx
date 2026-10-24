@@ -2,7 +2,7 @@
 // with the options payroll understands — the unpaid meal break, a flexible
 // start and the compressed workweek.
 
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { MAX_COMPRESSED_MINUTES, sameShift, shiftSpan, shiftWorkMinutes } from '../payroll/schedule'
 import type { Shift } from '../payroll/types'
 import type { ShiftTemplate } from '../lib/schedules'
@@ -86,7 +86,8 @@ export function ShiftFields({ value, onChange }: { value: Shift; onChange: (s: S
 
 /**
  * A shift for one weekday or date: rest day, a template, or custom times.
- * `value` null = rest day.
+ * `value` null = rest day. Custom times show as one line until edited, so a
+ * week of them stays readable.
  */
 export function ShiftChooser({
   value,
@@ -102,6 +103,7 @@ export function ShiftChooser({
   allowRest?: boolean
 }) {
   const id = useId()
+  const [editing, setEditing] = useState(false)
   const active = templates.filter((t) => t.active)
   // a template's shift carries its name; custom times never do (so equal times stay custom while edited)
   const matched = value?.name ? active.find((t) => t.name === value.name && sameShift(t.shift, value)) : undefined
@@ -115,8 +117,10 @@ export function ShiftChooser({
         onChange={(e) => {
           const v = e.target.value
           if (v === 'rest') onChange(null)
-          else if (v === 'custom') onChange(cleanShift(value ?? NEW_SHIFT))
-          else {
+          else if (v === 'custom') {
+            onChange(cleanShift(value ?? NEW_SHIFT))
+            setEditing(true)
+          } else {
             const t = active.find((x) => `t:${x.id}` === v)
             if (t) onChange(cleanShift(t.shift, t.name))
           }
@@ -128,9 +132,25 @@ export function ShiftChooser({
             {t.name} · {shiftLabel(t.shift)}
           </option>
         ))}
-        <option value="custom">Custom times…</option>
+        <option value="custom">{mode === 'custom' && value ? `Custom: ${shiftLabel(value)}` : 'Custom times…'}</option>
       </Select>
-      {mode === 'custom' && value && <ShiftFields value={value} onChange={(s) => onChange(cleanShift(s))} />}
+      {mode === 'custom' && value && (editing || shiftProblem(value) ? (
+        <div className="rounded-lg border border-slate-200 p-3">
+          <ShiftFields value={value} onChange={(s) => onChange(cleanShift(s))} />
+          {!shiftProblem(value) && (
+            <button type="button" onClick={() => setEditing(false)} className="mt-2 text-xs font-semibold text-brand-700 hover:underline">
+              Done
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+          {shiftDetail(value)}
+          <button type="button" onClick={() => setEditing(true)} className="font-semibold text-brand-700 hover:underline">
+            Edit times
+          </button>
+        </p>
+      ))}
     </div>
   )
 }

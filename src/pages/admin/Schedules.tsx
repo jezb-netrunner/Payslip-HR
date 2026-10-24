@@ -259,7 +259,9 @@ function Roster({ entity, onShifts }: { entity: Entity; onShifts: () => void }) 
                       type="button"
                       disabled={locked || !employed}
                       onClick={() => setEditing({ employee: e, date: dayInWeek })}
-                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left disabled:cursor-not-allowed"
+                      className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left disabled:cursor-not-allowed ${
+                        changed.has(key) ? 'bg-accent-100/70' : ''
+                      }`}
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-semibold text-ink-900">{fullName(e)}</span>

@@ -122,7 +122,8 @@ export function InsightChart({ chart }: { chart: Chart }) {
               barGap={2}
               margin={horizontal ? { top: 0, right: 96, bottom: 0, left: 0 } : { top: 8, right: 8, bottom: 0, left: 0 }}
             >
-              <CartesianGrid vertical={horizontal} horizontal={!horizontal} stroke={GRID} />
+              {/* ranked bars carry their values at the tips: no grid to read them against */}
+              {!horizontal && <CartesianGrid vertical={false} stroke={GRID} />}
               {horizontal ? (
                 <>
                   <XAxis type="number" hide />
@@ -139,7 +140,14 @@ export function InsightChart({ chart }: { chart: Chart }) {
               ) : (
                 <>
                   <XAxis dataKey="category" tick={{ fontSize: 11, fill: MUTED }} axisLine={{ stroke: BASELINE }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: MUTED }} axisLine={false} tickLine={false} width={56} tickFormatter={(v: number) => tick(v, chart.unit)} />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: MUTED }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={56}
+                    allowDecimals={chart.unit !== 'count' && chart.unit !== 'days'}
+                    tickFormatter={(v: number) => tick(v, chart.unit)}
+                  />
                 </>
               )}
               <Tooltip
@@ -148,6 +156,8 @@ export function InsightChart({ chart }: { chart: Chart }) {
               />
               {many && (
                 <Legend
+                  // the series' own order (the stack's, bottom to top), not alphabetical
+                  itemSorter={null}
                   iconType="square"
                   iconSize={10}
                   wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
