@@ -215,13 +215,19 @@ export default function Insights({ entity }: { entity: Entity }) {
     }
     switch (report) {
       case 'cost':
-        return costReport(inDept(data.slips), range, by)
+        return costReport(inDept(data.slips), range, by, today)
       case 'overtime':
-        return overtimeReport(inDept(data.slips), range, by, { standardHours: Number(entity.standard_hours_per_day) || 8, workingDaysPerYear: pay.workingDaysPerYear })
+        return overtimeReport(inDept(data.slips), range, by, { standardHours: Number(entity.standard_hours_per_day) || 8, workingDaysPerYear: pay.workingDaysPerYear }, today)
       case 'custom':
         return customReport(inDept(data.slips), range, by, measureKeys)
       case 'attendance':
-        return attendanceReport(inDept(data.days), inDept(data.slips), range, by)
+        return attendanceReport(
+          inDept(data.days),
+          inDept(data.slips),
+          range,
+          by,
+          new Map(data.people.map((e) => [e.id, { hire: e.hire_date, separation: e.separation_date }])),
+        )
       case 'headcount':
         return headcountReport(data.people, range, today, pay, department)
       case 'leave':

@@ -167,8 +167,11 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
     // off the clock (multiple entries with gaps = employee clocked out for
     // the break themselves).
     const effectiveBreak = Math.max(0, breakMinutes - gapMinutes)
+    // the break is taken on a day of 6 hours or more — or on a shorter shift
+    // that schedules one, once its span is worked (as its expected hours count it)
+    const breakAfter = shift && breakMinutes > 0 ? Math.min(6 * 60, shiftSpan(shift)) : 6 * 60
     const netMinutes =
-      rawMinutes >= 6 * 60 ? Math.max(0, rawMinutes - effectiveBreak) : rawMinutes
+      rawMinutes >= breakAfter ? Math.max(0, rawMinutes - effectiveBreak) : rawMinutes
     ndMinutes = Math.min(ndMinutes, netMinutes)
 
     const worked = netMinutes > 0

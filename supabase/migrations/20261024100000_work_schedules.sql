@@ -68,8 +68,10 @@ begin
   if v_span <= v_break then
     return false;
   end if;
-  -- a compressed workweek day runs at most 12 hours (DOLE Department Advisory 02-04)
-  if coalesce((p->>'compressed')::boolean, false) and v_span - v_break > 720 then
+  -- a compressed workweek day runs at most 12 hours of work (DOLE Department
+  -- Advisory 02-04); a break under an hour is paid time, so it counts
+  if coalesce((p->>'compressed')::boolean, false)
+     and v_span - (case when v_break >= 60 then v_break else 0 end) > 720 then
     return false;
   end if;
   return true;
@@ -160,6 +162,11 @@ begin
   if tg_op = 'UPDATE' and new.employee_id is distinct from old.employee_id then
     raise exception 'A schedule cannot move to another employee.';
   end if;
+  -- RLS checks a new row only after this trigger: refuse another client's
+  -- employee before saying anything about their pay
+  if tg_op <> 'DELETE' and auth.uid() is not null and not public.can_manage_employee(new.employee_id) then
+    raise exception 'Employee not found.';
+  end if;
   -- same writer order as attendance and finalize: the employee's payroll lock first
   perform pg_advisory_xact_lock(hashtextextended('time_entries:' || v_emp::text, 0));
   v_paid := public.last_paid_date(v_emp);
@@ -227,6 +234,9 @@ declare
 begin
   if tg_op = 'UPDATE' and new.employee_id is distinct from old.employee_id then
     raise exception 'A roster entry cannot move to another employee.';
+  end if;
+  if tg_op <> 'DELETE' and auth.uid() is not null and not public.can_manage_employee(new.employee_id) then
+    raise exception 'Employee not found.';
   end if;
   perform pg_advisory_xact_lock(hashtextextended('time_entries:' || v_emp::text, 0));
   if tg_op in ('UPDATE','DELETE') and public.attendance_locked(old.employee_id, old.work_date) then

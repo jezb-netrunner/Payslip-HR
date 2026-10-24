@@ -95,6 +95,12 @@ export default function MyLeaves() {
 
   async function submit() {
     if (!employee) return
+    // the days are counted on the schedule for those dates: wait for it
+    if (!formSchedule.ready) {
+      toast('error', formSchedule.error ? `${formSchedule.error}. Try again.` : 'Still loading your schedule — try again in a moment.')
+      if (formSchedule.error) formSchedule.reload()
+      return
+    }
     const days = workdayCount(form.start, form.end)
     if (!form.type || days <= 0) {
       toast('error', 'Pick a leave type and a valid date range.')

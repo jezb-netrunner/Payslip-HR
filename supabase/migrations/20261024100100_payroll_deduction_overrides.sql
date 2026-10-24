@@ -46,6 +46,10 @@ begin
     raise exception 'A payroll''s deduction amount cannot move to another run or deduction.';
   end if;
   if tg_op = 'DELETE' then
+    -- the deduction itself is being deleted (a cascade: it is already gone)
+    if not exists (select 1 from recurring_deductions where id = old.deduction_id) then
+      return old;
+    end if;
     v_emp := old.employee_id;
   else
     select * into v_ded from recurring_deductions where id = new.deduction_id;
@@ -58,6 +62,12 @@ begin
   select * into v_run from payroll_runs
     where id = case when tg_op = 'DELETE' then old.payroll_run_id else new.payroll_run_id end
     for no key update;
+  -- RLS checks a new row only after this trigger: another client's run or
+  -- deduction is "not found" before anything about it is said
+  if tg_op <> 'DELETE' and auth.uid() is not null
+     and (v_run.id is null or not public.can_manage_entity(v_run.entity_id)) then
+    raise exception 'Payroll run not found.';
+  end if;
   -- (a run being deleted is already gone: its cascade passes through)
   if v_run.id is not null and v_run.status <> 'draft' then
     raise exception 'Deductions of a finalized payroll run are locked. Reopen the run first.';
@@ -280,3 +290,52 @@ end
 $$;
 
 revoke execute on function public.guard_payroll_deduction_override() from public, anon, authenticated;
+
+-- ---------- reopening restores only what finalize paused ----------
+-- Finalize stops a deduction its payroll paid off; reopen used to re-start
+-- any deduction back above zero — including one the admin had paused and
+-- this payroll paid off through an amount set for it. Now finalize records
+-- which run closed it, and reopen re-starts only those (deductions closed
+-- before this change, with no amount set by the run, as before).
+alter table public.recurring_deductions add column if not exists closed_by_run uuid;
+
+create or replace function public.adjust_run_deduction_balances(p_run uuid, p_direction int)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  r record;
+begin
+  for r in
+    select (line->>'meta')::uuid as ded_id,
+           p.employee_id,
+           sum((line->>'amount')::numeric) as amt
+    from payslips p,
+         jsonb_array_elements(p.deductions) as line
+    where p.payroll_run_id = p_run
+      and line->>'code' like 'other:%'
+      and line->>'meta' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+    group by 1, 2
+  loop
+    update recurring_deductions d
+      set balance = d.balance + p_direction * r.amt,
+          active = case
+            -- finalize: stop a deduction that just reached zero
+            when p_direction < 0 then d.active and (d.balance + p_direction * r.amt) > 0
+            -- reopen: re-start only what this run's finalize stopped; never a manual pause
+            else d.active or (
+              d.balance + p_direction * r.amt > 0
+              and (d.closed_by_run is not distinct from p_run
+                   or (d.closed_by_run is null and d.balance <= 0
+                       and not exists (select 1 from payroll_deduction_overrides o
+                                       where o.payroll_run_id = p_run and o.deduction_id = d.id))))
+          end,
+          closed_by_run = case
+            when p_direction < 0 and d.active and (d.balance + p_direction * r.amt) <= 0 then p_run
+            when p_direction > 0 and d.closed_by_run is not distinct from p_run then null
+            else d.closed_by_run
+          end
+      where d.id = r.ded_id and d.employee_id = r.employee_id and d.balance is not null;
+  end loop;
+end
+$$;

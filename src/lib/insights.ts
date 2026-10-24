@@ -524,7 +524,10 @@ function costRow(label: string, a: CostAgg): Row {
   }
 }
 
-export function costReport(all: SlipFact[], range: MonthRange, by: GroupBy): Report {
+/** Payroll months before today's: the current one still has payrolls to come. */
+const completeMonth = (m: string, today?: string) => !today || m < today.slice(0, 7)
+
+export function costReport(all: SlipFact[], range: MonthRange, by: GroupBy, today?: string): Report {
   const facts = inMonths(all, range)
   const total = costAgg()
   facts.forEach((f) => addCost(total, f))
@@ -577,10 +580,14 @@ export function costReport(all: SlipFact[], range: MonthRange, by: GroupBy): Rep
   const insights: Insight[] = []
   if (!facts.length) insights.push(NO_PAY_YET)
   else {
-    // the latest month against the one before it, and what moved it
-    const paid = months.filter((m) => byMonth.has(m))
+    // the latest complete month against the one before it, and what moved it
+    const paid = months.filter((m) => byMonth.has(m) && completeMonth(m, today))
+    const partial = months.find((m) => byMonth.has(m) && !completeMonth(m, today))
     const last = paid[paid.length - 1]
-    const prev = shiftMonth(last, -1)
+    const prev = last ? shiftMonth(last, -1) : ''
+    if (partial) {
+      insights.push({ tone: 'info', text: `${monthShort(partial)} so far: ${money(costOf(byMonth.get(partial)!))} — its remaining payrolls are still to come, so it isn't compared yet.` })
+    }
     if (paid.length >= 2 && byMonth.has(prev)) {
       const a = byMonth.get(last)!
       const b = byMonth.get(prev)!
@@ -679,7 +686,7 @@ export interface WorkSettings {
   workingDaysPerYear: number
 }
 
-export function overtimeReport(all: SlipFact[], range: MonthRange, by: GroupBy, work: WorkSettings): Report {
+export function overtimeReport(all: SlipFact[], range: MonthRange, by: GroupBy, work: WorkSettings, today?: string): Report {
   const facts = inMonths(all, range).filter((f) => f.runType !== 'thirteenth_month')
   const total = otAgg()
   facts.forEach((f) => addOt(total, f))
@@ -755,7 +762,7 @@ export function overtimeReport(all: SlipFact[], range: MonthRange, by: GroupBy, 
         text: `The ${fmtNum(round2(total.otHours))} overtime hours equal about ${fmtNum(Math.round(fte * 10) / 10)} full-time employees' regular hours over the period. Overtime is paid at a premium (at least 25% more on an ordinary day, Labor Code Art. 87) — weigh it against the cost of another hire or a different schedule.`,
       })
     }
-    const paid = months.filter((m) => byMonth.has(m))
+    const paid = months.filter((m) => byMonth.has(m) && completeMonth(m, today))
     if (paid.length >= 3) {
       const last = paid[paid.length - 1]
       const earlier = paid.slice(0, -1)
@@ -820,8 +827,18 @@ function addAtt(a: AttAgg, d: DayFact) {
   }
 }
 
-export function attendanceReport(allDays: DayFact[], allSlips: SlipFact[], range: MonthRange, by: GroupBy): Report {
-  const days = uniqueDays(allDays, range)
+export function attendanceReport(
+  allDays: DayFact[],
+  allSlips: SlipFact[],
+  range: MonthRange,
+  by: GroupBy,
+  /** hire and separation dates: payroll marks days outside the employment absent to prorate the pay — they aren't absences */
+  employment?: Map<string, { hire: string; separation: string | null }>,
+): Report {
+  const days = uniqueDays(allDays, range).filter((d) => {
+    const e = employment?.get(d.employeeId)
+    return !e || (d.date >= e.hire && (!e.separation || d.date <= e.separation))
+  })
   const slips = inMonths(allSlips, range)
   const total = attAgg()
   days.forEach((d) => addAtt(total, d))
@@ -876,7 +893,7 @@ export function attendanceReport(allDays: DayFact[], allSlips: SlipFact[], range
     },
     { label: 'Late arrivals', value: fmtNum(total.late), sub: total.late ? `${pct(ratio(total.late, total.worked))} of days worked · ${fmtHours(total.lateMinutes)} in all` : 'none' },
     { label: 'Undertime', value: fmtNum(total.undertime), sub: total.undertime ? `days · ${fmtHours(total.undertimeMinutes)} in all` : 'none' },
-    { label: 'Deducted from pay', value: money(deducted), sub: 'absences, tardiness and undertime of monthly-paid' },
+    { label: 'Deducted from pay', value: money(deducted), sub: 'absences, tardiness and undertime of monthly-paid, in these payroll months' },
   ]
 
   const insights: Insight[] = []

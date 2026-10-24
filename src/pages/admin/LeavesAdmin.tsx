@@ -466,7 +466,9 @@ function FileLeaveModal({
             ? 'Pick an employee to count the workdays.'
             : f.end < f.start
               ? 'The end date is before the start date.'
-              : !counted
+              : sched.error
+                ? `${sched.error} — close and reopen to try again.`
+                : !counted
                 ? 'Counting workdays…'
                 : `${plural(days, 'scheduled workday')} (holidays and rest days not counted).`}
         </p>

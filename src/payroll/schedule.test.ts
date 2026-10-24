@@ -218,3 +218,24 @@ describe('pay against each date\'s shift', () => {
     expect(slip.overtimeHours).toBe(0)
   })
 })
+
+describe('short shifts with an unpaid break', () => {
+  it('takes the break once the shift is worked, so the shift pays its own hours', () => {
+    const half = { start: '08:00', end: '13:00', break_minutes: 60 }
+    const resolver = makeResolver({ days: [], start: '08:00', end: '17:00', break_minutes: 60 }, [], [{ work_date: '2026-10-17', shift: half }])
+    const day = (tout: string) =>
+      computeAttendance({
+        periodStart: '2026-10-17',
+        periodEnd: '2026-10-17',
+        schedule: resolver,
+        standardHoursPerDay: 8,
+        gracePeriodMinutes: 0,
+        entries: [{ work_date: '2026-10-17', clock_in: manilaWallToIso('2026-10-17', '08:00'), clock_out: manilaWallToIso('2026-10-17', tout) }],
+        holidays: [],
+        approvedLeaves: [],
+      })[0]
+    expect(day('13:00')).toMatchObject({ expectedMinutes: 240, workedMinutes: 240, payableMinutes: 240, undertimeMinutes: 0, otMinutes: 0 })
+    // left at noon: four hours worked, no lunch taken — the shift's four hours of work
+    expect(day('12:00')).toMatchObject({ workedMinutes: 240, undertimeMinutes: 0 })
+  })
+})

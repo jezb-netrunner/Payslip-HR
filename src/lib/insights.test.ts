@@ -445,3 +445,22 @@ describe('custom report and exports', () => {
     expect(cellText(null, 'money')).toBe('—')
   })
 })
+
+describe('review fixes', () => {
+  it('does not compare the current month while its payrolls are still to come', () => {
+    const slips = [fact({ month: '2026-09' }), fact({ month: '2026-09', employeeId: 'e2' }), fact({ month: '2026-10' })]
+    const r = costReport(slips, { from: '2026-09', to: '2026-10' }, 'month', '2026-10-24')
+    const t = texts(r)
+    expect(t[0]).toBe("Oct 2026 so far: ₱11,000.00 — its remaining payrolls are still to come, so it isn't compared yet.")
+    expect(t.some((x) => x.includes('down'))).toBe(false)
+  })
+
+  it('leaves days outside the employment out of attendance', () => {
+    const who = whoOf('n', { name: 'New Hire', department: 'Ops' })
+    const day = (date: string, absent: boolean) => ({ date, dayType: 'regular', scheduled: true, workedMinutes: absent ? 0 : 480, absent, lateMinutes: 0, undertimeMinutes: 0 })
+    // payroll marks the days before the hire absent to prorate the period
+    const days = toDayFacts(who, [day('2026-10-12', true), day('2026-10-13', true), day('2026-10-14', false), day('2026-10-15', false)])
+    const r = attendanceReport(days, [], { from: '2026-10', to: '2026-10' }, 'employee', new Map([['n', { hire: '2026-10-14', separation: null }]]))
+    expect(r.tables[0].total).toMatchObject({ expected: 2, absent: 0, worked: 2 })
+  })
+})

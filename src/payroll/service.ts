@@ -550,7 +550,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
                       : Math.min(Number(d.amount_per_period), Number(d.balance)),
                 upToNet: true,
                 balance: Number(d.balance),
-                settlement: settles && setFor(d) === undefined,
+                // no later payroll follows a separation, whatever amount was set
+                settlement: settles,
               })),
             ],
         oneTimeEarnings: empAdjustments

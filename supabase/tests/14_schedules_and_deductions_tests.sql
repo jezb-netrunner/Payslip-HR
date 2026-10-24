@@ -100,7 +100,7 @@ select set_config('request.jwt.claim.sub', :ta, true);
 select pg_temp.check((select count(*) from shift_templates) = 0, 'another client sees no templates');
 select pg_temp.check((select count(*) from employee_schedules) = 0, 'another client sees no schedules');
 select pg_temp.check((select count(*) from schedule_overrides) = 0, 'another client sees no roster');
-select pg_temp.expect_error($$insert into schedule_overrides (employee_id, work_date, shift) values ('20000000-0000-0000-0000-0000000000b1', '2026-11-06', null)$$, '%row-level security%');
+select pg_temp.expect_error($$insert into schedule_overrides (employee_id, work_date, shift) values ('20000000-0000-0000-0000-0000000000b1', '2026-11-06', null)$$, 'Employee not found.');  -- refused before RLS, saying nothing about them
 update employee_schedules set note = 'x';  -- matches no row they may update
 delete from schedule_overrides;              -- nor one they may delete
 commit;
@@ -111,7 +111,7 @@ select set_config('request.jwt.claim.sub', :us1, true);
 select pg_temp.check((select count(*) from employee_schedules) = 1, 'employee reads own schedule');
 select pg_temp.check((select count(*) from schedule_overrides) = 2, 'employee reads own roster');
 select pg_temp.check((select count(*) from shift_templates) = 0, 'employees do not see templates');
-select pg_temp.expect_error($$insert into schedule_overrides (employee_id, work_date, shift) values ('20000000-0000-0000-0000-0000000000b1', '2026-11-07', null)$$, '%row-level security%');
+select pg_temp.expect_error($$insert into schedule_overrides (employee_id, work_date, shift) values ('20000000-0000-0000-0000-0000000000b1', '2026-11-07', null)$$, 'Employee not found.');  -- employees never write their schedule
 update schedule_overrides set shift = null;  -- no update right
 commit;
 select pg_temp.check((select shift is not null from schedule_overrides where id = '5300000e-0000-0000-0000-000000000001'), 'employee could not change the roster');
@@ -204,7 +204,10 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :ta, true);
 select pg_temp.check((select count(*) from payroll_deduction_overrides) = 0, 'another client sees no deduction amounts');
-select pg_temp.expect_error($$insert into payroll_deduction_overrides (payroll_run_id, deduction_id, amount) values ('3000000e-0000-0000-0000-000000000002', '7000000e-0000-0000-0000-000000000002', 1)$$, '%row-level security%');
+-- refused before the guard says anything about the other client's run or deduction
+select pg_temp.expect_error($$insert into payroll_deduction_overrides (payroll_run_id, deduction_id, amount) values ('3000000e-0000-0000-0000-000000000002', '7000000e-0000-0000-0000-000000000002', 999999)$$, 'Payroll run not found.');
+select pg_temp.expect_error($$insert into employee_schedules (employee_id, effective_from, pattern) values ('20000000-0000-0000-0000-0000000000b1', '2026-01-01', '[null,null,null,null,null,null,null]')$$, 'Employee not found.');
+select pg_temp.expect_error($$insert into schedule_overrides (employee_id, work_date, shift) values ('20000000-0000-0000-0000-0000000000b1', '2026-11-03', null)$$, 'Employee not found.');
 commit;
 begin;
 set local role authenticated;
@@ -225,5 +228,36 @@ select set_config('request.jwt.claim.sub', :sa, true);
 select pg_temp.expect_error($$select public.approve_advance_request('6000000e-0000-0000-0000-000000000001', 1500, -1, '2026-11-16', null, 'cash', '2026-11-16')$$, '%deduction per payroll%');
 select public.approve_advance_request('6000000e-0000-0000-0000-000000000001', 1500, 0, '2026-11-16', null, 'cash', '2026-11-16');
 select pg_temp.check((select d.amount_per_period = 0 and d.balance = 1500 from advance_requests r join recurring_deductions d on d.id = r.advance_id where r.id = '6000000e-0000-0000-0000-000000000001'), 'approved with no fixed installment');
+commit;
+\echo '--- 14.7 reopening keeps a manual pause; deleting a deduction takes its amounts along'
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :sa, true);
+-- a paused loan that this payroll pays off through an amount set for it
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, active)
+values ('7000000e-0000-0000-0000-000000000003', '20000000-0000-0000-0000-0000000000b1', 'Paused loan', 'company_loan', 200, 600, 600, false);
+insert into payroll_deduction_overrides (payroll_run_id, deduction_id, amount) values ('3000000e-0000-0000-0000-000000000001', '7000000e-0000-0000-0000-000000000003', 600);
+-- an active loan its installment pays off
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, active)
+values ('7000000e-0000-0000-0000-000000000004', '20000000-0000-0000-0000-0000000000b1', 'Last installment', 'company_loan', 300, 300, 300, true);
+update payslips set deductions = '[{"code":"other:company_loan","label":"Paused loan","amount":600,"meta":"7000000e-0000-0000-0000-000000000003"},{"code":"other:company_loan","label":"Last installment","amount":300,"meta":"7000000e-0000-0000-0000-000000000004"}]', total_deductions = 900, net_pay = 3630
+  where payroll_run_id = '3000000e-0000-0000-0000-000000000001';
+select pg_temp.computed('3000000e-0000-0000-0000-000000000001');
+select public.finalize_payroll_run('3000000e-0000-0000-0000-000000000001');
+select pg_temp.check((select balance = 0 and not active from recurring_deductions where id = '7000000e-0000-0000-0000-000000000003'), 'the paused loan is paid off');
+select pg_temp.check((select balance = 0 and not active and closed_by_run = '3000000e-0000-0000-0000-000000000001' from recurring_deductions where id = '7000000e-0000-0000-0000-000000000004'), 'finalize stopped the paid-off loan and says so');
+select public.reopen_payroll_run('3000000e-0000-0000-0000-000000000001');
+select pg_temp.check((select balance = 600 and not active from recurring_deductions where id = '7000000e-0000-0000-0000-000000000003'), 'reopen restores the balance and keeps the pause');
+select pg_temp.check((select balance = 300 and active and closed_by_run is null from recurring_deductions where id = '7000000e-0000-0000-0000-000000000004'), 'reopen restarts what finalize stopped');
+-- skipped in a finalized payroll, then deleted: its amounts go with it
+update payroll_deduction_overrides set amount = 0 where deduction_id = '7000000e-0000-0000-0000-000000000003';
+update payslips set deductions = '[{"code":"other:company_loan","label":"Last installment","amount":300,"meta":"7000000e-0000-0000-0000-000000000004"}]', total_deductions = 300, net_pay = 4230
+  where payroll_run_id = '3000000e-0000-0000-0000-000000000001';
+select pg_temp.computed('3000000e-0000-0000-0000-000000000001');
+select public.finalize_payroll_run('3000000e-0000-0000-0000-000000000001');
+delete from recurring_deductions where id = '7000000e-0000-0000-0000-000000000003';
+select pg_temp.check((select count(*) from payroll_deduction_overrides where deduction_id = '7000000e-0000-0000-0000-000000000003') = 0, 'the deduction and its amounts are gone');
+select pg_temp.expect_error($$delete from payroll_deduction_overrides where payroll_run_id = '3000000e-0000-0000-0000-000000000001'$$, '%finalized payroll run are locked%');
+select public.reopen_payroll_run('3000000e-0000-0000-0000-000000000001');
 commit;
 \echo 'PASSED 14'
