@@ -300,6 +300,35 @@ phones; secondary columns fold under the hours below xl). Researched the
 BIR/DOLE correction rules and answered from the code (see the lesson
 *Correcting a payroll after payday*); the gaps found were reported, not built.
 
+### 2026-10-24 — Flexible schedules, informal advance deductions, management reports (same branch)
+
+**Asked:** schedules differ, so fixed-schedule logic will be a problem —
+remedy it the industry-standard way; advances are informal in small
+businesses, so what a cutoff deducts for an earlier advance differs each
+payroll; BIR & Reports should build real reports with insights for the
+owner's decisions, not only BIR and mandatory-contribution data.
+
+**Did:** migration `work_schedules` — `shift_templates`, `employee_schedules`
+(7-slot weekly pattern from an effective date), `schedule_overrides`
+(per-date roster changes; null shift = rest day), guards, RLS, audit, stale
+drafts. Engine: each date measured against its own shift
+(`src/payroll/schedule.ts` resolver; `attendance.ts`/`engine.ts`). UI:
+**Schedules** page (weekly roster + shift templates), employee **Schedule**
+tab (dated patterns, history, single-date changes), `ShiftPicker`; the
+profile form no longer edits shifts. Migration `payroll_deduction_overrides`
+— a draft sets what it deducts per recurring deduction (0 skips), advances
+may have no fixed installment (0); pay-run card *Cash advances & loans this
+payroll*, Cash Advances toggle, agreement wording for both. **Insights** tab
+(first on BIR & Reports): payroll cost, overtime, attendance, headcount &
+turnover, leave (unused-SIL cash), cash advances & loans, custom —
+`src/lib/insights.ts` (pure, tested) + `insightsData.ts` + `Insights.tsx` +
+`InsightChart.tsx` + `pdf/insightsPdf.ts`; settings live in the URL. Tests
+220 → 240 plus SQL suite 14. Browser QA on the local stack (Aug–Sep
+attendance seeded, four runs computed and finalized through the UI, a
+per-payroll advance amount set and finalized, schedule flows, 390 px):
+fixed alphabetical chart legends, fractional count ticks, an overflowing
+KPI, an over-long schedule modal (compact day rows), ISO dates in findings.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -875,6 +904,84 @@ another segment and carry a stripe texture plus a label. Re-run
 `validate_palette.js` (dataviz skill) before adding a series colour. Why it
 mattered: eyeballed brand colours gave pairs that colour-blind — and even
 full-vision — readers could not tell apart.
+recharts 3 sorts a legend alphabetically by default: pass
+`itemSorter={null}` so it follows the series (stack) order — the Insights
+cost chart listed "13th month" first above a stack that starts with basic pay.
+
+### Work schedules are effective-dated patterns plus per-date roster changes (confirmed approach)
+
+> For a date: a `schedule_overrides` row wins, else the newest `employee_schedules` pattern with `effective_from` ≤ date, else the legacy `employees.work_schedule` — so an earlier period always recomputes with the schedule it had, and nothing changed for anyone until a schedule was edited.
+
+Shifts are stored as snapshots ({start, end, break_minutes, flex_minutes?,
+compressed?, name?}); templates are presets, so editing a template never
+rewrites schedules already set. Paid days are protected in the database: a
+pattern can't start on or before `last_paid_date()` (finalized/paid regular,
+special or final-pay runs) and roster rows are locked by
+`attendance_locked()`; both take the employee's payroll advisory lock and
+stale the drafts. Engine semantics: regular time is capped at the standard
+day (or the whole shift on a compressed-workweek day, max 12 h); expected
+minutes = the shift's own work minutes, so a half-day shift misses half a
+day; monthly-paid hours past a short shift are paid at the regular rate
+("extra_hours"); flexible start moves the shift. Why it mattered: the old
+single `work_schedule` made every change retroactive — editing it would
+have recomputed past drafts with the new hours.
+
+### Hours-of-work rules behind the per-date engine (verified 2026-10-24)
+
+> Researched with sources before building the schedule engine; re-verify if DOLE issues a new advisory on flexible work arrangements.
+
+- Normal hours ≤ 8 a day (Art. 83); overtime beyond 8 hours, +25% on an
+  ordinary day (Art. 87).
+- Meal period of at least 60 minutes, not compensable (Art. 85); IRR Book
+  III Rule I §7: a shorter meal period (not under 20 minutes) is allowed in
+  listed cases but is **compensable hours worked**, and short rest periods
+  count as hours worked — hence `unpaidBreak()` deducts only breaks ≥ 60.
+- Weekly rest day: at least 24 consecutive hours after six consecutive
+  normal workdays (Art. 91) — the roster warns on a seven-workday week.
+- Compressed workweek (DOLE Department Advisory 02-04): voluntary, agreed
+  by a majority of the affected employees, DOLE regional office notified;
+  up to 12 hours a day with no overtime premium for hours within the agreed
+  schedule; overtime beyond 12 hours a day or 48 hours a week (unless the
+  practice is more generous). The app only marks a shift as compressed —
+  the agreement and the DOLE notice are the employer's. Flexible work
+  arrangements in general: DA 02-09; flexi-time: Labor Advisory 04-10;
+  telecommuting rules: DO 237-22 (replaced DO 202-19).
+- Probation: at most six months (Art. 296) = **180 days** (Mitsubishi
+  Motors v. Chrysler Phils. Labor Union, G.R. 148738, applying Civil Code
+  Art. 13); an employee allowed to work past it is regular, and so is one
+  whose standards were not made known at engagement.
+- Unused SIL converts to cash at the end of the year at the salary rate on
+  the date of commutation (DOLE handbook) — the Insights leave report values
+  it at the current daily rate.
+Why it mattered: two first-draft semantics were wrong against these rules —
+30-minute breaks were being deducted as unpaid, and compressed days had no
+12-hour ceiling.
+
+### Per-payroll deduction amounts are rows on the draft, not edits to the installment (confirmed approach)
+
+> `payroll_deduction_overrides` (run, deduction, amount ≥ 0; 0 = skip) sets what one draft deducts; the deduction's own `amount_per_period` (0 = no fixed installment) stays the default for every other payroll.
+
+computeRun applies the set amount even to a paused or not-yet-started
+deduction, caps it at the balance (the guard refuses more), and the payroll
+that settles a separation still takes the whole balance unless an amount is
+set (then it warns what is left). Finalize needed no change: it moves
+balances by the payslip lines. Overrides lock with the run (reopen to edit)
+and stale the draft. Why it mattered: the informal "how much can you pay
+this cutoff?" practice needs a per-payroll answer that leaves an audit trail
+and doesn't silently change the agreed installment; a larger-than-agreed
+amount warns that it needs the employee's written agreement.
+
+### Management reports read finalized payslips only, by payroll month (confirmed approach)
+
+> Insights pay figures come from finalized/paid runs grouped by `period_month` (the cutoff's month, as the 13th month and contributions use); attendance comes from those payslips' own day traces (`computation_trace->days`), deduplicated per employee-day.
+
+Drafts would show numbers that can still change; the day traces are payroll's
+own computation, so the attendance report can never disagree with what was
+paid (same reason as *Attendance visuals must use payroll's own day
+computation*). People-based reports (headcount, leave, advances) read the
+current records as of today. Every report returns one model (KPIs, findings,
+charts, tables), so the screen, CSV and PDF can't drift apart; the builders
+are pure and unit-tested in `src/lib/insights.test.ts`.
 
 ### Same route, new id: the page stays mounted — key record pages by id
 

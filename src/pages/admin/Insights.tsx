@@ -103,7 +103,7 @@ interface Data {
   people: PersonRow[]
   slips: SlipFact[]
   days: DayFact[]
-  leave?: { requests: LeaveRow[]; types: Pick<LeaveType, 'id' | 'code' | 'name' | 'paid' | 'default_annual_days' | 'min_service_months'>[]; entitlements: EntitlementRow[] }
+  leave?: { requests: LeaveRow[]; types: Pick<LeaveType, 'id' | 'code' | 'name' | 'paid' | 'default_annual_days' | 'min_service_months' | 'active'>[]; entitlements: EntitlementRow[] }
   advances?: { deductions: AdvanceRow[]; repayments: RepaymentRow[] }
 }
 

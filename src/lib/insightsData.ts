@@ -96,7 +96,7 @@ export async function fetchLeave(entityId: string, from: string, to: string, yea
         .order('id')
         .range(f, t),
     ),
-    supabase.from('leave_types').select('id, code, name, paid, default_annual_days, min_service_months').eq('entity_id', entityId),
+    supabase.from('leave_types').select('id, code, name, paid, default_annual_days, min_service_months, active').eq('entity_id', entityId),
     fetchAll<EntitlementRow>((f, t) =>
       supabase
         .from('employee_leave_entitlements')
@@ -110,7 +110,7 @@ export async function fetchLeave(entityId: string, from: string, to: string, yea
   if (types.error) throw types.error
   return {
     requests,
-    types: (types.data ?? []) as Pick<LeaveType, 'id' | 'code' | 'name' | 'paid' | 'default_annual_days' | 'min_service_months'>[],
+    types: (types.data ?? []) as Pick<LeaveType, 'id' | 'code' | 'name' | 'paid' | 'default_annual_days' | 'min_service_months' | 'active'>[],
     entitlements,
   }
 }

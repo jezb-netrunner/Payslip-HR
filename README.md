@@ -40,6 +40,14 @@ are refused; the Generate button makes random ones.
   career history, pay frequency, pay type, payment method (cash / bank /
   e-wallet / check), allowances with BIR classification, recurring deductions
   and loans, union dues, previous-employer and PERA data per tax year
+- **Schedules**: client shift templates (start, end, meal break, flexible
+  start, compressed-workweek days of up to 12 hours — DOLE Department
+  Advisory 02-04); each employee's weekly pattern is set *from a date on*
+  (earlier days, and anything already paid, keep the schedule they had);
+  a weekly roster changes single dates (a swapped shift, a moved rest day)
+  and warns when a week has no rest day (Labor Code Art. 91). Payroll
+  measures lateness, undertime, overtime and absences against each date's
+  own shift; a meal break under 60 minutes is paid time
 - **Time In / Out**: daily sheet (whole team, one day) and per-employee sheet
   (one person, a whole period) — admins key in time in/out (or fill the
   scheduled days from each employee's shift; Fill skips approved leaves and
@@ -62,9 +70,13 @@ are refused; the Generate button makes random ones.
   **bulk** (ticked employees or everyone: one PDF, a payslip per page, or a
   ZIP of single PDFs); **cash payout sheet** with bill/coin breakdown per
   employee and per run. Computing warns, per employee, about scheduled
-  workdays with no time in/out or leave (charged as absences)
+  workdays with no time in/out or leave (charged as absences). A draft can
+  set what it deducts for any cash advance or loan — the amount agreed for
+  that cutoff, or ₱0 to skip it — and the next payroll goes back to the usual
+  installment
 - **Cash Advances** ("bale"): record an advance when it is released, or
-  approve an employee's request, with the date the employee signed the
+  approve an employee's request (a fixed installment, or **no fixed
+  installment**: each payroll deducts what is set for it), with the date the employee signed the
   written authorization to deduct it (a printable agreement is built in;
   Labor Code Art. 113 and its IRR as amended by DOLE D.O. 195-2018). Advances
   are interest-free; each payroll deducts the agreed installment after tax,
@@ -76,9 +88,19 @@ are refused; the Generate button makes random ones.
   repayments → balance) are tracked; the database only lets the balance move
   through a finalized payroll or a recorded repayment
 - **Announcements** (pinned / expiring) shown on the employee portal
-- **BIR & Reports**: 1604-C alphalist Schedule 1 and Schedule 2 (MWEs), BIR
-  2316 working copies, 1604-C summary, 1601-C monthly remittance log,
-  SSS / PhilHealth / Pag-IBIG contribution reports
+- **BIR & Reports**: **Insights** — management reports from the app's own
+  records: payroll cost (what moved it, employer contributions, the 13th
+  month accruing), overtime (who, how routine, its full-time equivalent),
+  attendance (absence and late rates, weekday patterns, perfect
+  attendance), headcount and turnover (why people left, probation
+  deadlines, pay below the minimum wage setting), leave (and the cash value
+  of unused SIL), cash advances and loans (ageing, exposure, stalled
+  deductions) and a custom report of any payslip figures by month,
+  department, position, employee or pay type; each with key figures,
+  plain-language findings, charts with a table view, CSV and PDF, and its
+  settings in the link. Then the BIR side: 1604-C alphalist Schedule 1 and
+  Schedule 2 (MWEs), BIR 2316 working copies, 1604-C summary, 1601-C monthly
+  remittance log, SSS / PhilHealth / Pag-IBIG contribution reports
 - Client settings, audit log
 
 **Employee portal**
@@ -168,6 +190,7 @@ eBIRForms / eFPS.
 | Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | Capped computation |
 | 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap | Dedicated run type; cap tracked across the year |
 | OT / ND / premiums | Labor Code Arts. 86–94 | Per-day engine with computation trace |
+| Hours of work & schedules | Art. 83 (8 hours), Art. 85 + IRR Book III Rule I §7 (meal ≥ 60 min unpaid, shorter breaks paid), Art. 91 (weekly rest day), DOLE DA 02-04 (compressed workweek) | Each date measured against its own shift; compressed days regular up to the shift (max 12 h) |
 | Minimum wage | RA 6727 regional wage orders; MWE exemption RA 9504 | Per-client wage region and rate; MWE exempt package |
 | Holidays 2026 | Proclamations 1006 / 1189 / 1264 | National list + per-client local holidays |
 
@@ -268,8 +291,9 @@ src/
   pages/employee/ # employee portal
   components/     # UI kit, shell, payslip view
   lib/            # supabase client, auth, client context, login codes, pay periods,
-                  # cash denominations, Manila-time utils, labels
-  pdf/            # payslip PDFs, cash advance agreement
+                  # cash denominations, Manila-time utils, labels, schedules,
+                  # management reports (insights.ts: pure aggregations + tests)
+  pdf/            # payslip PDFs, cash advance agreement, time and insight reports
 supabase/         # migrations + edge functions (source of truth for schema)
 MEMORY.md         # running memory log: session history, deployed state, lessons
 ```

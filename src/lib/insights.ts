@@ -1242,7 +1242,7 @@ export interface EntitlementRow {
 
 export function leaveReport(
   requests: LeaveRow[],
-  types: Pick<LeaveType, 'id' | 'code' | 'name' | 'paid' | 'default_annual_days' | 'min_service_months'>[],
+  types: (Pick<LeaveType, 'id' | 'code' | 'name' | 'paid' | 'default_annual_days' | 'min_service_months'> & { active?: boolean })[],
   people: PersonRow[],
   entitlements: EntitlementRow[],
   range: MonthRange,
@@ -1291,7 +1291,8 @@ export function leaveReport(
 
   // unused service incentive leave this year: converted to cash at year end
   const year = Number(today.slice(0, 4))
-  const sil = types.find((t) => t.code === 'SIL')
+  // a client exempt from SIL (Art. 95: fewer than 10 workers, or 5+ days of paid leave already) turns the type off
+  const sil = types.find((t) => t.code === 'SIL' && t.active !== false)
   const silRows: Row[] = []
   let silDays = 0
   let silValue = 0
