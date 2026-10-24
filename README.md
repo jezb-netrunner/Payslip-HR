@@ -27,9 +27,10 @@ are refused; the Generate button makes random ones.
 - Clients: registered name, client code, TIN + branch code, RDO, address,
   withholding-agent category, top-withholding-agent flag, pay policy defaults
 - Admin users: create entity/company admins, assign clients, deactivate
-- Statutory tables editor: add a new version (effective date) of the WHT,
-  SSS, PhilHealth, Pag-IBIG or BIR annual table when a law changes — past
-  periods keep computing with the tables in force back then
+- Statutory tables (read-only): the WHT, SSS, PhilHealth, Pag-IBIG and BIR
+  annual tables in force and every past version, each with its legal basis,
+  source and the date it was last verified; a quick contribution check for
+  a sample salary; a yearly-check reminder on the dashboard
 - National holidays (clients add their own local holidays)
 - Dashboard across all clients
 
@@ -195,8 +196,34 @@ eBIRForms / eFPS.
 | Holidays 2026 | Proclamations 1006 / 1189 / 1264 | National list + per-client local holidays |
 
 Statutory tables live in `statutory_versions`, **versioned by effective
-date**: a company admin adds a version when a law changes and payroll uses
-whichever version is in force for each period. No code changes.
+date**: payroll uses the version in force for each period (contributions)
+or pay date (withholding). As in commercial payroll software, the tables
+**ship with the software** rather than being typed in by users — see
+*Updating the statutory tables* below.
+
+### Updating the statutory tables (maintainers)
+
+The app's users can only read the tables; the database refuses writes from
+every API role. A change in the law ships as a migration:
+
+1. Confirm the change in the agency's own issuance (BIR revenue regulation,
+   SSS / PhilHealth / Pag-IBIG circular) and one more independent source;
+   note the effective date (versions start on the first of a month).
+2. Add a migration inserting the new version with `kind`,
+   `effective_from`, `description`, `legal_basis`, `source_url` (https) and
+   `verified_on`. The database checks the figures (rates in range, MSC
+   steps, tax brackets ascending with each base following from the one
+   before) and refuses a malformed version.
+3. Mirror it in `src/payroll/defaults.ts`, add test vectors from the
+   agency's own examples, and run `npm test` and `supabase/tests/run.sh`.
+4. Apply the migration, run the Supabase security advisors, and record the
+   change in MEMORY.md (*Verified 2026 PH statutory figures*).
+
+Versions that finalized payrolls may have used are frozen. Only a published
+mistake is corrected in place, deliberately: the correcting migration runs
+`set local statutory.correction = 'on'`, and the affected payrolls are
+reopened and recomputed. Re-check every table each January (the dashboard
+reminds company admins when this year's check is due).
 
 ## Internal controls
 

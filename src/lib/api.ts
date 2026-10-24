@@ -44,7 +44,7 @@ export async function getStatutoryTables(asOf: string): Promise<StatutoryTables>
   const bir_annual = pick('bir_annual') as BirAnnualData | undefined
   if (!sss || !philhealth || !pagibig || !bir_wht || !bir_annual) {
     throw new Error(
-      'Statutory tables are incomplete for ' + asOf + '. Ask a company admin to add the missing table versions.',
+      'Statutory tables are incomplete for ' + asOf + '. The missing table version has to be published by the system maintainer (statutory tables ship with the software).',
     )
   }
   return { sss, philhealth, pagibig, bir_wht, bir_annual }

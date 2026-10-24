@@ -217,23 +217,27 @@ select pg_temp.check((select count(*) from announcements) = 0, 'other client emp
 select pg_temp.check((select count(*) from holidays where entity_id is not null) = 0, 'other client local holiday hidden');
 commit;
 
-\echo '--- 6. statutory tables: company admins only'
+\echo '--- 6. statutory tables: everyone reads, only the maintainer (migrations) writes'
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :ea, true);
 select pg_temp.check((select count(*) from statutory_versions) = 5, 'entity admin reads statutory');
-select pg_temp.expect_error($$insert into statutory_versions (kind, effective_from, data) values ('sss','2027-01-01','{}')$$, '%row-level security%');
-update statutory_versions set description = 'hacked';
-select pg_temp.check((select count(*) from statutory_versions where description = 'hacked') = 0, 'entity admin update is a no-op');
+select pg_temp.expect_error($$insert into statutory_versions (kind, effective_from, data) values ('sss','2027-01-01','{}')$$, '%permission denied%');
+select pg_temp.expect_error($$update statutory_versions set description = 'hacked'$$, '%permission denied%');
 commit;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :owner, true);
-insert into statutory_versions (kind, effective_from, description, data)
-select kind, '2027-01-01', 'test copy', data from statutory_versions where kind = 'pagibig';
+select pg_temp.expect_error($$insert into statutory_versions (kind, effective_from, description, legal_basis, source_url, data)
+  select kind, '2027-01-01', 'test copy', 'test', 'https://example.test', data from statutory_versions where kind = 'pagibig'$$, '%permission denied%');
+select pg_temp.expect_error($$update statutory_versions set description = 'hacked'$$, '%permission denied%');
+select pg_temp.expect_error($$delete from statutory_versions where kind = 'pagibig'$$, '%permission denied%');
+commit;
+-- the table owner (a migration) can still ship a version; the only one of a kind stays
+insert into statutory_versions (kind, effective_from, description, legal_basis, source_url, data)
+select kind, '2027-01-01', 'test copy', 'test', 'https://example.test', data from statutory_versions where kind = 'pagibig';
 delete from statutory_versions where kind = 'pagibig' and effective_from = '2027-01-01';
 select pg_temp.expect_error($$delete from statutory_versions where kind = 'sss'$$, '%only sss%');
-commit;
 
 \echo '--- 7. payroll: run, payslips, finalize/reopen, rounding chain, lock'
 begin;

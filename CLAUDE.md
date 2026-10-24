@@ -36,7 +36,8 @@ work:
   tests). Never hardcode a rate in the engine. Never seed a statutory figure
   from memory — verify against current official sources first
   (see MEMORY.md → *Verified 2026 PH statutory figures* for what's verified
-  and when to re-verify).
+  and when to re-verify). The app is read-only for these tables: a new
+  version ships as a migration (README → *Updating the statutory tables*).
 - Database schema changes go through Supabase migrations AND a matching file in
   `supabase/migrations/`. After any DDL, run the Supabase security advisors and
   fix findings (see MEMORY.md → *Run Supabase security advisors after every

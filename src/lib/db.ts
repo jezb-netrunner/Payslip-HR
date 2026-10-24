@@ -267,6 +267,10 @@ export interface StatutoryVersion {
   effective_to: string | null
   description: string
   source_url: string | null
+  /** The law, regulation or circular the version implements. */
+  legal_basis: string
+  /** When the maintainer last checked it against its source. */
+  verified_on: string | null
   data: unknown
   created_at: string
 }

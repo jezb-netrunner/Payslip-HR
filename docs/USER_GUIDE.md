@@ -8,7 +8,7 @@
 ## Company admin — one-time setup
 1. **Clients** → add each client (name, code, TIN, RDO, pay policy).
 2. **Admin Users** → create entity admins and assign them their clients.
-3. **Holidays** / **Statutory Tables** → keep national holidays and tax/contribution tables current (add a new version when a law changes).
+3. **Holidays** → keep national holidays current. **Statutory Tables** shows the tax and contribution tables payroll uses, read-only: they ship with the software (verified against BIR, SSS, PhilHealth and Pag-IBIG issuances) and can't be typed in, so a wrong rate can't slip in. When the dashboard says this year's check is due, or you hear of a new circular, ask the system maintainer to confirm the tables.
 
 ## Entity admin — pay cycle
 Always pick the client first in the client selector at the top.

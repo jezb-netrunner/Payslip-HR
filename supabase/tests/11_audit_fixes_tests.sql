@@ -64,9 +64,10 @@ insert into employee_tax_years (employee_id, year, has_previous_employer, prev_t
 values ('20000000-0000-0000-0000-0000000000f1', 2026, true, 300000, 12000);
 select pg_temp.check(pg_temp.totals('3000000c-0000-0000-0000-000000000001') = '{}', 'tax-year data marks draft stale');
 select pg_temp.computed('3000000c-0000-0000-0000-000000000001');
-select set_config('request.jwt.claim.sub', :owner, true);
-insert into statutory_versions (kind, effective_from, description, data)
-select 'sss', '2026-11-01', 'test schedule', data from statutory_versions where kind = 'sss' order by effective_from desc limit 1;
+-- a new version ships as a migration (the table owner)
+reset role;
+insert into statutory_versions (kind, effective_from, description, legal_basis, source_url, data)
+select 'sss', '2026-11-01', 'test schedule', 'test', 'https://example.test', data from statutory_versions where kind = 'sss' order by effective_from desc limit 1;
 select pg_temp.check(pg_temp.totals('3000000c-0000-0000-0000-000000000001') = '{}', 'statutory version marks draft stale');
 rollback;
 

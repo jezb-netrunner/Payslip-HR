@@ -495,20 +495,30 @@ unworked regular holiday = 100% daily as its own line.
 bug is paying holiday pay *on top of* a holiday-inclusive monthly rate (or
 deducting an unworked regular holiday).
 
-### Statutory tables are versioned data, not code (confirmed approach)
+### Statutory tables ship with the software; the app only reads them (confirmed approach, revised 2026-10-24)
 
-> Every legal rate lives in `statutory_versions` keyed by `(kind, effective_from)`; payroll loads the version in force for the period end, so a law change is an INSERT, never a deploy.
+> Every legal rate lives in `statutory_versions` keyed by `(kind, effective_from)`; payroll loads the version in force (contributions by period end, withholding by pay date). Since 2026-10-24 no API role may write the table: a law change ships as a reviewed migration with its legal basis, source and verification date, and the database validates and freezes versions.
 
 `getStatutoryTables(asOf)` picks, per kind, the newest row with
-`effective_from <= asOf`. `src/payroll/defaults.ts` mirrors the seeds for
-unit tests only — the DB is the runtime source of truth. Company admins add
-versions in the Statutory page's structured editor (brackets/rates as form
-fields, validated before save); entity admins read only. Numeric inputs are
-edited as text and parsed on save — binding them as numbers swallowed
-partial decimals like "0.0". Why it mattered:
-SSS stepped up every ~2 years through 2025 and wage orders/holidays change
-annually; an MSME admin must apply a new circular without a developer, and
-past periods must recompute with the tables in force back then.
+`effective_from <= asOf`; `src/payroll/defaults.ts` mirrors the versions for
+unit tests. Migration `statutory_tables_managed`: REVOKE writes from
+anon/authenticated and the old company-admin policies set to false (no DROP:
+the MCP destructive-SQL prompt can't be answered from cloud sessions);
+columns `legal_basis`, `verified_on`; CHECKs `valid_statutory_data(kind, data)`
+(shape, rate ranges, MSC steps, tax brackets ascending and each base = the
+previous base + rate × step within ₱1 — a mistyped figure fails),
+first-of-month `effective_from`, documented (legal basis, description, https
+source); trigger `guard_statutory_version` freezes data/effective date of a
+version any finalized run with `greatest(period_end, pay_date) >=
+effective_from` may have used, unless the correcting migration sets
+`statutory.correction = on`; notes stay editable. The dashboard reminds
+company admins when the tables in force were last verified before January 1
+of the current year. Process: README → *Updating the statutory tables*.
+Why it mattered: the owner pointed out that a hand-typed "New version" could
+misapply rates (a 5% typed as 50%, a wrong effective date, an in-place edit of
+a table finalized payrolls used) — commercial payroll software keeps tables
+vendor-maintained for exactly that reason. The earlier design (company admins
+editing in a structured form) is gone.
 
 ### RLS policies that reference each other's tables recurse
 
