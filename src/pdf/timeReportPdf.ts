@@ -9,12 +9,12 @@ import autoTable from 'jspdf-autotable'
 import { fmtPeriod, fmtTin, fullName, plural } from '../lib/format'
 import { FREQUENCY_LABELS } from '../lib/labels'
 import { manilaHHMM, todayManila } from '../lib/manila'
+import { shiftShort } from '../lib/shiftText'
 import {
   clock12,
   dayName,
   hoursOf,
   pairTimes,
-  scheduleText,
   shortDate,
   sumTotals,
   type EmployeeTimeReport,
@@ -115,7 +115,7 @@ function drawDtr(doc: jsPDF, r: EmployeeTimeReport, company: ReportCompany, gene
   doc.setTextColor(...SLATE)
   const halfW = pageW / 2 - MARGIN - 2
   const left = [`Employee No: ${e.employee_no || '—'}`, `Position: ${e.position || '—'}`, `Department: ${e.department || '—'}`]
-  const right = [`Schedule: ${scheduleText(e.work_schedule)}`, `Pay frequency: ${FREQUENCY_LABELS[e.pay_frequency]}`]
+  const right = [`Schedule: ${r.schedule}`, `Pay frequency: ${FREQUENCY_LABELS[e.pay_frequency]}`]
   left.forEach((t, i) => doc.text(fitText(doc, t, halfW), MARGIN, y + 5.5 + i * 4.2))
   right.forEach((t, i) => doc.text(fitText(doc, t, halfW), pageW / 2 + 4, y + 5.5 + i * 4.2))
   y += 20
@@ -125,12 +125,13 @@ function drawDtr(doc: jsPDF, r: EmployeeTimeReport, company: ReportCompany, gene
   autoTable(doc, {
     startY: y,
     margin: { left: MARGIN, right: MARGIN, top: 14 },
-    head: [['Date', 'Day', 'Time in', 'Time out', 'Hours', 'OT', 'ND', 'Late (min)', 'UT (min)', 'Remarks']],
+    head: [['Date', 'Day', 'Shift', 'Time in', 'Time out', 'Hours', 'OT', 'ND', 'Late (min)', 'UT (min)', 'Remarks']],
     body: r.days.map((d) => {
       const times = d.pairs.map((p) => pairTimes(p))
       return [
         shortDate(d.date),
         dayName(d.date),
+        d.shift ? shiftShort(d.shift) : 'Rest day',
         times.map((x) => x.timeIn).join('\n'),
         times.map((x) => x.timeOut).join('\n'),
         hrs(d.workedMinutes),
@@ -142,7 +143,7 @@ function drawDtr(doc: jsPDF, r: EmployeeTimeReport, company: ReportCompany, gene
       ]
     }),
     foot: [[
-      'Total', '', '', '',
+      'Total', '', '', '', '',
       hoursOf(t.workedMinutes).toFixed(2), hoursOf(t.otMinutes).toFixed(2), hoursOf(t.nightDiffMinutes).toFixed(2),
       String(t.lateMinutes), String(t.undertimeMinutes), `${plural(t.daysWorked, 'day')} worked`,
     ]],
@@ -153,15 +154,16 @@ function drawDtr(doc: jsPDF, r: EmployeeTimeReport, company: ReportCompany, gene
     headStyles: { fillColor: NAVY, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7 },
     footStyles: { fillColor: [237, 242, 250], textColor: NAVY, fontStyle: 'bold' },
     columnStyles: {
-      0: { cellWidth: 13 },
-      1: { cellWidth: 9 },
-      2: { cellWidth: 21 },
-      3: { cellWidth: 23 },
-      4: { cellWidth: 11, halign: 'right' },
+      0: { cellWidth: 12 },
+      1: { cellWidth: 8 },
+      2: { cellWidth: 15, fontSize: 6.5, textColor: SLATE },
+      3: { cellWidth: 19 },
+      4: { cellWidth: 21 },
       5: { cellWidth: 10, halign: 'right' },
-      6: { cellWidth: 10, halign: 'right' },
-      7: { cellWidth: 11, halign: 'right' },
-      8: { cellWidth: 11, halign: 'right' },
+      6: { cellWidth: 9, halign: 'right' },
+      7: { cellWidth: 9, halign: 'right' },
+      8: { cellWidth: 10, halign: 'right' },
+      9: { cellWidth: 10, halign: 'right' },
     },
     didParseCell: (data) => {
       if (data.section !== 'body') return
@@ -169,7 +171,7 @@ function drawDtr(doc: jsPDF, r: EmployeeTimeReport, company: ReportCompany, gene
       if (!d) return
       // rest days and holidays shaded; what payroll docks or ignores in red
       if (!d.scheduled || d.holiday) data.cell.styles.fillColor = SHADE
-      if (data.column.index === 9 && (d.absent || d.missingTimeOut)) data.cell.styles.textColor = ROSE
+      if (data.column.index === 10 && (d.absent || d.missingTimeOut)) data.cell.styles.textColor = ROSE
     },
   })
   y = (doc as AutoTableDoc).lastAutoTable.finalY + 6

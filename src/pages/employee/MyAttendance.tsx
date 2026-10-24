@@ -21,6 +21,7 @@ import {
 } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import type { Holiday, TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtHours, fmtTime, plural } from '../../lib/format'
 import { endOfMonth, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
@@ -37,6 +38,14 @@ export default function MyAttendance() {
   const [requests, setRequests] = useState<TimeCorrectionRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [monthStr, setMonthStr] = useState(todayManila().slice(0, 7))
+  // the month's shifts (a valid month only: a cleared field sends nothing)
+  const monthOk = /^\d{4}-\d{2}$/.test(monthStr)
+  const schedule = useEmployeeSchedule(
+    employee,
+    monthOk ? `${monthStr}-01` : '',
+    monthOk ? endOfMonth(`${monthStr}-01`) : '',
+    { asEmployee: true },
+  )
   const [correcting, setCorrecting] = useState<{ entry: TimeEntry | null } | null>(null)
   const [form, setForm] = useState({ work_date: '', in: '', out: '', reason: '' })
   const [busy, setBusy] = useState(false)
@@ -162,7 +171,7 @@ export default function MyAttendance() {
     dayTimeline(
       d,
       entries.filter((e) => e.work_date === d),
-      employee.work_schedule,
+      schedule.resolve ?? employee.work_schedule,
       { graceMinutes, standardHoursPerDay, holidays },
     ),
   )
@@ -221,7 +230,7 @@ export default function MyAttendance() {
             {view === 'timeline' ? (
               <AttendanceTimeline
                 entries={entries}
-                schedule={employee.work_schedule}
+                schedule={schedule.resolve ?? employee.work_schedule}
                 graceMinutes={graceMinutes}
                 standardHoursPerDay={standardHoursPerDay}
                 holidays={holidays}

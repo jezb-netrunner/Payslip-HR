@@ -3,7 +3,7 @@ import type { Holiday, TimeEntry } from '../lib/db'
 import { fmtHours, fmtTime } from '../lib/format'
 import { eachDate, manilaInstant } from '../lib/manila'
 import { dayTimeline, shiftOn, timelineTicks, timelineWindow, type DayTimeline, type SegmentKind } from '../lib/timeline'
-import type { WorkSchedule } from '../payroll/types'
+import type { ScheduleSource } from '../payroll/types'
 import { Badge, EmptyState } from './ui'
 
 const LOOK: Record<SegmentKind | 'leave', { label: string; bar: string }> = {
@@ -79,7 +79,7 @@ export default function AttendanceTimeline({
   onRequestFix,
 }: {
   entries: TimeEntry[]
-  schedule: WorkSchedule | null | undefined
+  schedule: ScheduleSource | null | undefined
   /** the client's late grace period and standard day, so late, overtime and hours match payroll */
   graceMinutes?: number
   standardHoursPerDay?: number

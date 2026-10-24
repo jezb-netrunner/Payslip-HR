@@ -454,7 +454,10 @@ describe('review fixes: attendance edge cases', () => {
     })
     const d = days.find((x) => x.date === '2026-08-17')
     expect(d?.workedMinutes).toBe(150)
-    expect(d?.undertimeMinutes).toBe(330) // short of 06:00 by 5.5h
+    // short of 06:00 by 5.5h on the clock, 1h of it the break: the shift
+    // schedules 7 working hours and 4.5 of them were missed (since the
+    // per-shift schedules of 2026-10-24; it used to dock the 8h standard day)
+    expect(d?.undertimeMinutes).toBe(270)
   })
 
   it('waives undertime when total hours meet the standard day (early clock-in)', () => {

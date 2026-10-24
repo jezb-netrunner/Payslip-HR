@@ -22,9 +22,11 @@ import type { Employee, Entity, Holiday, PayrollRun, Payslip, TimeEntry } from '
 import { useEntity } from '../../lib/entity'
 import { fmtDate, money, moneyWhole, plural } from '../../lib/format'
 import { FREQUENCY_LABELS } from '../../lib/labels'
-import { addDays, eachDate, isoWeekday, todayManila } from '../../lib/manila'
+import { addDays, eachDate, todayManila } from '../../lib/manila'
+import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import type { ScheduleResolver } from '../../payroll/types'
 
 // Categorical palette — validated (dataviz six checks, light surface):
 // green → blue → orange, fixed assignment order.
@@ -125,6 +127,8 @@ interface DashData {
   /** from two weeks back (attendance) to 45 days ahead (upcoming list) */
   holidays: Holiday[]
   recentLeaves: { employee_id: string; start_date: string; end_date: string }[]
+  /** who is scheduled on the recent days (patterns, roster changes) */
+  schedules: Map<string, ScheduleResolver>
   pendingCorrections: number
   pendingLeaves: number
   pendingAdvances: number
@@ -141,7 +145,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
       const twoWeeksAgo = addDays(today, -13)
       // six payroll months for the cost chart, plus the current one
       const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
-      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances] = await Promise.all([
+      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances, scheduleRows] = await Promise.all([
         getEmployees(entity.id),
         fetchAll<TimeEntry>((from, to) =>
           supabase
@@ -180,6 +184,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
         supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
         supabase.from('advance_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
+        fetchScheduleRows({ entityId: entity.id }, twoWeeksAgo, today),
       ])
       const failed = runsRes.error ?? corr.error ?? leaves.error ?? advances.error
       if (failed) throw failed
@@ -190,6 +195,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         slips,
         holidays: hols,
         recentLeaves,
+        schedules: resolversFor(emps, scheduleRows),
         pendingCorrections: corr.count ?? 0,
         pendingLeaves: leaves.count ?? 0,
         pendingAdvances: advances.count ?? 0,
@@ -394,7 +400,7 @@ function derive(data: DashData, entity: Entity, today: string) {
     if (h && h.kind !== 'special_working') return []
     return active.filter(
       (e) =>
-        e.work_schedule.days.includes(isoWeekday(date)) &&
+        (data.schedules.get(e.id)?.(date).shift ?? null) !== null &&
         e.hire_date <= date &&
         !data.recentLeaves.some((l) => l.employee_id === e.id && l.start_date <= date && l.end_date >= date),
     )

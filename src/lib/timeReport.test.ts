@@ -5,7 +5,7 @@ import {
   clock12,
   detailCsv,
   pairTimes,
-  scheduleText,
+  scheduleOfDays,
   sumTotals,
   summaryCsv,
   type ReportEmployee,
@@ -168,9 +168,19 @@ describe('report formatting', () => {
     expect(clock12('13:05')).toBe('1:05 PM')
   })
 
-  it('describes the schedule in words', () => {
-    expect(scheduleText(dayShift)).toBe('Mon–Fri 8:00 AM–5:00 PM, 60 min break')
-    expect(scheduleText({ ...dayShift, days: [1, 3, 5] })).toBe('Mon, Wed, Fri 8:00 AM–5:00 PM, 60 min break')
-    expect(scheduleText({ ...dayShift, days: [6, 7, 1, 2, 4, 5] }).split(' 8:')[0]).toBe('Mon, Tue, Thu–Sun')
+  it('describes the schedule a range followed', () => {
+    const day = { start: '08:00', end: '17:00', break_minutes: 60 }
+    const half = { start: '08:00', end: '12:00', break_minutes: 0 }
+    // Nov 2–8, 2026: Mon–Fri day shift, Saturday half day, Sunday off
+    const week = ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06'].map((date) => ({ date, shift: day }))
+    expect(scheduleOfDays([...week, { date: '2026-11-07', shift: half }, { date: '2026-11-08', shift: null }])).toBe(
+      'Mon–Fri 8:00 AM–5:00 PM · Sat 8:00 AM–12:00 PM',
+    )
+    // a moved rest day shows as a day that differs
+    const moved = week.map((d) => (d.date === '2026-11-04' ? { ...d, shift: null } : d))
+    const later = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20']
+    expect(scheduleOfDays([...moved, ...later.map((date) => ({ date, shift: day }))])).toBe(
+      'Mon–Fri 8:00 AM–5:00 PM (1 day differ)',
+    )
   })
 })

@@ -310,21 +310,29 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   let absentDays = 0
   let paidLeaveDays = 0
   let unpaidLeaveDays = 0
+  // absences and unpaid leave in days' pay: a half-day schedule misses half a day
+  let absencePayDays = 0
   let unworkedRegularHolidays = 0
   let paidUnworkedHolidays = 0
 
   let otPay = 0
   let ndPay = 0
+  // monthly-paid: hours past a shorter shift (a half day), up to the standard day
+  let extraRegularMinutes = 0
   let restDayPay = 0
   let specialDayPremium = 0
   let holidayPremium = 0
   let dailyBasic = 0 // daily-paid only
 
   const stdMin = settings.standardHoursPerDay * 60
+  // the share of a standard day the date's shift schedules (1 when there is no shift)
+  const dayShare = (d: DayComputation) => (d.scheduled ? (d.expectedMinutes ?? stdMin) / stdMin : 1)
 
   for (const d of days) {
     const worked = d.workedMinutes > 0
-    const fraction = Math.min(1, d.payableMinutes / stdMin)
+    // regular hours as a share of the standard day; above 1 only on a
+    // longer compressed-workweek shift
+    const fraction = d.payableMinutes / stdMin
     const builtIn = builtInFor(d.dayType, settings.workingDaysDivisor)
     if (worked) {
       daysWorked += 1
@@ -334,7 +342,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       lateMin += d.lateMinutes
       undertimeMin += d.undertimeMinutes
     }
-    if (d.absent) absentDays += 1
+    if (d.absent) {
+      absentDays += 1
+      absencePayDays += dayShare(d)
+    }
     // Leave flags exist on every covered day. Paid-leave credit applies to
     // ordinary scheduled days. Unpaid leave deducts every day the pay basis
     // would otherwise cover: for monthly-paid, any day the divisor deems
@@ -345,6 +356,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     if (d.onUnpaidLeave && !worked) {
       if (employee.payType === 'monthly' ? builtIn > 0 : d.dayType === 'regular') {
         unpaidLeaveDays += 1
+        absencePayDays += dayShare(d)
       }
     }
     if (!worked && isRegularHolidayType(d.dayType)) {
@@ -354,6 +366,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
     if (employee.payType === 'monthly') {
       if (worked) {
+        // The monthly rate pays the shift's own hours; time past a shorter
+        // shift up to the standard day is not overtime (Art. 87 starts at 8
+        // hours) but is still worked: paid at the regular rate.
+        if (d.scheduled && builtIn > 0) {
+          extraRegularMinutes += Math.max(0, d.payableMinutes - (d.expectedMinutes ?? stdMin))
+        }
         const extraMult = DAY_MULT[d.dayType] - builtIn
         const extra = extraMult * hourly * (d.payableMinutes / 60)
         if (d.dayType === 'rest_day') restDayPay += extra
@@ -387,7 +405,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         // of the presence-on-preceding-workday condition).
         if (!d.onUnpaidLeave) holidayPremium += daily
       }
-      if (d.onPaidLeave && d.dayType === 'regular') dailyBasic += daily
+      if (d.onPaidLeave && d.dayType === 'regular') dailyBasic += daily * dayShare(d)
     }
 
     if (worked && d.otMinutes > 0) {
@@ -418,15 +436,26 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   } else if (employee.payType === 'monthly') {
     basicPay = allocateMonthly(employee.monthlyRate, period.index, period.count)
     earn('basic', 'Basic Pay', basicPay, 'basic')
-    const absenceDeduction = round2((absentDays + unpaidLeaveDays) * daily)
+    const absenceDeduction = round2(absencePayDays * daily)
     if (absenceDeduction > 0) {
-      earn('absence', `Absences (${absentDays + unpaidLeaveDays} day/s)`, -absenceDeduction, 'basic')
+      const n = absentDays + unpaidLeaveDays
+      const share = round2(absencePayDays)
+      earn('absence', `Absences (${n} day/s${share !== n ? `, ${share} days' pay` : ''})`, -absenceDeduction, 'basic')
     }
     if (lateMin > 0) {
       earn('late', `Tardiness (${lateMin} min)`, -round2(lateMin * perMinute), 'basic')
     }
     if (undertimeMin > 0) {
       earn('undertime', `Undertime (${undertimeMin} min)`, -round2(undertimeMin * perMinute), 'basic')
+    }
+    if (extraRegularMinutes > 0) {
+      earn(
+        'extra_hours',
+        `Hours past the shift (${round2(extraRegularMinutes / 60)}h at the regular rate)`,
+        round2(extraRegularMinutes * perMinute),
+        'basic',
+        { hours: round2(extraRegularMinutes / 60) },
+      )
     }
     if (period.count > 1) {
       notes.push(`Monthly rate allocated as pay period ${period.index} of ${period.count} this month.`)

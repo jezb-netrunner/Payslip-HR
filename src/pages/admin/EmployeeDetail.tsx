@@ -74,6 +74,7 @@ import {
 import { nextInstallment } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
@@ -258,6 +259,9 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
   const seq = useRef(0)
   const start = `${month}-01`
   const end = endOfMonth(start)
+  // the shifts the month was scheduled (patterns, roster changes)
+  const schedule = useEmployeeSchedule(employee, start, end)
+  const scheduleOf = schedule.resolve ?? employee.work_schedule
 
   const load = useCallback(async () => {
     // quick month clicks: only the latest request may fill the page
@@ -312,7 +316,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
     dayTimeline(
       d,
       entries.filter((e) => e.work_date === d),
-      employee.work_schedule,
+      scheduleOf,
       { graceMinutes, standardHoursPerDay, holidays },
     ),
   )
@@ -320,7 +324,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
   const leaveDays = new Set(
     leaves.flatMap((l) =>
       eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date).filter(
-        (d) => leaveWorkdays(d, d, employee.work_schedule.days, holidays) > 0,
+        (d) => leaveWorkdays(d, d, scheduleOf, holidays) > 0,
       ),
     ),
   ).size
@@ -360,7 +364,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
         ) : (
           <AttendanceTimeline
             entries={entries}
-            schedule={employee.work_schedule}
+            schedule={scheduleOf}
             graceMinutes={graceMinutes}
             standardHoursPerDay={standardHoursPerDay}
             holidays={holidays}

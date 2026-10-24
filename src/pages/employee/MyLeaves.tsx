@@ -3,6 +3,7 @@ import { History, Plus } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, Select, Spinner, Textarea } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Holiday, LeaveRequest, LeaveType } from '../../lib/db'
 import { fmtDate, plural } from '../../lib/format'
@@ -27,8 +28,11 @@ export default function MyLeaves() {
   useQuickAction('leave', () => setOpen(true), !loading)
   const [busy, setBusy] = useState(false)
   const [form, setForm] = useState({ type: '', start: todayManila(), end: todayManila(), reason: '' })
+  // workdays follow the schedule for those dates (patterns, roster changes)
+  const formSchedule = useEmployeeSchedule(employee, form.start, form.end, { asEmployee: true })
 
   const year = Number(todayManila().slice(0, 4))
+  const yearSchedule = useEmployeeSchedule(employee, `${year}-01-01`, `${year}-12-31`, { asEmployee: true })
 
   const [loadError, setLoadError] = useState('')
 
@@ -77,7 +81,7 @@ export default function MyLeaves() {
   /** Leave days charged: scheduled workdays that aren't holidays. */
   function workdayCount(start: string, end: string): number {
     if (!employee) return 0
-    return leaveWorkdays(start, end, employee.work_schedule.days, holidays)
+    return leaveWorkdays(start, end, formSchedule.resolve ?? employee.work_schedule, holidays)
   }
 
   /** Why the picked type can't start on the picked date yet, if it can't. */
@@ -154,7 +158,7 @@ export default function MyLeaves() {
   const usedByType: Record<string, number> = {}
   for (const r of requests) {
     if (r.status !== 'approved') continue
-    const d = leaveDaysInYear(r, year, employee.work_schedule.days, holidays)
+    const d = leaveDaysInYear(r, year, yearSchedule.resolve ?? employee.work_schedule, holidays)
     if (d > 0) usedByType[r.leave_type_id] = (usedByType[r.leave_type_id] ?? 0) + d
   }
 

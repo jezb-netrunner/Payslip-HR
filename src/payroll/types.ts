@@ -68,6 +68,7 @@ export interface StatutoryTables {
 
 // ---------- attendance ----------
 
+/** An employee's base schedule (employees.work_schedule): one shift on the listed weekdays. */
 export interface WorkSchedule {
   /** ISO weekdays that are working days (1=Mon .. 7=Sun). */
   days: number[]
@@ -77,6 +78,38 @@ export interface WorkSchedule {
   end: string
   break_minutes: number
 }
+
+/** A scheduled stretch of work on a date (a shift template's or roster entry's snapshot). */
+export interface Shift {
+  /** "HH:MM" start; an end at or before the start is the next morning */
+  start: string
+  end: string
+  /** unpaid meal break, deducted from a day of 6 hours or more */
+  break_minutes: number
+  /** flexible start: a time in up to this many minutes after `start` is on time, and the shift moves with it */
+  flex_minutes?: number
+  /** compressed workweek: the whole shift is regular time, so overtime starts only after it */
+  compressed?: boolean
+  /** the template it was taken from, for display */
+  name?: string
+}
+
+/** Monday..Sunday (index 0 = Monday); null = rest day. */
+export type WeekPattern = (Shift | null)[]
+
+/** What the schedule says for one date. */
+export interface DaySchedule {
+  /** null = rest day */
+  shift: Shift | null
+  /** unpaid break for a day worked without a shift (rest-day work) */
+  restDayBreakMinutes: number
+}
+
+/** The schedule in force on each date (base schedule, effective-dated patterns, roster changes). */
+export type ScheduleResolver = (date: string) => DaySchedule
+
+/** A fixed weekly schedule, or one resolved per date. */
+export type ScheduleSource = WorkSchedule | ScheduleResolver
 
 export interface TimeEntryLite {
   work_date: string
@@ -111,8 +144,12 @@ export interface DayComputation {
   scheduled: boolean
   holidayName?: string
   workedMinutes: number
-  /** Worked minutes credited within the standard day. */
+  /** Worked minutes credited as regular time (within the standard day, or a longer compressed shift). */
   payableMinutes: number
+  /** Regular minutes the date's shift expects (0 on a rest day); missing ones are tardiness, undertime or absence. */
+  expectedMinutes?: number
+  /** The shift scheduled that date (null = rest day). */
+  shift?: Shift | null
   otMinutes: number
   nightDiffMinutes: number
   /** Portion of nightDiffMinutes falling inside the OT tail of the day. */

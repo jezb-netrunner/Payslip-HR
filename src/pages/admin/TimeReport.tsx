@@ -33,13 +33,13 @@ import { fmtHours, fmtPeriod, fullName, plural } from '../../lib/format'
 import { FREQUENCY_LABELS, RUN_TYPE_LABELS } from '../../lib/labels'
 import { addDays, endOfMonth, todayManila } from '../../lib/manila'
 import { suggestPeriod } from '../../lib/payPeriods'
+import { fetchScheduleRows, resolversFor, type ScheduleRows } from '../../lib/schedules'
 import { supabase } from '../../lib/supabase'
 import {
   buildTimeReport,
   dayName,
   detailCsv,
   pairTimes,
-  scheduleText,
   shortDate,
   sumTotals,
   summaryCsv,
@@ -75,6 +75,7 @@ interface ReportData {
   entries: ReportEntry[]
   leaves: ReportLeave[]
   holidays: Holiday[]
+  schedules: ScheduleRows
 }
 
 /** A year of days at most: longer ranges are slow to load and unreadable on screen. */
@@ -196,7 +197,7 @@ export default function TimeReport({
     setLoading(true)
     setLoadError('')
     try {
-      const [entries, leaves, holidays] = await Promise.all([
+      const [entries, leaves, holidays, schedules] = await Promise.all([
         fetchAll<ReportEntry>((f, t) =>
           supabase
             .from('time_entries')
@@ -220,6 +221,7 @@ export default function TimeReport({
             .range(f, t),
         ),
         getHolidaysBetween(entity.id, from, to),
+        fetchScheduleRows({ entityId: entity.id }, from, to),
       ])
       if (my !== seq.current) return
       setData({
@@ -227,6 +229,7 @@ export default function TimeReport({
         to,
         entries,
         holidays,
+        schedules,
         leaves: leaves.map((l) => ({
           employee_id: l.employee_id,
           start_date: l.start_date,
@@ -263,6 +266,7 @@ export default function TimeReport({
             entries: current.entries,
             leaves: current.leaves,
             holidays: current.holidays,
+            schedules: resolversFor(inRange, current.schedules),
             standardHoursPerDay: Number(entity.standard_hours_per_day) || 8,
             gracePeriodMinutes: Number(entity.grace_period_minutes) || 0,
           })
@@ -621,7 +625,7 @@ function DailyRecord({ report, onBack, onEdit }: { report: EmployeeTimeReport; o
       }
     >
       <p className="-mt-2 mb-4 text-xs text-slate-500">
-        {scheduleText(e.work_schedule)} · {fmtPeriod(report.from, report.to)}
+        {report.schedule} · {fmtPeriod(report.from, report.to)}
       </p>
 
       {/* phones: a list, one day per item */}

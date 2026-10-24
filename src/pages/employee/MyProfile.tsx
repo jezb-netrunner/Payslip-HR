@@ -11,6 +11,9 @@ import {
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
+import { addDays, eachDate, todayManila } from '../../lib/manila'
+import { scheduleOfDays } from '../../lib/timeReport'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 
 const eventLabels: Record<string, string> = {
   hired: 'Hired',
@@ -26,6 +29,10 @@ const eventLabels: Record<string, string> = {
 
 export default function MyProfile() {
   const { employee } = useAuth()
+  // the next two weeks of shifts (a rotation shows as days that differ)
+  const today = todayManila()
+  const twoWeeks = addDays(today, 13)
+  const coming = useEmployeeSchedule(employee, today, twoWeeks, { asEmployee: true })
   const [events, setEvents] = useState<CareerEvent[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -71,7 +78,12 @@ export default function MyProfile() {
         : `${money(Number(employee.daily_rate))} / day`,
     ],
     ['Paid', `${FREQUENCY_LABELS[employee.pay_frequency]} · ${PAYMENT_METHOD_LABELS[employee.payment_method]}`],
-    ['Work schedule', `${employee.work_schedule.start}–${employee.work_schedule.end}, break ${employee.work_schedule.break_minutes}m`],
+    [
+      'Work schedule',
+      coming.resolve
+        ? scheduleOfDays(eachDate(today, twoWeeks).map((date) => ({ date, shift: coming.resolve!(date).shift })))
+        : '—',
+    ],
     ['TIN', employee.tin ?? '—'],
     ['SSS No.', employee.sss_no ?? '—'],
     ['PhilHealth No.', employee.philhealth_no ?? '—'],

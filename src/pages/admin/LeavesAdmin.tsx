@@ -9,6 +9,8 @@ import { useEntity } from '../../lib/entity'
 import { errorMessage } from '../../lib/errors'
 import { fmtDate, fullName, plural } from '../../lib/format'
 import { eligibleFrom, leaveDaysInYear, leaveWorkdays, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
+import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { useQuickAction } from '../../lib/quickAction'
@@ -385,9 +387,11 @@ function FileLeaveModal({
   const type = types.find((t) => t.id === f.typeId)
   // the database refuses it unless this year's credits were set: say so before saving
   const opens = employee && type && f.start && !usableOn(type, employee.hire_date, f.start, undefined) ? eligibleFrom(type, employee.hire_date) : null
-  const counted = holidays?.range === range
+  // workdays follow the employee's schedule for those dates (patterns, roster changes)
+  const sched = useEmployeeSchedule(employee ?? null, f.start, f.end)
+  const counted = holidays?.range === range && sched.ready
   const days =
-    employee && counted && f.end >= f.start ? leaveWorkdays(f.start, f.end, employee.work_schedule.days, holidays.list) : 0
+    employee && counted && f.end >= f.start ? leaveWorkdays(f.start, f.end, sched.resolve ?? employee.work_schedule, holidays.list) : 0
 
   async function save() {
     if (!counted) return
@@ -509,7 +513,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
     if (!employee) return
     setLoading(true)
     try {
-      const [ents, leaves, hols] = await Promise.all([
+      const [ents, leaves, hols, schedules] = await Promise.all([
         supabase.from('employee_leave_entitlements').select('*').eq('employee_id', employee.id).eq('year', year),
         supabase
           .from('leave_requests')
@@ -519,6 +523,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
           .lte('start_date', `${year}-12-31`)
           .gte('end_date', `${year}-01-01`),
         getHolidaysBetween(entity.id, `${year}-01-01`, `${year}-12-31`),
+        fetchScheduleRows({ entityId: entity.id, employeeId: employee.id }, `${year}-01-01`, `${year}-12-31`),
       ])
       if (ents.error) throw ents.error
       if (leaves.error) throw leaves.error
@@ -526,8 +531,9 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
       const v: Record<string, string> = {}
       for (const e of ents.data ?? []) v[e.leave_type_id as string] = String(Number(e.days))
       const u: Record<string, number> = {}
+      const schedule = resolversFor([employee], schedules).get(employee.id) ?? employee.work_schedule
       for (const l of (leaves.data ?? []) as LeaveRequest[]) {
-        u[l.leave_type_id] = (u[l.leave_type_id] ?? 0) + leaveDaysInYear(l, year, employee.work_schedule.days, hols)
+        u[l.leave_type_id] = (u[l.leave_type_id] ?? 0) + leaveDaysInYear(l, year, schedule, hols)
       }
       setValues(v)
       setSaved(v)

@@ -17,12 +17,15 @@ import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, Holiday, TimeCorrectionRequest, TimeEntry } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { fmtDate, fmtDateTime, fmtHours, fullName, plural } from '../../lib/format'
-import { addDays, eachDate, hhmmToMinutes, isoWeekday, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
+import { addDays, eachDate, hhmmToMinutes, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { FREQUENCY_LABELS } from '../../lib/labels'
 import { notifyPendingChanged, onPendingChanged } from '../../lib/pending'
-import type { PayFrequency } from '../../payroll/types'
+import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
+import { shiftLabel } from '../../lib/shiftText'
+import { unpaidBreak } from '../../payroll/schedule'
+import type { PayFrequency, ScheduleResolver, Shift } from '../../payroll/types'
 import TimeReport, { type ReportPreset } from './TimeReport'
 
 interface SheetPreset {
@@ -154,6 +157,10 @@ interface Row {
   dayKey: string
   employee: Employee
   date: string
+  /** the shift scheduled that date (null = rest day) */
+  shift: Shift | null
+  /** the break deducted from a day of 6 hours or more */
+  breakMinutes: number
   entry: TimeEntry | null
   timeIn: string
   timeOut: string
@@ -166,9 +173,6 @@ function rowKey(employeeId: string, date: string) {
   return `${employeeId}|${date}`
 }
 
-function isScheduled(e: Employee, date: string) {
-  return e.work_schedule.days.includes(isoWeekday(date))
-}
 
 /** Holidays nobody is expected to work: a blank day there is not an absence. */
 function isDayOff(h: Holiday | undefined): boolean {
@@ -237,6 +241,7 @@ function buildRows(
   locked: Set<string>,
   holidays: Holiday[],
   leaves: Map<string, LeaveMark>,
+  schedules: Map<string, ScheduleResolver>,
 ): Row[] {
   const byKey = new Map<string, TimeEntry[]>()
   for (const t of entries) {
@@ -246,10 +251,14 @@ function buildRows(
   return pairs.flatMap(({ employee, date }): Row[] => {
     const dayKey = rowKey(employee.id, date)
     const list = byKey.get(dayKey) ?? []
+    const sched = schedules.get(employee.id)?.(date)
+    const shift = sched ? sched.shift : null
     const base = {
       dayKey,
       employee,
       date,
+      shift,
+      breakMinutes: unpaidBreak(shift ? shift.break_minutes : (sched?.restDayBreakMinutes ?? 60)),
       locked: locked.has(dayKey),
       holiday: holidays.find((h) => h.holiday_date === date),
       leave: leaves.get(dayKey),
@@ -276,8 +285,8 @@ function withExtraPair(rows: Row[], after: Row): Row[] {
 function filledWithSchedule(rows: Row[]): Row[] {
   const daysWithTimes = new Set(rows.filter((r) => r.timeIn || r.timeOut).map((r) => r.dayKey))
   return rows.map((r) =>
-    !r.locked && !daysWithTimes.has(r.dayKey) && !r.leave && !isDayOff(r.holiday) && isScheduled(r.employee, r.date)
-      ? { ...r, timeIn: r.employee.work_schedule.start, timeOut: r.employee.work_schedule.end }
+    !r.locked && !daysWithTimes.has(r.dayKey) && !r.leave && !isDayOff(r.holiday) && r.shift
+      ? { ...r, timeIn: r.shift.start, timeOut: r.shift.end }
       : r,
   )
 }
@@ -309,8 +318,7 @@ function nextDayFlags(rows: Row[]): Map<string, boolean> {
     if (r.entry && manilaHHMM(r.entry.clock_in) === r.timeIn) {
       next = manilaDateStr(new Date(r.entry.clock_in)) > r.date
     } else if (prevIn === null) {
-      const { start, end } = r.employee.work_schedule
-      next = hhmmToMinutes(end) <= hhmmToMinutes(start) && hhmmToMinutes(r.timeIn) < hhmmToMinutes(end)
+      next = !!r.shift && hhmmToMinutes(r.shift.end) <= hhmmToMinutes(r.shift.start) && hhmmToMinutes(r.timeIn) < hhmmToMinutes(r.shift.end)
     } else {
       next = prevNext || hhmmToMinutes(r.timeIn) < prevIn
     }
@@ -419,7 +427,7 @@ function RowCells({
   onAddPair: () => void
 }) {
   const mins = spanMinutes(row.timeIn, row.timeOut)
-  const net = mins === null ? null : mins >= 360 ? Math.max(0, mins - row.employee.work_schedule.break_minutes) : mins
+  const net = mins === null ? null : mins >= 360 ? Math.max(0, mins - row.breakMinutes) : mins
   const overnight = !!row.timeIn && !!row.timeOut && (inNext || hhmmToMinutes(row.timeOut) <= hhmmToMinutes(row.timeIn))
   const label = `${fullName(row.employee)} ${fmtDate(row.date)}`
   return (
@@ -457,10 +465,10 @@ function RowCells({
             </span>
           ) : (
             <>
-              {first && last && (
+              {first && last && row.shift && (
                 <button
                   type="button"
-                  onClick={() => onChange({ timeIn: row.employee.work_schedule.start, timeOut: row.employee.work_schedule.end })}
+                  onClick={() => row.shift && onChange({ timeIn: row.shift.start, timeOut: row.shift.end })}
                   className="text-[11px] font-semibold text-brand-600 hover:text-brand-800"
                 >
                   Schedule
@@ -497,7 +505,7 @@ function RowCells({
 function DayBadges({ row, showHoliday }: { row: Row; showHoliday: boolean }) {
   return (
     <>
-      {!isScheduled(row.employee, row.date) && <Badge tone="slate">rest day</Badge>}
+      {!row.shift && <Badge tone="slate">rest day</Badge>}
       {showHoliday && row.holiday && (
         <Badge tone={row.holiday.kind === 'regular' ? 'red' : 'amber'}>{row.holiday.name}</Badge>
       )}
@@ -542,17 +550,27 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
     setLoadError('')
     setRows([])
     try {
-      const [emps, { data: ent, error: entErr }, locked, hols, leaves] = await Promise.all([
+      const [emps, { data: ent, error: entErr }, locked, hols, leaves, schedules] = await Promise.all([
         getEmployees(entity.id),
         supabase.from('time_entries').select('*').eq('entity_id', entity.id).eq('work_date', date),
         lockedKeys(entity.id, date, date),
         getHolidaysBetween(entity.id, date, date),
         leaveMarks(entity.id, date, date),
+        fetchScheduleRows({ entityId: entity.id }, date, date),
       ])
       if (entErr) throw entErr
       if (my !== seq.current) return
       const active = emps.filter((e) => e.hire_date <= date && isActiveOn(e, date))
-      setRows(buildRows(active.map((employee) => ({ employee, date })), (ent ?? []) as TimeEntry[], locked, hols, leaves))
+      setRows(
+        buildRows(
+          active.map((employee) => ({ employee, date })),
+          (ent ?? []) as TimeEntry[],
+          locked,
+          hols,
+          leaves,
+          resolversFor(active, schedules),
+        ),
+      )
     } catch (err) {
       if (my === seq.current) setLoadError(errorMessage(err, 'Failed to load'))
     } finally {
@@ -570,7 +588,7 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
   }, [load])
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)))
-  const shown = rows.filter((r) => !onlyScheduled || isScheduled(r.employee, date))
+  const shown = rows.filter((r) => !onlyScheduled || r.shift)
   const dirty = rows.filter(changed).length
   const flags = useMemo(() => nextDayFlags(rows), [rows])
   useEffect(() => onDirty(dirty), [dirty, onDirty])
@@ -658,8 +676,8 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
                   <Td className="text-xs">
                     {first && (
                       <div className="flex flex-wrap items-center gap-1">
-                        {isScheduled(r.employee, date) && (
-                          <span className="whitespace-nowrap">{`${r.employee.work_schedule.start}–${r.employee.work_schedule.end}`}</span>
+                        {r.shift && (
+                          <span className="whitespace-nowrap" title={r.shift.name}>{shiftLabel(r.shift)}</span>
                         )}
                         <DayBadges row={r} showHoliday={false} />
                       </div>
@@ -740,16 +758,26 @@ function EmployeeSheet({
     setLoading(true)
     setLoadError('')
     try {
-      const [{ data: ent, error: entErr }, locked, hols, leaves] = await Promise.all([
+      const [{ data: ent, error: entErr }, locked, hols, leaves, schedules] = await Promise.all([
         supabase.from('time_entries').select('*').eq('employee_id', employee.id).gte('work_date', from).lte('work_date', to),
         lockedKeys(entity.id, from, to),
         getHolidaysBetween(entity.id, from, to),
         leaveMarks(entity.id, from, to, employee.id),
+        fetchScheduleRows({ entityId: entity.id, employeeId: employee.id }, from, to),
       ])
       if (entErr) throw entErr
       if (my !== seq.current) return
       const dates = eachDate(from, to).filter((d) => d >= employee.hire_date && isActiveOn(employee, d))
-      setRows(buildRows(dates.map((date) => ({ employee, date })), (ent ?? []) as TimeEntry[], locked, hols, leaves))
+      setRows(
+        buildRows(
+          dates.map((date) => ({ employee, date })),
+          (ent ?? []) as TimeEntry[],
+          locked,
+          hols,
+          leaves,
+          resolversFor([employee], schedules),
+        ),
+      )
     } catch (err) {
       if (my === seq.current) setLoadError(errorMessage(err, 'Failed to load'))
     } finally {
@@ -786,7 +814,7 @@ function EmployeeSheet({
   const totalMinutes = rows.reduce((s, r) => {
     const m = spanMinutes(r.timeIn, r.timeOut)
     if (m === null) return s
-    return s + (m >= 360 ? Math.max(0, m - r.employee.work_schedule.break_minutes) : m)
+    return s + (m >= 360 ? Math.max(0, m - r.breakMinutes) : m)
   }, 0)
 
   return (

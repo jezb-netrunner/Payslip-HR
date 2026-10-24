@@ -5,11 +5,15 @@
 // built-in PDF fonts can print (no peso sign, no narrow no-break spaces).
 
 import { computeAttendance } from '../payroll/attendance'
-import { round2, type DayType, type HolidayLite, type WorkSchedule } from '../payroll/types'
+import { sameShift } from '../payroll/schedule'
+import { round2, type DayType, type HolidayLite, type ScheduleResolver, type Shift, type WeekPattern } from '../payroll/types'
 import type { CsvValue } from './csv'
 import type { Employee, TimeEntry } from './db'
-import { fullName } from './format'
+import { clock12, fullName, plural } from './format'
 import { isoWeekday, manilaDateStr, manilaHHMM } from './manila'
+import { patternSummary } from './shiftText'
+
+export { clock12 }
 
 export type ReportEmployee = Pick<
   Employee,
@@ -51,6 +55,8 @@ export interface ReportDay {
   date: string
   dayType: DayType
   scheduled: boolean
+  /** the shift scheduled that date (null = rest day) */
+  shift: Shift | null
   holiday?: HolidayLite
   pairs: ReportPair[]
   /** net of the unpaid break; overtime included */
@@ -98,6 +104,8 @@ export interface EmployeeTimeReport {
   /** the requested range clipped to the employment */
   from: string
   to: string
+  /** the schedule over the range, e.g. "Mon–Fri 8:00 AM–5:00 PM · Sat 8:00 AM–12:00 PM (2 days differ)" */
+  schedule: string
   days: ReportDay[]
   totals: ReportTotals
 }
@@ -111,6 +119,8 @@ export interface TimeReportParams {
   entries: ReportEntry[]
   leaves: ReportLeave[]
   holidays: HolidayLite[]
+  /** each employee's schedule per date (patterns and roster changes); the base schedule when missing */
+  schedules?: Map<string, ScheduleResolver>
   standardHoursPerDay: number
   gracePeriodMinutes: number
 }
@@ -166,7 +176,7 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
     const computed = computeAttendance({
       periodStart: from,
       periodEnd: to,
-      schedule: employee.work_schedule,
+      schedule: p.schedules?.get(employee.id) ?? employee.work_schedule,
       standardHoursPerDay: p.standardHoursPerDay,
       gracePeriodMinutes: p.gracePeriodMinutes,
       entries,
@@ -209,6 +219,7 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
         date: d.date,
         dayType: d.dayType,
         scheduled: d.scheduled,
+        shift: d.shift ?? null,
         holiday,
         pairs,
         workedMinutes: d.workedMinutes,
@@ -246,9 +257,28 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
       if (worked && HOLIDAY_TYPES.has(d.dayType)) totals.holidaysWorked += 1
       if (d.missingTimeOut) totals.missingTimeOut += 1
     }
-    out.push({ employee, from, to, days, totals })
+    out.push({ employee, from, to, schedule: scheduleOfDays(days), days, totals })
   }
   return out
+}
+
+/**
+ * The schedule a range of days follows: each weekday's most usual shift, and
+ * how many days had another (a roster change, or a new schedule mid-range).
+ */
+export function scheduleOfDays(days: Pick<ReportDay, 'date' | 'shift'>[]): string {
+  const pattern: WeekPattern = Array.from({ length: 7 }, (_, wd) => {
+    const counts: { shift: Shift | null; n: number }[] = []
+    for (const d of days) {
+      if (isoWeekday(d.date) - 1 !== wd) continue
+      const c = counts.find((x) => sameShift(x.shift, d.shift))
+      if (c) c.n += 1
+      else counts.push({ shift: d.shift, n: 1 })
+    }
+    return counts.sort((a, b) => b.n - a.n)[0]?.shift ?? null
+  })
+  const differ = days.filter((d) => !sameShift(d.shift, pattern[isoWeekday(d.date) - 1])).length
+  return patternSummary(pattern) + (differ ? ` (${plural(differ, 'day')} differ)` : '')
 }
 
 /** Totals of several employees. */
@@ -275,12 +305,6 @@ export function shortDate(date: string, withYear = false): string {
   return withYear ? `${s}, ${date.slice(0, 4)}` : s
 }
 
-/** "13:05" -> "1:05 PM" */
-export function clock12(hhmm: string): string {
-  const [h, m] = hhmm.split(':').map(Number)
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
-}
-
 /** A pair's time in and time out for display; "(+1)" marks the next day. */
 export function pairTimes(p: ReportPair, fmt: (hhmm: string) => string = clock12): { timeIn: string; timeOut: string } {
   return {
@@ -292,23 +316,6 @@ export function pairTimes(p: ReportPair, fmt: (hhmm: string) => string = clock12
 /** Minutes as decimal hours, e.g. 510 -> 8.5 */
 export function hoursOf(minutes: number): number {
   return round2(minutes / 60)
-}
-
-/** "Mon–Fri 8:00 AM–5:00 PM, 60 min break" */
-export function scheduleText(s: WorkSchedule): string {
-  const days = [...new Set(s.days)].filter((d) => d >= 1 && d <= 7).sort((a, b) => a - b)
-  const runs: number[][] = []
-  for (const d of days) {
-    const last = runs[runs.length - 1]
-    if (last && d === last[last.length - 1] + 1) last.push(d)
-    else runs.push([d])
-  }
-  const dayText = runs
-    .flatMap((r) =>
-      r.length >= 3 ? [`${DAY_NAMES[r[0] - 1]}–${DAY_NAMES[r[r.length - 1] - 1]}`] : r.map((d) => DAY_NAMES[d - 1]),
-    )
-    .join(', ')
-  return `${dayText || 'No workdays'} ${clock12(s.start)}–${clock12(s.end)}, ${s.break_minutes} min break`
 }
 
 // ---------- CSV ----------
@@ -347,7 +354,6 @@ export function detailCsv(reports: EmployeeTimeReport[]): CsvValue[][] {
   ]
   const rows: CsvValue[][] = [header]
   for (const r of reports) {
-    const { start, end } = r.employee.work_schedule
     for (const d of r.days) {
       const times = Array.from({ length: maxPairs }, (_, i) => {
         const pair = d.pairs[i]
@@ -357,7 +363,7 @@ export function detailCsv(reports: EmployeeTimeReport[]): CsvValue[][] {
       }).flat()
       rows.push([
         r.employee.employee_no, fullName(r.employee), d.date, dayName(d.date),
-        d.scheduled ? `${start}-${end}` : 'Rest day', ...times, hoursOf(d.workedMinutes), hoursOf(d.regularMinutes),
+        d.shift ? `${d.shift.start}-${d.shift.end}` : 'Rest day', ...times, hoursOf(d.workedMinutes), hoursOf(d.regularMinutes),
         hoursOf(d.otMinutes), hoursOf(d.nightDiffMinutes), d.lateMinutes, d.undertimeMinutes, d.remarks.join('; '),
       ])
     }

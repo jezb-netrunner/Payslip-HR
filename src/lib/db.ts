@@ -382,6 +382,18 @@ export interface PayrollAdjustment {
   created_at: string
 }
 
+/** What one draft payroll deducts for a recurring deduction instead of its usual installment (0 = skip). */
+export interface PayrollDeductionOverride {
+  id: string
+  payroll_run_id: string
+  deduction_id: string
+  employee_id: string
+  entity_id: string
+  amount: number
+  note: string
+  created_at: string
+}
+
 export interface Announcement {
   id: string
   entity_id: string
