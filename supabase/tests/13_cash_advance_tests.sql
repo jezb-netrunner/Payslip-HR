@@ -141,7 +141,8 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :za, true);
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 250, 1000, 1000, '2026-11-03')$$, '%written authorization%');
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 250, 1000, 600, '2026-11-03', '2026-11-03')$$, '%balance equal to the amount released%');
-select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 0, 1000, 1000, '2026-11-03', '2026-11-03')$$, '%per payroll%');
+-- (payroll_deduction_overrides: 0 = no fixed installment is allowed; a negative one never is)
+select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', -1, 1000, 1000, '2026-11-03', '2026-11-03')$$, '%per payroll%');
 insert into recurring_deductions (id, employee_id, label, category, amount_per_period, total_amount, balance, start_date, released_on, release_method, authorized_on)
 values ('7000000f-0000-0000-0000-000000000001', '20000000-0000-0000-0000-0000000000a1', 'Cash advance (Nov 3, 2026)', 'cash_advance', 250, 1000, 1000, '2026-11-03', '2026-11-03', 'e_wallet', '2026-11-03');
 -- the release and authorization record can't be cleared, and the first deduction can't precede the release
@@ -150,8 +151,8 @@ select pg_temp.expect_error($$update recurring_deductions set released_on = null
 select pg_temp.expect_error($$update recurring_deductions set start_date = '2026-11-02' where id = '7000000f-0000-0000-0000-000000000001'$$, '%can''t come before the release%');
 select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, start_date, released_on, authorized_on) values ('20000000-0000-0000-0000-0000000000a1', 'Cash advance', 'cash_advance', 250, 1000, 1000, '2026-11-01', '2026-11-03', '2026-11-03')$$, '%can''t come before the release%');
 -- other deductions can't be turned into advances (that would skip the checks above)
-insert into recurring_deductions (id, employee_id, label, category, amount_per_period)
-values ('7000000f-0000-0000-0000-000000000009', '20000000-0000-0000-0000-0000000000a1', 'Uniform', 'other', 100);
+insert into recurring_deductions (id, employee_id, label, category, amount_per_period, authorized_on)
+values ('7000000f-0000-0000-0000-000000000009', '20000000-0000-0000-0000-0000000000a1', 'Uniform', 'other', 100, '2026-11-01');
 select pg_temp.expect_error($$update recurring_deductions set category = 'cash_advance' where id = '7000000f-0000-0000-0000-000000000009'$$, '%Cash Advances%');
 commit;
 
@@ -163,7 +164,7 @@ select pg_temp.expect_error($$update recurring_deductions set balance = 400 wher
 update recurring_deductions set total_amount = 1200, balance = 1200 where id = '7000000f-0000-0000-0000-000000000001';
 update recurring_deductions set amount_per_period = 300, active = false where id = '7000000f-0000-0000-0000-000000000001';
 update recurring_deductions set active = true where id = '7000000f-0000-0000-0000-000000000001';
-select pg_temp.expect_error($$update recurring_deductions set amount_per_period = 0 where id = '7000000f-0000-0000-0000-000000000001'$$, '%per payroll%');
+select pg_temp.expect_error($$update recurring_deductions set amount_per_period = -5 where id = '7000000f-0000-0000-0000-000000000001'$$, '%per payroll%');
 select pg_temp.check((select balance = 1200 and amount_per_period = 300 and active from recurring_deductions where id = '7000000f-0000-0000-0000-000000000001'), 'corrected before repayment; installment changed; resumed');
 commit;
 

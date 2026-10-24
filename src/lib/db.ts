@@ -6,6 +6,7 @@ import type {
   AllowanceCategory,
   BirBucket,
   ContributionTiming,
+  MaternityBenefit,
   PayFrequency,
   RoundingMode,
   WorkSchedule,
@@ -118,6 +119,10 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
+  /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent) */
+  philhealth_ee_waiver?: 'pwd' | 'solo_parent' | null
+  philhealth_ee_waiver_from?: string | null
+  philhealth_ee_waiver_until?: string | null
   payment_method: PaymentMethod
   work_schedule: WorkSchedule
   bank_name: string | null
@@ -267,6 +272,10 @@ export interface StatutoryVersion {
   effective_to: string | null
   description: string
   source_url: string | null
+  /** The law, regulation or circular the version implements. */
+  legal_basis: string
+  /** When the maintainer last checked it against its source. */
+  verified_on: string | null
   data: unknown
   created_at: string
 }
@@ -379,6 +388,22 @@ export interface PayrollAdjustment {
   label: string
   amount: number
   category: string
+  /** RA 11210 maternity pay (category other_non_taxable) */
+  benefit?: MaternityBenefit | null
+  /** date the employee signed the written authorization ('other' deductions, Labor Code Art. 113) */
+  authorized_on?: string | null
+  created_at: string
+}
+
+/** What one draft payroll deducts for a recurring deduction instead of its usual installment (0 = skip). */
+export interface PayrollDeductionOverride {
+  id: string
+  payroll_run_id: string
+  deduction_id: string
+  employee_id: string
+  entity_id: string
+  amount: number
+  note: string
   created_at: string
 }
 

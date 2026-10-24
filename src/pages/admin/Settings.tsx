@@ -23,7 +23,8 @@ function settingsRangeProblem(s: Entity): string | null {
   const int = (v: unknown) => Number.isInteger(Number(v))
   if (!(n(s.minimum_wage_daily) >= 0)) return 'Minimum wage cannot be negative.'
   if (!(n(s.working_days_divisor) > 0 && n(s.working_days_divisor) <= 366)) return 'Days-per-year factor must be between 1 and 366.'
-  if (!(n(s.standard_hours_per_day) > 0 && n(s.standard_hours_per_day) <= 24)) return 'Standard hours per day must be above 0 and at most 24.'
+  // normal hours of work are 8 a day at most (Labor Code Art. 83); longer days are compressed-workweek shifts
+  if (!(n(s.standard_hours_per_day) > 0 && n(s.standard_hours_per_day) <= 8)) return 'Standard hours per day must be above 0 and at most 8 (Labor Code Art. 83).'
   if (!int(s.grace_period_minutes) || n(s.grace_period_minutes) < 0 || n(s.grace_period_minutes) > 240)
     return 'Grace period must be a whole number of minutes, 0–240.'
   if (!(n(s.night_diff_rate) >= 0.1 && n(s.night_diff_rate) <= 1))
@@ -219,8 +220,8 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             <Field label="Days-per-year factor" hint="261 (Mon–Fri), 313 (6-day week), 365; overridable per employee">
               <Input type="number" value={s.working_days_divisor} onChange={(e) => set('working_days_divisor', e.target.value as unknown as number)} />
             </Field>
-            <Field label="Standard hours per day">
-              <Input type="number" value={s.standard_hours_per_day} onChange={(e) => set('standard_hours_per_day', e.target.value as unknown as number)} />
+            <Field label="Standard hours per day" hint="8 at most (Art. 83); a longer day is a compressed-workweek shift">
+              <Input type="number" min={1} max={8} value={s.standard_hours_per_day} onChange={(e) => set('standard_hours_per_day', e.target.value as unknown as number)} />
             </Field>
             <Field label="Grace period (minutes)">
               <Input type="number" value={s.grace_period_minutes} onChange={(e) => set('grace_period_minutes', e.target.value as unknown as number)} />

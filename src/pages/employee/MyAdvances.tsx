@@ -8,6 +8,7 @@ import {
   ADVANCE_STATUS_TONES,
   advanceLedger,
   advanceStatus,
+  installmentText,
   nextInstallment,
   payrollsToRepay,
   type LedgerSlip,
@@ -89,6 +90,7 @@ export default function MyAdvances() {
   const outstanding = advances.filter((a) => Number(a.balance ?? 0) > 0)
   const owed = round2(outstanding.reduce((s, a) => s + Number(a.balance), 0))
   const next = nextInstallment(outstanding.filter((a) => !a.start_date || a.start_date <= today))
+  const agreed = outstanding.some((a) => a.active && !(Number(a.amount_per_period) > 0))
   const pending = requests.filter((r) => r.status === 'pending')
   const ledgerSlips: LedgerSlip[] = slips.map((s) => ({ ...s, finalized: true }))
   const lastNet = slips.find((s) => s.run_type !== 'thirteenth_month')?.net_pay
@@ -145,7 +147,7 @@ export default function MyAdvances() {
     <div className="space-y-6">
       <PageHeader
         title="Cash Advances"
-        subtitle="Advances on your pay. They carry no interest and are repaid from your next payrolls, a fixed amount each payroll, as shown on your payslips."
+        subtitle="Advances on your pay. They carry no interest and are repaid from your next payrolls — the installment you agreed on, or the amount agreed for each payroll — as shown on your payslips."
         actions={
           !separated && (
             <Button onClick={() => setOpen(true)}>
@@ -157,7 +159,7 @@ export default function MyAdvances() {
 
       <StatGroup>
         <StatCard label="You owe" value={money(owed)} sub={outstanding.length ? plural(outstanding.length, 'advance') : 'nothing owed'} icon={<Wallet />} />
-        <StatCard label="Deducted per payroll" value={money(next)} sub="from your take-home pay" icon={<HandCoins />} />
+        <StatCard label="Deducted per payroll" value={money(next)} sub={agreed ? '+ amounts agreed each payroll' : 'from your take-home pay'} icon={<HandCoins />} />
         <StatCard label="Requests waiting" value={pending.length} sub={pending.length ? 'HR is reviewing' : 'none'} icon={<Hourglass />} />
       </StatGroup>
 
@@ -182,7 +184,7 @@ export default function MyAdvances() {
                   <div className="min-w-0">
                     <p className="text-sm font-bold text-ink-900">{money(total)} advance</p>
                     <p className="text-xs text-slate-500">
-                      Released {fmtDate(a.released_on)} · {money(Number(a.amount_per_period))} per payroll
+                      Released {fmtDate(a.released_on)} · {installmentText(Number(a.amount_per_period))}
                     </p>
                   </div>
                   <Badge tone={ADVANCE_STATUS_TONES[status]}>

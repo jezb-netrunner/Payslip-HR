@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Building2,
   BriefcaseBusiness,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -69,11 +70,14 @@ import {
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
   PAYMENT_METHOD_LABELS,
+  philhealthWaiverProblem,
   SEPARATION_REASON_LABELS,
 } from '../../lib/labels'
-import { nextInstallment } from '../../lib/advances'
+import { AUTHORIZED_DEDUCTIONS, DEDUCTION_CATEGORY_LABELS, repaymentText } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
+import { ScheduleTab } from './EmployeeSchedule'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
@@ -216,6 +220,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
         tabs={[
           { key: 'profile', label: 'Profile & Employment', icon: <UserRound /> },
           { key: 'time', label: 'Attendance', icon: <Clock /> },
+          { key: 'schedule', label: 'Schedule', icon: <CalendarClock /> },
           { key: 'pay', label: 'Pay & Policy', icon: <Wallet /> },
           { key: 'career', label: 'Career History', icon: <History /> },
           { key: 'login', label: 'Login Code', icon: <KeyRound /> },
@@ -224,8 +229,9 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
         active={tab}
         onChange={setTab}
       />
-      {tab === 'profile' && <ProfileTab employee={employee} onSaved={load} />}
+      {tab === 'profile' && <ProfileTab employee={employee} onSaved={load} onSchedule={() => setTab('schedule')} />}
       {tab === 'time' && <AttendanceTab employee={employee} entity={entity} />}
+      {tab === 'schedule' && <ScheduleTab employee={employee} entity={entity} />}
       {tab === 'pay' && (
         <PayTab employee={employee} entity={entity} allowances={allowances} deductions={deductions} onChanged={load} />
       )}
@@ -258,6 +264,9 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
   const seq = useRef(0)
   const start = `${month}-01`
   const end = endOfMonth(start)
+  // the shifts the month was scheduled (patterns, roster changes)
+  const schedule = useEmployeeSchedule(employee, start, end)
+  const scheduleOf = schedule.resolve ?? employee.work_schedule
 
   const load = useCallback(async () => {
     // quick month clicks: only the latest request may fill the page
@@ -312,7 +321,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
     dayTimeline(
       d,
       entries.filter((e) => e.work_date === d),
-      employee.work_schedule,
+      scheduleOf,
       { graceMinutes, standardHoursPerDay, holidays },
     ),
   )
@@ -320,7 +329,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
   const leaveDays = new Set(
     leaves.flatMap((l) =>
       eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date).filter(
-        (d) => leaveWorkdays(d, d, employee.work_schedule.days, holidays) > 0,
+        (d) => leaveWorkdays(d, d, scheduleOf, holidays) > 0,
       ),
     ),
   ).size
@@ -360,7 +369,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
         ) : (
           <AttendanceTimeline
             entries={entries}
-            schedule={employee.work_schedule}
+            schedule={scheduleOf}
             graceMinutes={graceMinutes}
             standardHoursPerDay={standardHoursPerDay}
             holidays={holidays}
@@ -377,7 +386,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
   )
 }
 
-function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => Promise<void> }) {
+function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onSaved: () => Promise<void>; onSchedule: () => void }) {
   const toast = useToast()
   const [f, setF] = useState({ ...employee })
   const [busy, setBusy] = useState(false)
@@ -418,7 +427,6 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
           employment_status: f.employment_status,
           position: f.position,
           department: f.department,
-          work_schedule: f.work_schedule,
           emergency_contact_name: f.emergency_contact_name || null,
           emergency_contact_phone: f.emergency_contact_phone || null,
           notes: f.notes || null,
@@ -500,38 +508,12 @@ function ProfileTab({ employee, onSaved }: { employee: Employee; onSaved: () => 
             <Field label="Date started"><Input type="date" value={f.hire_date} onChange={(e) => set('hire_date', e.target.value)} /></Field>
             <Field label="Regularization date"><Input type="date" value={f.regularization_date ?? ''} onChange={(e) => set('regularization_date', e.target.value)} /></Field>
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <Field label="Shift start"><Input type="time" value={f.work_schedule.start} onChange={(e) => set('work_schedule', { ...f.work_schedule, start: e.target.value })} /></Field>
-            <Field label="Shift end"><Input type="time" value={f.work_schedule.end} onChange={(e) => set('work_schedule', { ...f.work_schedule, end: e.target.value })} /></Field>
-            <Field label="Break (min)"><Input type="number" value={f.work_schedule.break_minutes} onChange={(e) => set('work_schedule', { ...f.work_schedule, break_minutes: Number(e.target.value) })} /></Field>
-          </div>
-          <Field label="Work days" className="mt-3" group>
-            <div className="flex gap-1.5">
-              {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => {
-                const day = i + 1
-                const on = f.work_schedule.days.includes(day)
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    aria-pressed={on}
-                    aria-label={['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][i]}
-                    onClick={() =>
-                      set('work_schedule', {
-                        ...f.work_schedule,
-                        days: on
-                          ? f.work_schedule.days.filter((x) => x !== day)
-                          : [...f.work_schedule.days, day].sort(),
-                      })
-                    }
-                    className={`size-8 rounded-lg text-xs font-bold ${on ? 'bg-brand-700 text-white' : 'bg-slate-100 text-slate-400'}`}
-                  >
-                    {d}
-                  </button>
-                )
-              })}
-            </div>
-          </Field>
+          <p className="mt-3 text-xs text-slate-500">
+            Work schedule (shifts, rest days, changes from a date):{' '}
+            <button type="button" onClick={onSchedule} className="font-semibold text-brand-700 underline">
+              Schedule tab
+            </button>
+          </p>
         </Card>
 
         <Card title="Separation (resignation, termination, retirement…)" icon={<DoorOpen />}>
@@ -601,6 +583,9 @@ function PayTab({
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
     bank_account_no: employee.bank_account_no ?? '',
+    ph_waiver: employee.philhealth_ee_waiver ?? '',
+    ph_waiver_from: employee.philhealth_ee_waiver_from ?? '',
+    ph_waiver_until: employee.philhealth_ee_waiver_until ?? '',
   })
   const [busy, setBusy] = useState(false)
   const [listBusy, setListBusy] = useState(false)
@@ -611,6 +596,11 @@ function PayTab({
     const dpy = f.days_per_year ? Number(f.days_per_year) : null
     if (dpy !== null && !(dpy > 0 && dpy <= 366)) {
       toast('error', 'Days-per-year factor must be between 1 and 366 (or blank for the client default).')
+      return
+    }
+    const waiverProblem = philhealthWaiverProblem(f.ph_waiver, f.ph_waiver_from, f.ph_waiver_until)
+    if (waiverProblem) {
+      toast('error', waiverProblem)
       return
     }
     setBusy(true)
@@ -627,6 +617,9 @@ function PayTab({
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
           bank_account_no: f.bank_account_no || null,
+          philhealth_ee_waiver: f.ph_waiver || null,
+          philhealth_ee_waiver_from: f.ph_waiver ? f.ph_waiver_from : null,
+          philhealth_ee_waiver_until: f.ph_waiver ? f.ph_waiver_until || null : null,
         })
         .eq('id', employee.id)
       if (error) throw error
@@ -689,6 +682,10 @@ function PayTab({
       toast('error', 'The end date is before the start date.')
       return
     }
+    if (AUTHORIZED_DEDUCTIONS.includes(d.category) && !d.authorized) {
+      toast('error', 'Enter the date the employee signed the written authorization for this deduction (Labor Code Art. 113).')
+      return
+    }
     const row = {
       label: d.label.trim(),
       category: d.category,
@@ -696,6 +693,7 @@ function PayTab({
       balance,
       start_date: d.start || null,
       end_date: d.end || null,
+      authorized_on: d.authorized || null,
     }
     const done = await listWrite(
       () =>
@@ -776,6 +774,28 @@ function PayTab({
             </p>
           )}
         </div>
+        <div className="mt-4 space-y-3 rounded-lg bg-slate-50 p-3">
+          <Field
+            label="PhilHealth employee share"
+            hint="The national government pays it for an employed PWD (RA 11228) and, from Sep 26, 2026, a solo parent (RA 11861; PhilHealth Circular 2026-0015). The employer share is unchanged. Keep a copy of the PWD or Solo Parent ID."
+          >
+            <Select value={f.ph_waiver} onChange={(e) => setF({ ...f, ph_waiver: e.target.value as typeof f.ph_waiver })}>
+              <option value="">Deducted from pay</option>
+              <option value="pwd">Paid by the government — person with disability</option>
+              <option value="solo_parent">Paid by the government — solo parent</option>
+            </Select>
+          </Field>
+          {f.ph_waiver && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="From">
+                <Input type="date" value={f.ph_waiver_from} onChange={(e) => setF({ ...f, ph_waiver_from: e.target.value })} />
+              </Field>
+              <Field label="Until (optional)" hint="e.g. when the ID expires">
+                <Input type="date" value={f.ph_waiver_until} onChange={(e) => setF({ ...f, ph_waiver_until: e.target.value })} />
+              </Field>
+            </div>
+          )}
+        </div>
         <Button className="mt-4" disabled={busy} onClick={savePay}>
           {busy ? 'Saving…' : 'Save pay details'}
         </Button>
@@ -838,7 +858,7 @@ function PayTab({
         icon={<Receipt />}
         className="lg:col-span-2"
         actions={
-          <Button variant="secondary" onClick={() => setEditingDed({ label: '', category: 'other', amount: '', balance: '', start: '', end: '' })}>
+          <Button variant="secondary" onClick={() => setEditingDed({ label: '', category: 'other', amount: '', balance: '', start: '', end: '', authorized: '' })}>
             <Plus className="size-4" /> Add
           </Button>
         }
@@ -850,7 +870,7 @@ function PayTab({
               <div className="min-w-0">
                 <p className="break-words text-sm font-semibold text-slate-700">{d.label}</p>
                 <p className="text-xs text-slate-400">
-                  {money(Number(d.amount_per_period))}/payroll · {d.category.replaceAll('_', ' ')}
+                  {Number(d.amount_per_period) > 0 ? `${money(Number(d.amount_per_period))}/payroll` : 'set in each payroll'} · {DEDUCTION_CATEGORY_LABELS[d.category] ?? d.category.replaceAll('_', ' ')}
                   {d.balance !== null && ` · balance ${money(Number(d.balance))}`}
                   {(d.start_date || d.end_date) && ` · ${d.start_date ? fmtDate(d.start_date) : '…'} → ${d.end_date ? fmtDate(d.end_date) : '…'}`}
                   {!d.active && ' · inactive'}
@@ -868,6 +888,7 @@ function PayTab({
                       balance: d.balance === null ? '' : String(d.balance),
                       start: d.start_date ?? '',
                       end: d.end_date ?? '',
+                      authorized: d.authorized_on ?? '',
                     })
                   }
                   className="text-xs font-semibold text-brand-600"
@@ -913,7 +934,7 @@ function PayTab({
             {openAdvances.length > 0 ? (
               <>
                 Owes <b className="text-ink-900">{money(owedOnAdvances)}</b> on {plural(openAdvances.length, 'advance')} ·{' '}
-                {money(nextInstallment(openAdvances.filter((d) => !d.start_date || d.start_date <= todayManila())))} per payroll
+                {repaymentText(openAdvances.filter((d) => !d.start_date || d.start_date <= todayManila()))}
               </>
             ) : advances.length > 0 ? (
               `No balance owed (${plural(advances.length, 'advance')} fully paid).`
@@ -993,6 +1014,14 @@ function PayTab({
                 <Input type="date" value={editingDed.end} onChange={(e) => setEditingDed({ ...editingDed, end: e.target.value })} />
               </Field>
             </div>
+            {AUTHORIZED_DEDUCTIONS.includes(editingDed.category) && (
+              <Field
+                label="Employee's written authorization signed on"
+                hint="Required: a deduction the law doesn't provide for (a company loan, HMO or insurance premium, anything else) needs the employee's written authorization (Labor Code Art. 113). Keep the signed copy on file."
+              >
+                <Input type="date" value={editingDed.authorized} onChange={(e) => setEditingDed({ ...editingDed, authorized: e.target.value })} />
+              </Field>
+            )}
             <Button className="w-full" disabled={listBusy} onClick={() => saveDeduction(editingDed)}>
               {listBusy ? 'Saving…' : 'Save'}
             </Button>
@@ -1020,16 +1049,10 @@ interface DeductionForm {
   balance: string
   start: string
   end: string
+  /** date the written authorization was signed ('' = none) */
+  authorized: string
 }
 
-const DEDUCTION_CATEGORY_LABELS: Record<string, string> = {
-  sss_loan: 'SSS loan',
-  pagibig_loan: 'Pag-IBIG loan',
-  company_loan: 'Company loan',
-  hmo: 'HMO',
-  union_dues: 'Union dues (tax-exempt)',
-  other: 'Other',
-}
 
 function CareerTab({
   employee,

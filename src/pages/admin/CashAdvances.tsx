@@ -20,6 +20,7 @@ import {
   StatGroup,
   Tabs,
   Textarea,
+  Toggle,
 } from '../../components/ui'
 import AdvanceLedgerList from '../../components/AdvanceLedgerList'
 import { useToast } from '../../components/toast'
@@ -185,13 +186,14 @@ function Advances({ entity }: { entity: Entity }) {
   const totalOwed = round2(outstanding.reduce((s, a) => s + Number(a.balance), 0))
   const owing = new Set(outstanding.map((a) => a.employee_id)).size
   const nextDeduction = nextInstallment(outstanding.filter((a) => !a.start_date || a.start_date <= today))
+  const agreedCount = outstanding.filter((a) => a.active && !(Number(a.amount_per_period) > 0)).length
   const viewed = advances.find((a) => a.id === viewing) ?? null
 
   return (
     <div>
       <PageHeader
         title="Cash Advances"
-        subtitle="Interest-free advances repaid from the next payrolls: each finalized payroll deducts the installment, never more than the net pay, and the payroll that includes a separation takes the rest."
+        subtitle="Interest-free advances repaid from the next payrolls: each finalized payroll deducts the installment — or the amount set for that payroll in its draft — never more than the net pay, and the payroll that includes a separation takes the rest."
         actions={
           <>
             <Button variant="secondary" onClick={exportCsv} disabled={shownAdvances.length === 0}>
@@ -215,7 +217,7 @@ function Advances({ entity }: { entity: Entity }) {
 
       <StatGroup className="mb-6">
         <StatCard label="Outstanding" value={money(totalOwed)} sub={`${plural(owing, 'employee')} repaying`} icon={<Wallet />} />
-        <StatCard label="Collected per payroll" value={money(nextDeduction)} sub="current installments, capped at each balance" icon={<HandCoins />} />
+        <StatCard label="Collected per payroll" value={money(nextDeduction)} sub={agreedCount ? `installments + ${plural(agreedCount, 'advance')} set each payroll` : 'current installments, capped at each balance'} icon={<HandCoins />} />
         <StatCard label="Requests waiting" value={pending.length} sub={pending.length ? 'review under Requests' : 'none'} icon={<Hourglass />} tone={pending.length ? 'warn' : 'default'} />
       </StatGroup>
 
@@ -367,7 +369,7 @@ function AdvanceRow({ advance: a, today, onOpen }: { advance: Advance; today: st
           </div>
           <div>
             <dt className="text-xs text-slate-500">Per payroll</dt>
-            <dd className="font-semibold text-ink-900">{money(Number(a.amount_per_period))}</dd>
+            <dd className="font-semibold text-ink-900">{Number(a.amount_per_period) > 0 ? money(Number(a.amount_per_period)) : 'Set each payroll'}</dd>
           </div>
           <div>
             <dt className="text-xs text-slate-500">Balance</dt>
@@ -413,6 +415,8 @@ function RecordAdvanceModal({
     employeeId: request?.employee_id ?? (employees.some((e) => e.id === employeeId) ? employeeId! : ''),
     amount: request ? String(Number(request.amount)) : '',
     perPayroll: request ? String(Number(request.per_payroll)) : '',
+    /** no fixed installment: each payroll deducts what is set for it */
+    agreed: false,
     releasedOn: today,
     firstDeduction: today,
     method: 'cash' as PaymentMethod,
@@ -423,13 +427,13 @@ function RecordAdvanceModal({
   const [busy, setBusy] = useState(false)
   const person: Person | undefined = request?.employees ?? employees.find((e) => e.id === f.employeeId)
   const amount = round2(Number(f.amount) || 0)
-  const per = round2(Number(f.perPayroll) || 0)
+  const per = f.agreed ? 0 : round2(Number(f.perPayroll) || 0)
   const payrolls = payrollsToRepay(amount, per)
   const problem = !person
     ? 'Pick the employee.'
     : amount <= 0
       ? 'Enter the amount released.'
-      : per <= 0
+      : !f.agreed && per <= 0
         ? 'Enter how much to deduct per payroll.'
         : per > amount
           ? "The deduction per payroll can't be more than the advance."
@@ -442,7 +446,7 @@ function RecordAdvanceModal({
                 : ''
 
   function printForm() {
-    if (!person || amount <= 0 || per <= 0) {
+    if (!person || amount <= 0 || (!f.agreed && per <= 0)) {
       toast('error', 'Fill in the employee, the amount and the deduction per payroll first.')
       return
     }
@@ -494,7 +498,12 @@ function RecordAdvanceModal({
         })
         if (error) throw error
       }
-      toast('success', `Cash advance recorded: ${money(per)} comes off each payroll from the ${fmtDate(f.firstDeduction)} cutoff.`)
+      toast(
+        'success',
+        per > 0
+          ? `Cash advance recorded: ${money(per)} comes off each payroll from the ${fmtDate(f.firstDeduction)} cutoff.`
+          : `Cash advance recorded: set what each payroll deducts in its draft (Pay Runs → the draft → Cash advances & loans), from the ${fmtDate(f.firstDeduction)} cutoff.`,
+      )
       onSaved()
     } catch (err) {
       toast('error', errorMessage(err, 'Could not record the advance'))
@@ -530,10 +539,19 @@ function RecordAdvanceModal({
           <Field label="Amount released (PHP)">
             <Input type="number" inputMode="decimal" min={0} step="0.01" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
           </Field>
-          <Field label="Deduct per payroll (PHP)">
-            <Input type="number" inputMode="decimal" min={0} step="0.01" value={f.perPayroll} onChange={(e) => setF({ ...f, perPayroll: e.target.value })} />
-          </Field>
+          {!f.agreed && (
+            <Field label="Deduct per payroll (PHP)">
+              <Input type="number" inputMode="decimal" min={0} step="0.01" value={f.perPayroll} onChange={(e) => setF({ ...f, perPayroll: e.target.value })} />
+            </Field>
+          )}
         </div>
+        <Toggle checked={f.agreed} onChange={(agreed) => setF({ ...f, agreed })} label="No fixed installment: agree on the amount each payroll" />
+        {f.agreed ? (
+          <p className="-mt-2 text-xs text-slate-500">
+            Each payroll deducts only the amount you set for it in its draft (Pay Runs → the draft → Cash advances &amp;
+            loans); nothing is deducted until you do. The payroll that includes a separation takes the whole balance.
+          </p>
+        ) : (
         <div className="-mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
           {payrolls > 0 ? <span>Repaid in about {plural(payrolls, 'payroll')}.</span> : <span>Spread over:</span>}
           {[1, 2, 3, 4, 6].map((n) => (
@@ -548,6 +566,7 @@ function RecordAdvanceModal({
             </button>
           ))}
         </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Released on">
             <Input type="date" value={f.releasedOn} onChange={(e) => setF({ ...f, releasedOn: e.target.value, firstDeduction: f.firstDeduction < e.target.value ? e.target.value : f.firstDeduction })} />
@@ -688,7 +707,7 @@ function AdvanceDetailModal({
               <dd className="font-semibold text-ink-900">
                 {editingPer === null ? (
                   <span className="flex items-center gap-1.5">
-                    {money(Number(a.amount_per_period))}
+                    {Number(a.amount_per_period) > 0 ? money(Number(a.amount_per_period)) : 'Set each payroll'}
                     {balance > 0 && (
                       <IconButton size="sm" label="Change the deduction per payroll" onClick={() => setEditingPer(String(Number(a.amount_per_period)))}>
                         <Pencil className="size-3.5" />
@@ -697,14 +716,15 @@ function AdvanceDetailModal({
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5">
-                    <Input type="number" min={0} step="0.01" aria-label="Deduction per payroll" value={editingPer} onChange={(e) => setEditingPer(e.target.value)} className="w-28" />
+                    <Input type="number" min={0} step="0.01" aria-label="Deduction per payroll (0 = set in each payroll)" title="0 = no fixed installment: set the amount in each payroll" value={editingPer} onChange={(e) => setEditingPer(e.target.value)} className="w-28" />
                     <Button
                       size="sm"
                       disabled={busy}
                       onClick={async () => {
                         const v = round2(Number(editingPer))
-                        if (!(v > 0)) return toast('error', 'Enter an amount above zero.')
-                        if (await write(() => supabase.from('recurring_deductions').update({ amount_per_period: v }).eq('id', a.id), `Now ${money(v)} per payroll.`)) setEditingPer(null)
+                        if (editingPer.trim() === '' || !(v >= 0)) return toast('error', 'Enter the amount per payroll (0 = no fixed installment).')
+                        const ok = v > 0 ? `Now ${money(v)} per payroll.` : 'No fixed installment: set the amount in each payroll draft.'
+                        if (await write(() => supabase.from('recurring_deductions').update({ amount_per_period: v }).eq('id', a.id), ok)) setEditingPer(null)
                       }}
                     >
                       Save

@@ -25,7 +25,7 @@ export function sssMsc(monthlySalary: number, t: SssTableData): number {
 
 /**
  * SSS contribution for one month. MSC up to `mpf_threshold` funds the regular
- * program; the portion above it funds the Mandatory Provident Fund (WISP).
+ * program; the portion above it funds the Mandatory Provident Fund (WISP, now the MySSS Pension Booster).
  * The employer additionally pays Employees' Compensation (EC).
  */
 export function computeSss(monthlySalary: number, t: SssTableData): SssComputation {

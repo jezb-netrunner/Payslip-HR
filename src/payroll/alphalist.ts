@@ -1,4 +1,4 @@
-// BIR Form 1604-C alphalist rows (RMC 73-2019 / RMC 160-2022 layout:
+// BIR Form 1604-C alphalist rows (RMC 73-2019 layout:
 // Schedule 1 = employees, Schedule 2 = minimum wage earners) built from a
 // client's finalized payslips for a calendar year. The figures mirror BIR
 // Form 2316; the payroll officer keys or imports them into the BIR

@@ -4,10 +4,11 @@ import { ArrowRight, CalendarCheck, CalendarRange, Eye, HandCoins, Megaphone, Pi
 import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView'
 import { Avatar, Button, Card, Donut, EmptyState, LoadFailed, Modal, Spinner, StatCard, StatGroup } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Announcement, Entity, Holiday, LeaveRequest, LeaveType, Payslip, RecurringDeduction, TimeEntry } from '../../lib/db'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials } from '../../lib/format'
-import { nextInstallment } from '../../lib/advances'
+import { repaymentText } from '../../lib/advances'
 import { eligibleFrom, leaveDaysInYear, showsBalance, usableOn } from '../../lib/leave'
 import { endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -31,6 +32,8 @@ export default function MyDashboard() {
 
   const today = todayManila()
   const year = today.slice(0, 4)
+  // leave days that straddle New Year count the workdays of this year's schedule
+  const yearSchedule = useEmployeeSchedule(employee, `${year}-01-01`, `${year}-12-31`, { asEmployee: true })
   const month = today.slice(0, 7)
 
   const load = useCallback(async () => {
@@ -93,7 +96,7 @@ export default function MyDashboard() {
 
   const used: Record<string, number> = {}
   for (const r of leaves) {
-    const d = leaveDaysInYear(r, Number(year), employee.work_schedule.days, holidays)
+    const d = leaveDaysInYear(r, Number(year), yearSchedule.resolve ?? employee.work_schedule, holidays, types.find((t) => t.id === r.leave_type_id))
     if (d > 0) used[r.leave_type_id] = (used[r.leave_type_id] ?? 0) + d
   }
   const balances = types
@@ -187,7 +190,7 @@ export default function MyDashboard() {
             value={money(advances.reduce((t, a) => t + Number(a.balance), 0))}
             sub={
               <Link to="/me/advances" className="font-semibold text-brand-600">
-                {money(nextInstallment(advances.filter((a) => !a.start_date || a.start_date <= today)))} per payroll · details
+                {repaymentText(advances.filter((a) => !a.start_date || a.start_date <= today))} · details
               </Link>
             }
             icon={<HandCoins className="size-5" />}

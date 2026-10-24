@@ -299,7 +299,7 @@ function AddClientModal({
           </Field>
           <Field label="Wage order reference">
             <Input
-              placeholder="e.g. WO NCR-27, eff. 25 Jul 2026"
+              placeholder="e.g. WO NCR-28, eff. 26 Sep 2026"
               value={f.minimum_wage_reference}
               onChange={(e) => setF({ ...f, minimum_wage_reference: e.target.value })}
             />

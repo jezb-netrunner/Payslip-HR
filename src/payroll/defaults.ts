@@ -1,7 +1,8 @@
 // Canonical statutory table data used to seed `statutory_versions` and as
 // fixtures for engine tests. THE DATABASE IS THE SOURCE OF TRUTH at runtime —
-// the app always computes from the versioned rows in Supabase so the admin
-// can add new versions when the law changes without touching code.
+// the app always computes from the versioned rows in Supabase. Users never
+// edit them: a new version ships as a migration (README, "Updating the
+// statutory tables"), checked by the database before it applies.
 //
 // Figures verified against official sources as of August 2026:
 //  - SSS: RA 11199 schedule — 15% total (10% ER / 5% EE) effective Jan 2025,

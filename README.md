@@ -27,9 +27,10 @@ are refused; the Generate button makes random ones.
 - Clients: registered name, client code, TIN + branch code, RDO, address,
   withholding-agent category, top-withholding-agent flag, pay policy defaults
 - Admin users: create entity/company admins, assign clients, deactivate
-- Statutory tables editor: add a new version (effective date) of the WHT,
-  SSS, PhilHealth, Pag-IBIG or BIR annual table when a law changes — past
-  periods keep computing with the tables in force back then
+- Statutory tables (read-only): the WHT, SSS, PhilHealth, Pag-IBIG and BIR
+  annual tables in force and every past version, each with its legal basis,
+  source and the date it was last verified; a quick contribution check for
+  a sample salary; a yearly-check reminder on the dashboard
 - National holidays (clients add their own local holidays)
 - Dashboard across all clients
 
@@ -40,12 +41,23 @@ are refused; the Generate button makes random ones.
   career history, pay frequency, pay type, payment method (cash / bank /
   e-wallet / check), allowances with BIR classification, recurring deductions
   and loans, union dues, previous-employer and PERA data per tax year
+- **Schedules**: client shift templates (start, end, meal break, flexible
+  start, compressed-workweek days of up to 12 hours — DOLE Department
+  Advisory 02-04); each employee's weekly pattern is set *from a date on*
+  (earlier days, and anything already paid, keep the schedule they had);
+  a weekly roster changes single dates (a swapped shift, a moved rest day)
+  and warns when a week has no rest day (Labor Code Art. 91). Payroll
+  measures lateness, undertime, overtime and absences against each date's
+  own shift; a meal break under 60 minutes is paid time
 - **Time In / Out**: daily sheet (whole team, one day) and per-employee sheet
   (one person, a whole period) — admins key in time in/out (or fill the
   scheduled days from each employee's shift; Fill skips approved leaves and
   non-working holidays), split shifts as extra in/out pairs, with rest days,
   holidays and approved leaves shown; employees can only *request*
-  corrections. Attendance is locked once it has been paid in a finalized run
+  corrections. Attendance is locked once it has been paid in a finalized run.
+  A **Report** tab gives any period's totals per employee and each one's
+  daily time record (DTR), computed as payroll computes them, as PDF (with
+  signature lines) or CSV
 - Leaves: per-client leave types (seeded from statutory templates),
   per-employee credits, approvals that feed payroll, leaves filed by HR for
   an employee, and revoking an approved leave (until its days are paid).
@@ -59,9 +71,13 @@ are refused; the Generate button makes random ones.
   **bulk** (ticked employees or everyone: one PDF, a payslip per page, or a
   ZIP of single PDFs); **cash payout sheet** with bill/coin breakdown per
   employee and per run. Computing warns, per employee, about scheduled
-  workdays with no time in/out or leave (charged as absences)
+  workdays with no time in/out or leave (charged as absences). A draft can
+  set what it deducts for any cash advance or loan — the amount agreed for
+  that cutoff, or ₱0 to skip it — and the next payroll goes back to the usual
+  installment
 - **Cash Advances** ("bale"): record an advance when it is released, or
-  approve an employee's request, with the date the employee signed the
+  approve an employee's request (a fixed installment, or **no fixed
+  installment**: each payroll deducts what is set for it), with the date the employee signed the
   written authorization to deduct it (a printable agreement is built in;
   Labor Code Art. 113 and its IRR as amended by DOLE D.O. 195-2018). Advances
   are interest-free; each payroll deducts the agreed installment after tax,
@@ -73,9 +89,19 @@ are refused; the Generate button makes random ones.
   repayments → balance) are tracked; the database only lets the balance move
   through a finalized payroll or a recorded repayment
 - **Announcements** (pinned / expiring) shown on the employee portal
-- **BIR & Reports**: 1604-C alphalist Schedule 1 and Schedule 2 (MWEs), BIR
-  2316 working copies, 1604-C summary, 1601-C monthly remittance log,
-  SSS / PhilHealth / Pag-IBIG contribution reports
+- **BIR & Reports**: **Insights** — management reports from the app's own
+  records: payroll cost (what moved it, employer contributions, the 13th
+  month accruing), overtime (who, how routine, its full-time equivalent),
+  attendance (absence and late rates, weekday patterns, perfect
+  attendance), headcount and turnover (why people left, probation
+  deadlines, pay below the minimum wage setting), leave (and the cash value
+  of unused SIL), cash advances and loans (ageing, exposure, stalled
+  deductions) and a custom report of any payslip figures by month,
+  department, position, employee or pay type; each with key figures,
+  plain-language findings, charts with a table view, CSV and PDF, and its
+  settings in the link. Then the BIR side: 1604-C alphalist Schedule 1 and
+  Schedule 2 (MWEs), BIR 2316 working copies, 1604-C summary, 1601-C monthly
+  remittance log, SSS / PhilHealth / Pag-IBIG contribution reports
 - Client settings, audit log
 
 **Employee portal**
@@ -138,9 +164,10 @@ The app captures everything the annual information return needs:
   supplementary) so the 2316 / alphalist columns are summed, not guessed.
   Minimum wage earners' exempt package (basic, holiday, OT, ND, hazard) is
   kept separate, the ₱90,000 13th-month/other-benefits exemption is tracked
-  across the year, and an **annualizing run** (last payroll of the year, a
-  payroll that includes an employee's separation, or final pay) trues up
-  the year's tax
+  across the tax year (a bonus beyond what is left of it is taxed with the
+  payroll that pays it), and an **annualizing run** (the last payroll paid
+  in December, a payroll that includes an employee's separation, or final
+  pay) trues up the year's tax
 - 1601-C remittances (date, bank/agency, TRA/eROR/eAR, amounts) for the
   1604-C remittance schedule
 
@@ -155,22 +182,51 @@ key or import into the **BIR Alphalist Data Entry and Validation Module**,
 which produces the DAT file to submit; the return itself is filed through
 eBIRForms / eFPS.
 
-## Philippine statutory compliance (verified as of Aug 2026)
+## Philippine statutory compliance (verified Aug 2026, reviewed Oct 24, 2026)
 
 | Item | Basis | Implementation |
 |---|---|---|
 | Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward | Daily / weekly / semi-monthly / monthly tables + annual table for annualization, versioned in DB |
-| SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MPF/WISP above ₱20k; EC ₱10/₱30 | MSC bracket mapping + MPF split + EC, versioned in DB |
-| PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50 | Odd centavo carried by employer (official convention) |
-| Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | Capped computation |
-| 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap | Dedicated run type; cap tracked across the year |
-| OT / ND / premiums | Labor Code Arts. 86–94 | Per-day engine with computation trace |
-| Minimum wage | RA 6727 regional wage orders; MWE exemption RA 9504 | Per-client wage region and rate; MWE exempt package |
-| Holidays 2026 | Proclamations 1006 / 1189 / 1264 | National list + per-client local holidays |
+| SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MySSS Pension Booster (MPF) above ₱20k; EC ₱10/₱30; MSC on the month's actual compensation (Sec. 8(f)) | Earlier payrolls of a month deduct a provisional share on the rate; the month's closing payroll settles it on everything the month paid (OT, allowances), refunding any over-deduction |
+| PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50; employee share paid by the government for PWDs (RA 11228) and solo parents (RA 11861, Circular 2026-0015) | Odd centavo carried by employer (official convention); waiver per employee with dates |
+| Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | On basic salary plus allowances, capped |
+| 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap | Dedicated run type; cap tracked across the tax year; the excess taxed when paid |
+| OT / ND / premiums / holiday pay | Labor Code Arts. 86–94; IRR Book III Rule IV Secs. 6, 10 | Per-day engine with computation trace; an unworked regular holiday is paid after work or paid leave on the workday before it |
+| Hours of work & schedules | Art. 83 (8 hours), Art. 85 + IRR Book III Rule I §7 (meal ≥ 60 min unpaid; shorter meals and rests ≤ 20 min are hours worked), Art. 91 (weekly rest day), DOLE DA 02-04 (compressed workweek) | Each date measured against its own shift; compressed days regular up to the shift (max 12 h; ≤ 5 days and 48 h a week) |
+| Leaves | Art. 95 (SIL after 12 months), RA 11861 (solo parent, 6 months), RA 9710 (women, 6 months), RA 11210 (maternity 105 calendar days), RA 8187, RA 9262 | Service requirements enforced; maternity paid as the SSS benefit + salary differential (tax-exempt, RMC 105-2019), not as salary |
+| Deductions | Art. 113, IRR Book III Rule VIII §10 (DO 195-18) | Company loans, HMO and other deductions need the employee's written authorization date |
+| Minimum wage | RA 6727 regional wage orders (e.g. NCR-28, ₱755 from Sep 26, 2026); MWE exemption RA 9504; apprentices/learners 75% (Arts. 61, 73) | Per-client wage region and rate; MWE exempt package; payslip warnings when a rate is below the floor or an MWE is paid above the minimum |
+| Holidays | 2026: Proclamations 1006 / 1189 / 1264; 2027: Proclamation 1427 | National list + per-client local holidays |
 
 Statutory tables live in `statutory_versions`, **versioned by effective
-date**: a company admin adds a version when a law changes and payroll uses
-whichever version is in force for each period. No code changes.
+date**: payroll uses the version in force for each period (contributions)
+or pay date (withholding). As in commercial payroll software, the tables
+**ship with the software** rather than being typed in by users — see
+*Updating the statutory tables* below.
+
+### Updating the statutory tables (maintainers)
+
+The app's users can only read the tables; the database refuses writes from
+every API role. A change in the law ships as a migration:
+
+1. Confirm the change in the agency's own issuance (BIR revenue regulation,
+   SSS / PhilHealth / Pag-IBIG circular) and one more independent source;
+   note the effective date (versions start on the first of a month).
+2. Add a migration inserting the new version with `kind`,
+   `effective_from`, `description`, `legal_basis`, `source_url` (https) and
+   `verified_on`. The database checks the figures (rates in range, MSC
+   steps, tax brackets ascending with each base following from the one
+   before) and refuses a malformed version.
+3. Mirror it in `src/payroll/defaults.ts`, add test vectors from the
+   agency's own examples, and run `npm test` and `supabase/tests/run.sh`.
+4. Apply the migration, run the Supabase security advisors, and record the
+   change in MEMORY.md (*Verified 2026 PH statutory figures*).
+
+Versions that finalized payrolls may have used are frozen. Only a published
+mistake is corrected in place, deliberately: the correcting migration runs
+`set local statutory.correction = 'on'`, and the affected payrolls are
+reopened and recomputed. Re-check every table each January (the dashboard
+reminds company admins when this year's check is due).
 
 ## Internal controls
 
@@ -265,8 +321,9 @@ src/
   pages/employee/ # employee portal
   components/     # UI kit, shell, payslip view
   lib/            # supabase client, auth, client context, login codes, pay periods,
-                  # cash denominations, Manila-time utils, labels
-  pdf/            # payslip PDFs, cash advance agreement
+                  # cash denominations, Manila-time utils, labels, schedules,
+                  # management reports (insights.ts: pure aggregations + tests)
+  pdf/            # payslip PDFs, cash advance agreement, time and insight reports
 supabase/         # migrations + edge functions (source of truth for schema)
 MEMORY.md         # running memory log: session history, deployed state, lessons
 ```
@@ -275,9 +332,12 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
 
 - The BIR reports are working data for the BIR Alphalist module and
   eBIRForms; the app does not generate the DAT file or file returns.
-- Unworked regular-holiday pay qualification (presence on the preceding
-  workday) is simplified — the engine pays unless the employee is on unpaid
-  leave; see the computation trace notes.
+- The SSS maternity benefit and the salary differential are entered as
+  adjustments (the SSS figure comes from the SSS portal); payroll only stops
+  paying the leave days as salary and reminds you.
+- Whether a minimum wage earner's rest-day and special-day premiums are
+  tax-exempt like holiday pay is not settled in the sources checked; the app
+  treats them as exempt — confirm with your accountant.
 - De minimis ceilings are the admin's responsibility when classifying
   allowances as de minimis (current caps per RR 29-2025 are shown in the UI).
 - This software assists with compliance but is not legal advice — always

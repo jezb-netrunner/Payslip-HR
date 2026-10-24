@@ -1,7 +1,7 @@
 // Display labels and BIR codes shared across pages.
 
 import type { EmploymentStatus, PaymentMethod, SeparationReason } from './db'
-import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, PayFrequency, RoundingMode } from '../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, RoundingMode } from '../payroll/types'
 
 export const FREQUENCY_LABELS: Record<PayFrequency, string> = {
   weekly: 'Weekly',
@@ -76,7 +76,7 @@ export const ALLOWANCE_CATEGORY_LABELS: Record<AllowanceCategory, string> = {
   hazard: 'Hazard pay',
   representation: 'Representation (taxable)',
   transportation: 'Transportation (taxable)',
-  cola: 'COLA',
+  cola: 'COLA mandated by a wage order',
   housing: 'Fixed housing allowance (taxable)',
   other_taxable: 'Other taxable allowance',
   other_non_taxable: 'Other non-taxable compensation',
@@ -99,10 +99,16 @@ export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
   de_minimis: 'De minimis',
   representation: 'Representation',
   transportation: 'Transportation',
-  cola: 'COLA',
+  cola: 'COLA (wage order)',
   housing: 'Housing allowance',
   other_taxable: 'Other taxable',
   other_non_taxable: 'Other non-taxable',
+}
+
+/** RA 11210 maternity pay, paid as one-time earnings (both tax-exempt, RMC 105-2019). */
+export const MATERNITY_BENEFIT_LABELS: Record<MaternityBenefit, string> = {
+  sss_maternity: 'SSS maternity benefit (tax-exempt)',
+  maternity_differential: 'Maternity salary differential (tax-exempt, counts for 13th month)',
 }
 
 /** Wage-board regions (for minimum wage and the MWE alphalist). */
@@ -138,4 +144,18 @@ export const RUN_TYPE_LABELS: Record<string, string> = {
   thirteenth_month: '13th month pay',
   special: 'Special / off-cycle',
   final_pay: 'Final pay',
+}
+
+/** The solo-parent PhilHealth rule's first day (PhilHealth Circular 2026-0015). */
+export const SOLO_PARENT_PHILHEALTH_FROM = '2026-09-26'
+
+/** Why a PhilHealth employee-share waiver can't be saved ('' = fine). */
+export function philhealthWaiverProblem(kind: string, from: string, until: string): string {
+  if (!kind) return ''
+  if (!from) return 'Enter the date the PhilHealth employee share stops being deducted.'
+  if (until && until < from) return 'The PhilHealth waiver ends before it starts.'
+  if (kind === 'solo_parent' && from < SOLO_PARENT_PHILHEALTH_FROM) {
+    return 'For solo parents the government pays the PhilHealth employee share from Sep 26, 2026 (PhilHealth Circular 2026-0015).'
+  }
+  return ''
 }

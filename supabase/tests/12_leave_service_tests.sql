@@ -31,7 +31,9 @@ grant execute on function pg_temp.check(boolean, text) to authenticated, anon, s
 \echo '--- 12.1 SIL needs 12 months of service; templates carry it to new clients'
 select pg_temp.check((select min_service_months from leave_types where entity_id is null and code = 'SIL') = 12, 'SIL template: 12 months');
 select pg_temp.check((select bool_and(min_service_months = 12) from leave_types where code = 'SIL'), 'every client''s SIL: 12 months');
-select pg_temp.check((select bool_and(min_service_months = 0) from leave_types where code <> 'SIL'), 'other leaves: no requirement');
+-- Solo Parent Leave and Special Leave for Women: six months (RA 11861 Sec. 8; RA 9710 Sec. 18)
+select pg_temp.check((select bool_and(min_service_months = 6) from leave_types where code in ('SPL', 'MCW')), 'SPL and MCW: 6 months');
+select pg_temp.check((select bool_and(min_service_months = 0) from leave_types where code not in ('SIL', 'SPL', 'MCW')), 'other leaves: no requirement');
 
 insert into auth.users (id, email, raw_app_meta_data) values (:da, 'da@delta.test', '{"role":"entity_admin"}');
 begin;

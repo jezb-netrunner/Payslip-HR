@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, FileText, Landmark, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th, StatGroup } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees, getStatutoryTables } from '../../lib/api'
@@ -13,13 +13,15 @@ import { supabase } from '../../lib/supabase'
 import { alphalistCsv, buildAlphalist, type AlphalistRow, type YearEndRate } from '../../payroll/alphalist'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
+import Insights from './Insights'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
 
 export default function Reports() {
   const { entity } = useEntity()
   const { isCompanyAdmin } = useAuth()
-  const [tab, setTab] = useState('alphalist')
+  // management reports first
+  const [tab, setTab] = useState('insights')
   const [year, setYear] = useState(() => {
     const t = todayManila()
     // January: last year's 1604-C is what's due
@@ -33,15 +35,18 @@ export default function Reports() {
         title="BIR & Reports"
         subtitle={`${entity.name} · TIN ${fmtTin(entity.tin, entity.tin_branch_code) || 'not set'} · RDO ${entity.rdo_code || '—'}`}
         actions={
-          <Select value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-28">
-            {Array.from({ length: 6 }, (_, i) => thisYear - 5 + i).map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </Select>
+          tab !== 'insights' && (
+            <Select aria-label="Year" value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-28">
+              {Array.from({ length: 6 }, (_, i) => thisYear - 5 + i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </Select>
+          )
         }
       />
       <Tabs
         tabs={[
+          { key: 'insights', label: 'Insights', icon: <Lightbulb /> },
           { key: 'alphalist', label: 'Alphalist (1604-C schedules)', icon: <ListOrdered /> },
           { key: '1604c', label: '1604-C summary', icon: <FileText /> },
           { key: '1601c', label: '1601-C remittances', icon: <Landmark /> },
@@ -50,6 +55,7 @@ export default function Reports() {
         active={tab}
         onChange={setTab}
       />
+      {tab === 'insights' && <Insights key={entity.id} entity={entity} />}
       {tab === 'alphalist' && <Alphalist key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === '1604c' && <Summary1604C key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === '1601c' && <Remittances key={`${entity.id}${year}`} entity={entity} year={year} />}
@@ -252,7 +258,7 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
         )
       })}
       <p className="text-[11px] text-slate-400">
-        Layout follows the 1604-C alphalist (RMC 73-2019 / RMC 160-2022): Schedule 1 employees, Schedule 2 minimum
+        Layout follows the 1604-C alphalist (RMC 73-2019): Schedule 1 employees, Schedule 2 minimum
         wage earners, each figure as declared on BIR Form 2316. Key or import the CSV figures into the BIR Alphalist
         Data Entry and Validation Module (it generates the DAT file for eSubmission). Balance = tax due − tax withheld.
       </p>
@@ -277,8 +283,9 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
         ['Tax due', s.taxDue],
         ['Taxes withheld — present employer (as adjusted)', s.withheldAsAdjusted],
         ['Taxes withheld — previous employer', s.prevTaxWithheld],
-        ['5% tax credit (PERA Act of 2008)', s.peraCredit],
         ['Total amount of taxes withheld as adjusted', s.withheldAsAdjusted + s.prevTaxWithheld],
+        ['5% tax credit (PERA Act of 2008)', s.peraCredit],
+        ['Total taxes withheld', s.withheldAsAdjusted + s.prevTaxWithheld + s.peraCredit],
       ],
     ],
     [

@@ -1,15 +1,20 @@
+// Statutory tables, read-only. Tax and contribution tables ship with the
+// software: the maintainer verifies each version against the agency's
+// published table, the database checks its shape and figures, and it is
+// released as an update with its effective date (see README, "Updating the
+// statutory tables"). Nobody edits them here, so a typo can't misapply a rate;
+// a version finalized payrolls may have used is frozen in the database.
+
 import { useCallback, useEffect, useState } from 'react'
-import { Calculator, ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react'
-import { Badge, Button, Card, Field, Input, Modal, PageHeader, Spinner, TableShell, Td, Th } from '../../components/ui'
-import { useToast } from '../../components/toast'
-import { useAuth } from '../../lib/auth'
+import { Calculator, ExternalLink, ShieldCheck } from 'lucide-react'
+import { Badge, Card, Field, Input, LoadFailed, PageHeader, Spinner, TableShell, Td, Th } from '../../components/ui'
 import type { StatutoryVersion } from '../../lib/db'
+import { errorMessage } from '../../lib/errors'
 import { fmtDate, money } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
 import type { BirAnnualData, BirWhtData, PagibigData, PhilHealthData, SssTableData, TaxBracket } from '../../payroll/types'
-import { errorMessage } from '../../lib/errors'
 
 type Kind = StatutoryVersion['kind']
 
@@ -23,22 +28,64 @@ const kindLabels: Record<Kind, string> = {
 
 const KINDS: Kind[] = ['sss', 'philhealth', 'pagibig', 'bir_wht', 'bir_annual']
 
+/** The single figures of a table, for showing what a version changed. */
+const FIGURES: Partial<Record<Kind, { key: string; label: string; percent?: boolean }[]>> = {
+  sss: [
+    { key: 'rate_ee', label: 'Employee share', percent: true },
+    { key: 'rate_er', label: 'Employer share', percent: true },
+    { key: 'msc_min', label: 'Minimum MSC' },
+    { key: 'msc_max', label: 'Maximum MSC' },
+    { key: 'msc_step', label: 'MSC step' },
+    { key: 'mpf_threshold', label: 'MPF above MSC' },
+    { key: 'ec_er_low', label: 'EC below threshold' },
+    { key: 'ec_er_high', label: 'EC at/above threshold' },
+    { key: 'ec_threshold_msc', label: 'EC threshold MSC' },
+  ],
+  philhealth: [
+    { key: 'rate', label: 'Premium rate', percent: true },
+    { key: 'floor', label: 'Salary floor' },
+    { key: 'ceiling', label: 'Salary ceiling' },
+  ],
+  pagibig: [
+    { key: 'ee_rate_low', label: 'Employee rate, low earners', percent: true },
+    { key: 'low_threshold', label: 'Low-earner threshold' },
+    { key: 'ee_rate_high', label: 'Employee rate, others', percent: true },
+    { key: 'er_rate', label: 'Employer rate', percent: true },
+    { key: 'max_fund_salary', label: 'Maximum fund salary' },
+  ],
+  bir_annual: [{ key: 'other_benefits_exemption_cap', label: '13th month + other benefits exemption cap' }],
+}
+
+const pct = (v: number) => `${+(v * 100).toFixed(4)}%`
+const figure = (v: unknown, percent?: boolean) => (typeof v === 'number' ? (percent ? pct(v) : `₱${v.toLocaleString()}`) : '—')
+
+/** What a version changed from the one before it. */
+function changesFrom(prev: Pick<StatutoryVersion, 'kind' | 'data'>, v: Pick<StatutoryVersion, 'kind' | 'data'>): string[] {
+  const a = prev.data as Record<string, unknown>
+  const b = v.data as Record<string, unknown>
+  const out = (FIGURES[v.kind] ?? [])
+    .filter((f) => a[f.key] !== b[f.key])
+    .map((f) => `${f.label} ${figure(a[f.key], f.percent)} → ${figure(b[f.key], f.percent)}`)
+  const brackets = v.kind === 'bir_wht' ? ['daily', 'weekly', 'semi_monthly', 'monthly'] : v.kind === 'bir_annual' ? ['brackets'] : []
+  const changedTables = brackets.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
+  if (changedTables.length) out.push(`new ${changedTables.map((k) => k.replace('_', '-')).join(', ')} brackets`)
+  return out
+}
+
 export default function Statutory() {
-  const toast = useToast()
-  const { isCompanyAdmin } = useAuth()
-  const [versions, setVersions] = useState<StatutoryVersion[]>([])
-  const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<{ kind: Kind; version: Partial<StatutoryVersion> } | null>(null)
+  const [versions, setVersions] = useState<StatutoryVersion[] | null>(null)
+  const [loadError, setLoadError] = useState('')
   const [sample, setSample] = useState('25000')
 
   const load = useCallback(async () => {
-    const { data } = await supabase
+    setLoadError('')
+    const { data, error } = await supabase
       .from('statutory_versions')
       .select('*')
       .order('kind')
       .order('effective_from', { ascending: false })
-    setVersions((data ?? []) as StatutoryVersion[])
-    setLoading(false)
+    if (error) setLoadError(errorMessage(error, 'Could not load the statutory tables'))
+    else setVersions((data ?? []) as StatutoryVersion[])
   }, [])
 
   useEffect(() => {
@@ -46,159 +93,142 @@ export default function Statutory() {
   }, [load])
 
   const today = todayManila()
-  const current = (kind: Kind) => versions.find((v) => v.kind === kind && v.effective_from <= today)
+  if (loadError) return <LoadFailed message={loadError} onRetry={load} />
+  if (!versions) return <Spinner />
 
+  const current = (kind: Kind) => versions.find((v) => v.kind === kind && v.effective_from <= today)
   const sss = current('sss')?.data as SssTableData | undefined
   const ph = current('philhealth')?.data as PhilHealthData | undefined
   const pi = current('pagibig')?.data as PagibigData | undefined
   const wht = current('bir_wht')?.data as BirWhtData | undefined
   const salary = Number(sample) || 0
-
-  async function remove(v: StatutoryVersion) {
-    if (!confirm(`Delete the ${kindLabels[v.kind]} version effective ${fmtDate(v.effective_from)}? Draft payrolls recomputed afterwards use the remaining versions; finalized payslips are unaffected.`)) return
-    const { error } = await supabase.from('statutory_versions').delete().eq('id', v.id)
-    if (error) toast('error', error.message)
-    else {
-      toast('success', 'Version deleted (audit-logged).')
-      await load()
-    }
-  }
+  // the oldest check among the tables in force
+  const lastVerified = KINDS.map((k) => current(k)?.verified_on ?? '').sort()[0] || null
+  const reviewDue = !lastVerified || lastVerified < `${today.slice(0, 4)}-01-01`
 
   return (
     <div>
       <PageHeader
         title="Statutory Tables"
-        subtitle={
-          isCompanyAdmin
-            ? 'Versioned by effective date: payroll uses the version in force at each period end. When a law or circular changes a rate, add a new version — no code changes needed.'
-            : 'Maintained by your company admins. Payroll uses the version in force at each period end.'
-        }
+        subtitle="Maintained with the software and read-only here. Contribution tables apply by the period worked, tax tables by the pay date — each from its effective date on."
       />
 
-      {loading ? (
-        <Spinner />
-      ) : (
-        <div className="space-y-6">
-          <Card title="Quick check — contributions for a sample salary" icon={<Calculator />}>
-            <div className="flex flex-wrap items-end gap-4">
-              <Field label="Monthly basic salary (PHP)">
-                <Input type="number" value={sample} onChange={(e) => setSample(e.target.value)} className="w-44" />
-              </Field>
-              {sss && ph && pi && wht && salary > 0 && (() => {
-                const s = computeSss(salary, sss)
-                const p = computePhilHealth(salary, ph)
-                const g = computePagibig(salary, pi)
-                const monthlyEe = s.ee + s.mpfEe + p.ee + g.ee
-                const tax = computeWithholdingTax(salary - monthlyEe, 'monthly', wht)
-                return (
-                  <div className="grid w-full flex-1 grid-cols-2 gap-3 text-sm sm:w-auto sm:min-w-[28rem] sm:grid-cols-5">
-                    <div><p className="text-xs text-slate-400">SSS EE (MSC {s.msc.toLocaleString()})</p><p className="font-bold">{money(s.ee + s.mpfEe)}</p></div>
-                    <div><p className="text-xs text-slate-400">PhilHealth EE</p><p className="font-bold">{money(p.ee)}</p></div>
-                    <div><p className="text-xs text-slate-400">Pag-IBIG EE</p><p className="font-bold">{money(g.ee)}</p></div>
-                    <div><p className="text-xs text-slate-400">Monthly W/Tax</p><p className="font-bold">{money(tax)}</p></div>
-                    <div><p className="text-xs text-slate-400">Net (est.)</p><p className="font-bold text-brand-800">{money(salary - monthlyEe - tax)}</p></div>
-                  </div>
-                )
-              })()}
-            </div>
-          </Card>
+      <div className="space-y-6">
+        <Card title="How these tables are kept current" icon={<ShieldCheck />}>
+          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-600">
+            <li>
+              Each version is checked against the agency's published table (BIR revenue regulations, SSS, PhilHealth and
+              Pag-IBIG circulars) and released as a software update with its effective date and legal basis.
+            </li>
+            <li>
+              The database refuses a version with a malformed table or an out-of-range figure (for example a tax bracket
+              that doesn't follow from the one before it), and keeps every past version: earlier periods keep computing
+              with the figures in force then.
+            </li>
+            <li>
+              A version that finalized payrolls may have used is frozen. A change in the law arrives as a new version from
+              its effective date, and the draft payrolls it affects are marked for recomputing.
+            </li>
+            <li>
+              Rates usually change on January 1, or when an agency issues a new circular. If you learn of a change, tell
+              the system maintainer — the tables aren't typed in here, so a wrong figure can't slip in.
+            </li>
+          </ul>
+          <p className={`mt-3 text-xs font-semibold ${reviewDue ? 'text-amber-700' : 'text-slate-500'}`}>
+            {lastVerified ? `The tables in force were last verified on ${fmtDate(lastVerified)}.` : 'The tables in force have no verification date.'}
+            {reviewDue && ' This year’s check is due.'}
+          </p>
+        </Card>
 
-          {KINDS.map((kind) => {
-            const rows = versions.filter((v) => v.kind === kind)
-            const cur = current(kind)
-            return (
-              <Card
-                key={kind}
-                title={
-                  <span>
-                    {kindLabels[kind]}{' '}
-                    {cur && <Badge tone="green">in force since {fmtDate(cur.effective_from)}</Badge>}
-                  </span>
-                }
-                actions={
-                  isCompanyAdmin && (
-                    <Button
-                      variant="secondary"
-                      onClick={() =>
-                        setEditing({
-                          kind,
-                          version: {
-                            kind,
-                            data: structuredClone((rows[0] ?? cur)?.data ?? {}),
-                            description: '',
-                            source_url: '',
-                            effective_from: '',
-                          },
-                        })
-                      }
-                    >
-                      <Plus className="size-4" /> New version
-                    </Button>
-                  )
-                }
-              >
-                {cur ? <VersionDetail version={cur} /> : <p className="text-sm text-rose-600">No version in force — payroll cannot run.</p>}
-                {rows.length > 0 && (
-                  <div className="mt-3 border-t border-slate-100 pt-2">
-                    <p className="text-xs font-semibold text-slate-400">All versions</p>
-                    {rows.map((v) => (
-                      <div key={v.id} className="flex items-center justify-between gap-3 py-1 text-xs text-slate-500">
-                        <span>
-                          • Effective {fmtDate(v.effective_from)}
-                          {v.effective_from > today && <Badge tone="blue">upcoming</Badge>} — {v.description.slice(0, 110)}
+        <Card title="Quick check — contributions for a sample salary" icon={<Calculator />}>
+          <div className="flex flex-wrap items-end gap-4">
+            <Field label="Monthly basic salary (PHP)">
+              <Input type="number" value={sample} onChange={(e) => setSample(e.target.value)} className="w-44" />
+            </Field>
+            {sss && ph && pi && wht && salary > 0 && (() => {
+              const s = computeSss(salary, sss)
+              const p = computePhilHealth(salary, ph)
+              const g = computePagibig(salary, pi)
+              const monthlyEe = s.ee + s.mpfEe + p.ee + g.ee
+              const tax = computeWithholdingTax(salary - monthlyEe, 'monthly', wht)
+              return (
+                <div className="grid w-full flex-1 grid-cols-2 gap-3 text-sm sm:w-auto sm:min-w-[28rem] sm:grid-cols-5">
+                  <div><p className="text-xs text-slate-400">SSS EE (MSC {s.msc.toLocaleString()})</p><p className="font-bold">{money(s.ee + s.mpfEe)}</p></div>
+                  <div><p className="text-xs text-slate-400">PhilHealth EE</p><p className="font-bold">{money(p.ee)}</p></div>
+                  <div><p className="text-xs text-slate-400">Pag-IBIG EE</p><p className="font-bold">{money(g.ee)}</p></div>
+                  <div><p className="text-xs text-slate-400">Monthly W/Tax</p><p className="font-bold">{money(tax)}</p></div>
+                  <div><p className="text-xs text-slate-400">Net (est.)</p><p className="font-bold text-brand-800">{money(salary - monthlyEe - tax)}</p></div>
+                </div>
+              )
+            })()}
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            A month of basic pay only. Payroll takes SSS on the month's actual pay (overtime and allowances included,
+            settled on the month's last payroll) and Pag-IBIG on basic pay plus allowances.
+          </p>
+        </Card>
+
+        {KINDS.map((kind) => {
+          const rows = versions.filter((v) => v.kind === kind)
+          const cur = current(kind)
+          return (
+            <Card
+              key={kind}
+              title={
+                <span>
+                  {kindLabels[kind]} {cur && <Badge tone="green">in force since {fmtDate(cur.effective_from)}</Badge>}
+                </span>
+              }
+            >
+              {cur ? <VersionDetail version={cur} /> : <p className="text-sm text-rose-600">No version in force — payroll cannot run.</p>}
+              {rows.length > 0 && (
+                <div className="mt-3 border-t border-slate-100 pt-2">
+                  <p className="text-xs font-semibold text-slate-400">All versions</p>
+                  {rows.map((v, i) => {
+                    const prev = rows[i + 1]
+                    const changes = prev ? changesFrom(prev, v) : []
+                    return (
+                      <div key={v.id} className="py-1.5 text-xs text-slate-500">
+                        <p className="flex flex-wrap items-center gap-x-1.5">
+                          <span className="font-semibold text-slate-600">Effective {fmtDate(v.effective_from)}</span>
+                          {v.effective_from > today && <Badge tone="blue">upcoming</Badge>}
+                          {v.legal_basis && <span>· {v.legal_basis}</span>}
+                          {v.verified_on && <span>· verified {fmtDate(v.verified_on)}</span>}
                           {v.source_url && (
-                            <a href={v.source_url} target="_blank" rel="noreferrer" className="ml-1 inline-flex items-center text-brand-600" title="Source" aria-label="Open the source document">
-                              <ExternalLink className="size-3" />
+                            <a href={v.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand-600 hover:underline">
+                              source <ExternalLink className="size-3" />
                             </a>
                           )}
-                        </span>
-                        {isCompanyAdmin && (
-                          <span className="flex shrink-0 gap-2">
-                            <button type="button" onClick={() => setEditing({ kind, version: structuredClone(v) })} className="text-slate-400 hover:text-brand-700" title="Edit" aria-label={`Edit the version effective ${v.effective_from}`}>
-                              <Pencil className="size-3.5" />
-                            </button>
-                            {rows.length > 1 && (
-                              <button type="button" onClick={() => remove(v)} className="text-slate-300 hover:text-rose-500" title="Delete" aria-label={`Delete the version effective ${v.effective_from}`}>
-                                <Trash2 className="size-3.5" />
-                              </button>
-                            )}
-                          </span>
-                        )}
+                        </p>
+                        {changes.length > 0 && <p className="mt-0.5 text-slate-400">Changed: {changes.join('; ')}</p>}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
-            )
-          })}
-        </div>
-      )}
-
-      {editing && (
-        <VersionEditor
-          kind={editing.kind}
-          initial={editing.version}
-          onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null)
-            toast('success', 'Statutory table saved (audit-logged).')
-            await load()
-          }}
-        />
-      )}
+                    )
+                  })}
+                </div>
+              )}
+            </Card>
+          )
+        })}
+      </div>
     </div>
   )
 }
 
 function VersionDetail({ version }: { version: StatutoryVersion }) {
   const d = version.data
+  const head = (
+    <p className="text-sm text-slate-600">
+      {version.description}
+      {version.legal_basis && <span className="mt-0.5 block text-xs text-slate-400">Legal basis: {version.legal_basis}</span>}
+    </p>
+  )
   if (version.kind === 'sss') {
     const t = d as SssTableData
     return (
       <div className="text-sm text-slate-600">
-        <p>{version.description}</p>
+        {head}
         <div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-          <p>Rate: <b>{+((t.rate_ee + t.rate_er) * 100).toFixed(4)}%</b> (EE {+(t.rate_ee * 100).toFixed(4)}% / ER {+(t.rate_er * 100).toFixed(4)}%)</p>
+          <p>Rate: <b>{+((t.rate_ee + t.rate_er) * 100).toFixed(4)}%</b> (EE {pct(t.rate_ee)} / ER {pct(t.rate_er)})</p>
           <p>MSC: <b>₱{t.msc_min.toLocaleString()}–₱{t.msc_max.toLocaleString()}</b> (step ₱{t.msc_step})</p>
           <p>MPF above MSC: <b>₱{t.mpf_threshold.toLocaleString()}</b></p>
           <p>EC: <b>₱{t.ec_er_low}</b> / <b>₱{t.ec_er_high}</b> (MSC ≥ ₱{t.ec_threshold_msc.toLocaleString()})</p>
@@ -210,10 +240,10 @@ function VersionDetail({ version }: { version: StatutoryVersion }) {
     const t = d as PhilHealthData
     return (
       <div className="text-sm text-slate-600">
-        <p>{version.description}</p>
+        {head}
         <p className="mt-2 text-xs">
-          Rate <b>{+(t.rate * 100).toFixed(4)}%</b> of basic salary · floor <b>₱{t.floor.toLocaleString()}</b> ·
-          ceiling <b>₱{t.ceiling.toLocaleString()}</b> · split 50/50 (odd centavo to the employer)
+          Rate <b>{pct(t.rate)}</b> of basic salary · floor <b>₱{t.floor.toLocaleString()}</b> · ceiling{' '}
+          <b>₱{t.ceiling.toLocaleString()}</b> · split 50/50 (odd centavo to the employer)
         </p>
       </div>
     )
@@ -222,10 +252,10 @@ function VersionDetail({ version }: { version: StatutoryVersion }) {
     const t = d as PagibigData
     return (
       <div className="text-sm text-slate-600">
-        <p>{version.description}</p>
+        {head}
         <p className="mt-2 text-xs">
-          EE <b>{+(t.ee_rate_low * 100).toFixed(4)}%</b> (≤ ₱{t.low_threshold.toLocaleString()}) or <b>{+(t.ee_rate_high * 100).toFixed(4)}%</b> ·
-          ER <b>{+(t.er_rate * 100).toFixed(4)}%</b> · max fund salary <b>₱{t.max_fund_salary.toLocaleString()}</b>
+          EE <b>{pct(t.ee_rate_low)}</b> (≤ ₱{t.low_threshold.toLocaleString()}) or <b>{pct(t.ee_rate_high)}</b> · ER{' '}
+          <b>{pct(t.er_rate)}</b> · max fund salary <b>₱{t.max_fund_salary.toLocaleString()}</b>
         </p>
       </div>
     )
@@ -234,7 +264,7 @@ function VersionDetail({ version }: { version: StatutoryVersion }) {
     const t = d as BirWhtData
     return (
       <div>
-        <p className="mb-2 text-sm text-slate-600">{version.description}</p>
+        <div className="mb-2">{head}</div>
         <div className="grid gap-4 lg:grid-cols-3">
           <BracketTable title="Weekly" brackets={t.weekly} />
           <BracketTable title="Semi-monthly" brackets={t.semi_monthly} />
@@ -246,7 +276,7 @@ function VersionDetail({ version }: { version: StatutoryVersion }) {
   const t = d as BirAnnualData
   return (
     <div>
-      <p className="mb-2 text-sm text-slate-600">{version.description}</p>
+      <div className="mb-2">{head}</div>
       <BracketTable title="Annual" brackets={t.brackets} />
       <p className="mt-2 text-xs text-slate-500">
         13th month pay + other benefits tax-exempt cap: <b>₱{t.other_benefits_exemption_cap.toLocaleString()}</b>
@@ -272,259 +302,11 @@ function BracketTable({ title, brackets }: { title: string; brackets: TaxBracket
             <tr key={i}>
               <Td>₱{b.over.toLocaleString()}</Td>
               <Td className="text-right">₱{b.base.toLocaleString()}</Td>
-              <Td className="text-right">{+(b.rate * 100).toFixed(4)}%</Td>
+              <Td className="text-right">{pct(b.rate)}</Td>
             </tr>
           ))}
         </tbody>
       </TableShell>
     </div>
-  )
-}
-
-// ---------- structured editor (company admins) ----------
-
-type NumField = { key: string; label: string; percent?: boolean }
-
-const SCALAR_FIELDS: Partial<Record<Kind, NumField[]>> = {
-  sss: [
-    { key: 'rate_ee', label: 'Employee share', percent: true },
-    { key: 'rate_er', label: 'Employer share', percent: true },
-    { key: 'msc_min', label: 'Minimum MSC (₱)' },
-    { key: 'msc_max', label: 'Maximum MSC (₱)' },
-    { key: 'msc_step', label: 'MSC step (₱)' },
-    { key: 'mpf_threshold', label: 'MPF/WISP above MSC (₱)' },
-    { key: 'ec_er_low', label: 'EC (employer) below threshold (₱)' },
-    { key: 'ec_er_high', label: 'EC (employer) at/above threshold (₱)' },
-    { key: 'ec_threshold_msc', label: 'EC threshold MSC (₱)' },
-  ],
-  philhealth: [
-    { key: 'rate', label: 'Premium rate (total)', percent: true },
-    { key: 'floor', label: 'Salary floor (₱)' },
-    { key: 'ceiling', label: 'Salary ceiling (₱)' },
-  ],
-  pagibig: [
-    { key: 'ee_rate_low', label: 'Employee rate, low earners', percent: true },
-    { key: 'low_threshold', label: 'Low-earner threshold (₱/month)' },
-    { key: 'ee_rate_high', label: 'Employee rate, others', percent: true },
-    { key: 'er_rate', label: 'Employer rate', percent: true },
-    { key: 'max_fund_salary', label: 'Maximum fund salary (₱)' },
-  ],
-  bir_annual: [{ key: 'other_benefits_exemption_cap', label: '13th month + other benefits exemption cap (₱)' }],
-}
-
-const BRACKET_SETS: Partial<Record<Kind, { key: string; label: string }[]>> = {
-  bir_wht: [
-    { key: 'daily', label: 'Daily' },
-    { key: 'weekly', label: 'Weekly' },
-    { key: 'semi_monthly', label: 'Semi-monthly' },
-    { key: 'monthly', label: 'Monthly' },
-  ],
-  bir_annual: [{ key: 'brackets', label: 'Annual' }],
-}
-
-const pctIn = (v: number) => String(+(v * 100).toFixed(6))
-const pctOut = (s: string) => +(Number(s) / 100).toFixed(8)
-
-function validate(kind: Kind, data: Record<string, unknown>): string | null {
-  for (const f of SCALAR_FIELDS[kind] ?? []) {
-    const v = data[f.key]
-    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return `${f.label} must be a number ≥ 0.`
-    if (f.percent && v > 1) return `${f.label} must be at most 100%.`
-  }
-  for (const set of BRACKET_SETS[kind] ?? []) {
-    const rows = data[set.key] as TaxBracket[] | undefined
-    if (!rows || rows.length === 0) return `${set.label} table needs at least one bracket.`
-    if (rows[0].over !== 0) return `${set.label} table must start at ₱0.`
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i]
-      if ([r.over, r.base, r.rate].some((x) => !Number.isFinite(x) || x < 0)) return `${set.label} bracket ${i + 1} has an invalid number.`
-      if (r.rate > 1) return `${set.label} bracket ${i + 1}: rate must be at most 100%.`
-      if (i > 0 && r.over <= rows[i - 1].over) return `${set.label} brackets must be in ascending order.`
-    }
-  }
-  if (kind === 'sss') {
-    const d = data as unknown as SssTableData
-    if (d.msc_min > d.msc_max || d.msc_step <= 0) return 'Check the MSC range and step.'
-  }
-  if (kind === 'philhealth') {
-    const d = data as unknown as PhilHealthData
-    if (d.floor > d.ceiling) return 'The salary floor must not exceed the ceiling.'
-  }
-  return null
-}
-
-function VersionEditor({
-  kind,
-  initial,
-  onClose,
-  onSaved,
-}: {
-  kind: Kind
-  initial: Partial<StatutoryVersion>
-  onClose: () => void
-  onSaved: () => Promise<void>
-}) {
-  const toast = useToast()
-  const [meta, setMeta] = useState({
-    effective_from: initial.effective_from ?? '',
-    description: initial.description ?? '',
-    source_url: initial.source_url ?? '',
-  })
-  const data = (initial.data as Record<string, unknown>) ?? {}
-  // percent fields are edited as text so partial input ("0.") survives
-  const [scalarText, setScalarText] = useState<Record<string, string>>(() => {
-    const out: Record<string, string> = {}
-    for (const f of SCALAR_FIELDS[kind] ?? []) {
-      const v = Number((initial.data as Record<string, number> | undefined)?.[f.key] ?? 0)
-      out[f.key] = f.percent ? pctIn(v) : String(v)
-    }
-    return out
-  })
-  // bracket rows are edited as text too, parsed on save
-  type BracketText = { over: string; base: string; rate: string }
-  const [brackets, setBrackets] = useState<Record<string, BracketText[]>>(() => {
-    const out: Record<string, BracketText[]> = {}
-    for (const set of BRACKET_SETS[kind] ?? []) {
-      const rows = ((initial.data as Record<string, TaxBracket[]> | undefined)?.[set.key] ?? []) as TaxBracket[]
-      out[set.key] = rows.map((b) => ({ over: String(b.over), base: String(b.base), rate: pctIn(b.rate) }))
-    }
-    return out
-  })
-  const [busy, setBusy] = useState(false)
-
-  function setBracket(key: string, i: number, field: keyof BracketText, value: string) {
-    setBrackets({ ...brackets, [key]: brackets[key].map((r, j) => (j === i ? { ...r, [field]: value } : r)) })
-  }
-
-  async function save() {
-    if (!meta.effective_from) return toast('error', 'Effective date is required.')
-    if (!meta.description.trim()) return toast('error', 'Describe the law or circular (e.g. "SSS Circular 2027-001").')
-    const merged: Record<string, unknown> = { ...data }
-    for (const f of SCALAR_FIELDS[kind] ?? []) {
-      const raw = scalarText[f.key] ?? ''
-      merged[f.key] = raw.trim() === '' ? NaN : f.percent ? pctOut(raw) : Number(raw)
-    }
-    for (const set of BRACKET_SETS[kind] ?? []) {
-      merged[set.key] = (brackets[set.key] ?? []).map((r) => ({
-        over: r.over.trim() === '' ? NaN : Number(r.over),
-        base: r.base.trim() === '' ? NaN : Number(r.base),
-        rate: r.rate.trim() === '' ? NaN : pctOut(r.rate),
-      }))
-    }
-    const problem = validate(kind, merged)
-    if (problem) return toast('error', problem)
-    setBusy(true)
-    try {
-      const payload = {
-        kind,
-        effective_from: meta.effective_from,
-        description: meta.description.trim(),
-        source_url: meta.source_url.trim() || null,
-        data: merged,
-      }
-      const { error } = initial.id
-        ? await supabase.from('statutory_versions').update(payload).eq('id', initial.id)
-        : await supabase.from('statutory_versions').insert(payload)
-      if (error) throw error
-      await onSaved()
-    } catch (err) {
-      const msg = errorMessage(err, 'Failed')
-      toast('error', /kind_effective_from_key|unique/.test(msg) ? 'A version with that effective date already exists — edit it instead.' : msg)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title={`${initial.id ? 'Edit' : 'New'} version — ${kindLabels[kind]}`} wide>
-      <div className="space-y-5">
-        {initial.id ? (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            Editing corrects this version in place. Draft payrolls pick it up when recomputed; finalized payslips keep
-            the figures they were computed with. For an actual change in the law, add a new version instead.
-          </p>
-        ) : (
-          <p className="rounded-lg bg-brand-50 px-3 py-2 text-xs text-brand-800">
-            Prefilled from the latest version. Change what the new law or circular changes and set the date it takes
-            effect — earlier periods keep computing with the old figures.
-          </p>
-        )}
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Effective from">
-            <Input type="date" value={meta.effective_from} onChange={(e) => setMeta({ ...meta, effective_from: e.target.value })} />
-          </Field>
-          <Field label="Legal basis / description" className="sm:col-span-2">
-            <Input value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} />
-          </Field>
-          <Field label="Source URL" className="sm:col-span-3">
-            <Input value={meta.source_url} onChange={(e) => setMeta({ ...meta, source_url: e.target.value })} />
-          </Field>
-        </div>
-
-        {(SCALAR_FIELDS[kind] ?? []).length > 0 && (
-          <div className="grid gap-3 sm:grid-cols-3">
-            {(SCALAR_FIELDS[kind] ?? []).map((f) => (
-              <Field key={f.key} label={f.percent ? `${f.label} (%)` : f.label}>
-                <Input
-                  inputMode="decimal"
-                  value={scalarText[f.key] ?? ''}
-                  onChange={(e) => setScalarText({ ...scalarText, [f.key]: e.target.value })}
-                />
-              </Field>
-            ))}
-          </div>
-        )}
-
-        {(BRACKET_SETS[kind] ?? []).map((set) => (
-          <div key={set.key}>
-            <div className="mb-1 flex items-center justify-between">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{set.label} brackets</p>
-              <button
-                className="text-xs font-semibold text-brand-600"
-                onClick={() => setBrackets({ ...brackets, [set.key]: [...(brackets[set.key] ?? []), { over: '', base: '', rate: '' }] })}
-              >
-                + Add bracket
-              </button>
-            </div>
-            <TableShell>
-              <thead className="bg-slate-50">
-                <tr>
-                  <Th>Compensation over (₱)</Th>
-                  <Th>Base tax (₱)</Th>
-                  <Th>Rate on excess (%)</Th>
-                  <Th></Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(brackets[set.key] ?? []).map((b, i) => (
-                  <tr key={i}>
-                    <Td><Input inputMode="decimal" value={b.over} onChange={(e) => setBracket(set.key, i, 'over', e.target.value)} /></Td>
-                    <Td><Input inputMode="decimal" value={b.base} onChange={(e) => setBracket(set.key, i, 'base', e.target.value)} /></Td>
-                    <Td><Input inputMode="decimal" value={b.rate} onChange={(e) => setBracket(set.key, i, 'rate', e.target.value)} /></Td>
-                    <Td>
-                      {i > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setBrackets({ ...brackets, [set.key]: brackets[set.key].filter((_, j) => j !== i) })}
-                          className="text-slate-300 hover:text-rose-500"
-                          title="Remove bracket"
-                          aria-label="Remove bracket"
-                        >
-                          <Trash2 className="size-4" />
-                        </button>
-                      )}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableShell>
-          </div>
-        ))}
-
-        <Button className="w-full" disabled={busy} onClick={save}>
-          {busy ? 'Saving…' : initial.id ? 'Save changes' : 'Add version'}
-        </Button>
-      </div>
-    </Modal>
   )
 }

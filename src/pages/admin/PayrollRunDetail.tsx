@@ -49,11 +49,12 @@ import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib
 import { useEntity } from '../../lib/entity'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
-import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
+import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
+import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
-import { round2 } from '../../payroll/types'
+import { round2, type MaternityBenefit } from '../../payroll/types'
 
 // Categorical chart colours in fixed order (validated: lightness, chroma,
 // colour-blind and normal-vision separation; yellow sits below 3:1, so every
@@ -302,8 +303,8 @@ export default function PayrollRunDetail() {
       <>
         {stale && (
           <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-            Attendance, adjustments, leave or pay settings changed since this draft was computed (or the last
-            computation did not finish). Recompute the draft before finalizing.
+            Attendance, schedules, adjustments, deduction amounts, leave or pay settings changed since this draft
+            was computed (or the last computation did not finish). Recompute the draft before finalizing.
           </p>
         )}
         {hasWarnings && (
@@ -592,7 +593,11 @@ export default function PayrollRunDetail() {
                         <span className="text-slate-500"> · {a.label}</span>{' '}
                         <Badge tone={a.kind === 'earning' ? 'green' : 'red'}>{a.kind}</Badge>{' '}
                         <span className="text-xs text-slate-400">
-                          {a.kind === 'earning' ? BIR_BUCKET_LABELS[a.category as keyof typeof BIR_BUCKET_LABELS] : a.category.replaceAll('_', ' ')}
+                          {a.benefit
+                            ? MATERNITY_BENEFIT_LABELS[a.benefit]
+                            : a.kind === 'earning'
+                              ? BIR_BUCKET_LABELS[a.category as keyof typeof BIR_BUCKET_LABELS]
+                              : a.category.replaceAll('_', ' ')}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -611,6 +616,8 @@ export default function PayrollRunDetail() {
               )}
             </Card>
           )}
+
+          {!isThirteenth && <RunDeductionsCard run={run} covered={covered} slips={slips} onChanged={load} />}
 
           {computed && (
             <div className="grid gap-6 2xl:grid-cols-2">
@@ -674,6 +681,14 @@ export default function PayrollRunDetail() {
           <div className="rounded-xl bg-slate-200/50 p-4">
             <p className="text-sm font-semibold text-ink-900">{tip.title}</p>
             <p className="mt-1 text-sm text-slate-600">{tip.body}</p>
+            {!isThirteenth && (
+              <Link
+                to={`/admin/timesheets?tab=report&from=${run.period_start}&to=${run.period_end}${run.pay_frequency ? `&frequency=${run.pay_frequency}` : ''}`}
+                className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline"
+              >
+                <Clock className="size-4" /> Time report for this period
+              </Link>
+            )}
           </div>
           {notices && <div className="hidden space-y-4 xl:block">{notices}</div>}
           <dl className="space-y-3 rounded-xl border border-slate-200/80 bg-white p-4 text-sm">
@@ -877,12 +892,20 @@ function AdjustmentModal({
     label: '',
     amount: '',
     category: initialKind === 'earning' ? 'other_taxable' : 'other',
+    authorized: '',
   })
   const [busy, setBusy] = useState(false)
+  // maternity pay is picked like a classification: other non-taxable, marked with which one
+  const benefit = f.kind === 'earning' && f.category.startsWith('benefit:') ? (f.category.slice(8) as MaternityBenefit) : null
+  const needsAuthorization = f.kind === 'deduction' && f.category === 'other'
 
   async function save() {
     if (!employees.some((e) => e.id === f.employee_id) || !f.label.trim() || !(Number(f.amount) > 0)) {
       toast('error', 'Employee, label and a positive amount are required.')
+      return
+    }
+    if (needsAuthorization && !f.authorized) {
+      toast('error', 'Enter the date the employee signed the written authorization for this deduction (Labor Code Art. 113).')
       return
     }
     setBusy(true)
@@ -893,7 +916,9 @@ function AdjustmentModal({
       kind: f.kind,
       label: f.label.trim(),
       amount: Number(f.amount),
-      category: f.kind === 'earning' ? f.category : f.category === 'union_dues' ? 'union_dues' : 'other',
+      category: f.kind === 'earning' ? (benefit ? 'other_non_taxable' : f.category) : f.category === 'union_dues' ? 'union_dues' : 'other',
+      benefit,
+      authorized_on: needsAuthorization ? f.authorized : null,
       created_by: userData.user?.id ?? null,
     })
     setBusy(false)
@@ -931,9 +956,16 @@ function AdjustmentModal({
         <Field label={f.kind === 'earning' ? 'BIR classification' : 'Deduction kind'}>
           <Select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
             {f.kind === 'earning' ? (
-              EARNING_CATEGORIES.map((c) => (
-                <option key={c} value={c}>{BIR_BUCKET_LABELS[c]}</option>
-              ))
+              <>
+                {EARNING_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{BIR_BUCKET_LABELS[c]}</option>
+                ))}
+                <optgroup label="Maternity leave (RA 11210)">
+                  {(Object.keys(MATERNITY_BENEFIT_LABELS) as MaternityBenefit[]).map((b) => (
+                    <option key={b} value={`benefit:${b}`}>{MATERNITY_BENEFIT_LABELS[b]}</option>
+                  ))}
+                </optgroup>
+              </>
             ) : (
               <>
                 <option value="other">Other deduction</option>
@@ -942,10 +974,19 @@ function AdjustmentModal({
             )}
           </Select>
         </Field>
+        {needsAuthorization && (
+          <Field
+            label="Employee's written authorization signed on"
+            hint="Required: a deduction the law doesn't provide for needs the employee's written authorization (Labor Code Art. 113). Keep the signed copy on file."
+          >
+            <Input type="date" value={f.authorized} onChange={(e) => setF({ ...f, authorized: e.target.value })} />
+          </Field>
+        )}
         {f.kind === 'earning' && (
           <p className="text-xs text-slate-400">
-            Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory
-            minimum wage package stays exempt for minimum wage earners.
+            {benefit
+              ? 'Maternity leave days are not paid as salary: the SSS maternity benefit (advanced in full within 30 days of the leave application) and the salary differential up to full pay are their own earnings, both tax-exempt (RMC 105-2019).'
+              : 'Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory minimum wage package stays exempt for minimum wage earners. Monetized unused vacation leave is de minimis up to 12 days a year (RR 29-2025); classify the rest as Other taxable.'}
           </p>
         )}
         <Button className="w-full" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Add adjustment'}</Button>

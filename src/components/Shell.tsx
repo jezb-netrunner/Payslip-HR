@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
+  CalendarRange,
   ClipboardList,
   Clock,
   FileBarChart,
@@ -63,6 +64,7 @@ const adminGroups: NavGroup[] = [
     items: [
       { to: '/admin/employees', label: 'Employees', icon: <Users className={ic} /> },
       { to: '/admin/timesheets', label: 'Time In / Out', icon: <Clock className={ic} />, counter: 'corrections' },
+      { to: '/admin/schedules', label: 'Schedules', icon: <CalendarRange className={ic} /> },
       { to: '/admin/leaves', label: 'Leaves', icon: <Palmtree className={ic} />, counter: 'leaves' },
       { to: '/admin/announcements', label: 'Announcements', icon: <Megaphone className={ic} /> },
     ],

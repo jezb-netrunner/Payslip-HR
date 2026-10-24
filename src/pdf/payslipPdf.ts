@@ -3,8 +3,9 @@
 // Note: the built-in PDF fonts have no ₱ glyph, so amounts use "PHP".
 
 import { zipSync } from 'fflate'
-import { jsPDF } from 'jspdf'
+import type { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { safeDoc } from './text'
 import type { Payslip } from '../lib/db'
 import type { PayslipCompany, PayslipRunInfo } from '../components/PayslipView'
 import { employerFor, roundingLines } from '../lib/payslip'
@@ -40,7 +41,7 @@ function fitText(doc: jsPDF, text: string, maxW: number): string {
   return `${t.trimEnd()}…`
 }
 
-const newDoc = () => new jsPDF({ unit: 'mm', format: 'a4' })
+const newDoc = () => safeDoc({ unit: 'mm', format: 'a4' })
 
 /** Draws one payslip from the top of the document's current page. */
 function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: PayslipCompany): void {

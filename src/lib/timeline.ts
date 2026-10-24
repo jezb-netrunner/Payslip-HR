@@ -6,8 +6,9 @@
 // day, so the bar never shows lateness or overtime that payroll won't count.
 
 import { computeAttendance } from '../payroll/attendance'
-import type { HolidayLite, WorkSchedule } from '../payroll/types'
-import { hhmmToMinutes, isoWeekday, manilaInstant } from './manila'
+import { shiftSpan, toResolver } from '../payroll/schedule'
+import type { HolidayLite, ScheduleSource } from '../payroll/types'
+import { hhmmToMinutes, manilaInstant } from './manila'
 
 export type SegmentKind = 'work' | 'break' | 'late' | 'overtime'
 
@@ -53,13 +54,12 @@ export function minutesFrom(date: string, iso: string): number {
   return (Date.parse(iso) - manilaInstant(date, 0).getTime()) / 60000
 }
 
-/** The scheduled shift on a date as [start, end] minutes, or null on a rest day. */
-export function shiftOn(date: string, schedule: WorkSchedule | null | undefined): [number, number] | null {
-  if (!schedule || !schedule.days.includes(isoWeekday(date))) return null
-  const s = hhmmToMinutes(schedule.start)
-  let e = hhmmToMinutes(schedule.end)
-  if (e <= s) e += 1440 // overnight shift
-  return [s, e]
+/** The scheduled shift on a date as [start, end] minutes (overnight past 1440), or null on a rest day. */
+export function shiftOn(date: string, schedule: ScheduleSource | null | undefined): [number, number] | null {
+  const shift = schedule ? toResolver(schedule)(date).shift : null
+  if (!shift) return null
+  const s = hhmmToMinutes(shift.start)
+  return [s, s + shiftSpan(shift)]
 }
 
 /**
@@ -72,7 +72,7 @@ export function shiftOn(date: string, schedule: WorkSchedule | null | undefined)
 export function dayTimeline(
   date: string,
   entries: EntrySpan[],
-  schedule: WorkSchedule | null | undefined,
+  schedule: ScheduleSource | null | undefined,
   { now: nowIso, graceMinutes = 0, standardHoursPerDay = 8, holidays = [] }: DayTimelineOptions = {},
 ): DayTimeline {
   const now = nowIso ? minutesFrom(date, nowIso) : null

@@ -8,7 +8,9 @@ import type { Employee, Entity, Holiday, LeaveRequest, LeaveType } from '../../l
 import { useEntity } from '../../lib/entity'
 import { errorMessage } from '../../lib/errors'
 import { fmtDate, fullName, plural } from '../../lib/format'
-import { eligibleFrom, leaveDaysInYear, leaveWorkdays, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
+import { countsCalendarDays, eligibleFrom, leaveDays, leaveDaysInYear, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
+import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
+import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { useQuickAction } from '../../lib/quickAction'
@@ -226,8 +228,9 @@ function Leaves({ entity }: { entity: Entity }) {
             </tbody>
           </TableShell>
           <p className="mt-3 text-xs text-slate-400">
-            Seeded with the statutory leaves: SIL 5 days after 12 months of service (Art. 95), Maternity 105 (RA 11210),
-            Paternity 7 (RA 8187), Solo Parent 7 (RA 11861), VAWC 10 (RA 9262), Special Leave for Women 60 (RA 9710). Add
+            Seeded with the statutory leaves: SIL 5 days after 12 months of service (Art. 95), Maternity 105 calendar days
+            (RA 11210), Paternity 7 (RA 8187), Solo Parent 7 after 6 months of service (RA 11861), VAWC 10 (RA 9262),
+            Special Leave for Women 60 after 6 months of service (RA 9710). Add
             company leaves (e.g. VL/SL credits) as needed. Set individual credits under Entitlements — credits set for a
             year also let that employee use the leave before the service requirement is met.
           </p>
@@ -385,9 +388,11 @@ function FileLeaveModal({
   const type = types.find((t) => t.id === f.typeId)
   // the database refuses it unless this year's credits were set: say so before saving
   const opens = employee && type && f.start && !usableOn(type, employee.hire_date, f.start, undefined) ? eligibleFrom(type, employee.hire_date) : null
-  const counted = holidays?.range === range
+  // workdays follow the employee's schedule for those dates (patterns, roster changes)
+  const sched = useEmployeeSchedule(employee ?? null, f.start, f.end)
+  const counted = holidays?.range === range && sched.ready
   const days =
-    employee && counted && f.end >= f.start ? leaveWorkdays(f.start, f.end, employee.work_schedule.days, holidays.list) : 0
+    employee && counted && f.end >= f.start ? leaveDays(type, f.start, f.end, sched.resolve ?? employee.work_schedule, holidays.list) : 0
 
   async function save() {
     if (!counted) return
@@ -462,9 +467,13 @@ function FileLeaveModal({
             ? 'Pick an employee to count the workdays.'
             : f.end < f.start
               ? 'The end date is before the start date.'
-              : !counted
+              : sched.error
+                ? `${sched.error} — close and reopen to try again.`
+                : !counted
                 ? 'Counting workdays…'
-                : `${plural(days, 'scheduled workday')} (holidays and rest days not counted).`}
+                : countsCalendarDays(type)
+                  ? `${plural(days, 'calendar day')} (${type?.name ?? 'this leave'} runs in calendar days).`
+                  : `${plural(days, 'scheduled workday')} (holidays and rest days not counted).`}
         </p>
         <Field label="Reason">
           <Textarea rows={2} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
@@ -509,7 +518,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
     if (!employee) return
     setLoading(true)
     try {
-      const [ents, leaves, hols] = await Promise.all([
+      const [ents, leaves, hols, schedules] = await Promise.all([
         supabase.from('employee_leave_entitlements').select('*').eq('employee_id', employee.id).eq('year', year),
         supabase
           .from('leave_requests')
@@ -519,6 +528,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
           .lte('start_date', `${year}-12-31`)
           .gte('end_date', `${year}-01-01`),
         getHolidaysBetween(entity.id, `${year}-01-01`, `${year}-12-31`),
+        fetchScheduleRows({ entityId: entity.id, employeeId: employee.id }, `${year}-01-01`, `${year}-12-31`),
       ])
       if (ents.error) throw ents.error
       if (leaves.error) throw leaves.error
@@ -526,8 +536,9 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
       const v: Record<string, string> = {}
       for (const e of ents.data ?? []) v[e.leave_type_id as string] = String(Number(e.days))
       const u: Record<string, number> = {}
+      const schedule = resolversFor([employee], schedules).get(employee.id) ?? employee.work_schedule
       for (const l of (leaves.data ?? []) as LeaveRequest[]) {
-        u[l.leave_type_id] = (u[l.leave_type_id] ?? 0) + leaveDaysInYear(l, year, employee.work_schedule.days, hols)
+        u[l.leave_type_id] = (u[l.leave_type_id] ?? 0) + leaveDaysInYear(l, year, schedule, hols, types.find((t) => t.id === l.leave_type_id))
       }
       setValues(v)
       setSaved(v)
@@ -537,7 +548,7 @@ function Entitlements({ entity, types }: { entity: Entity; types: LeaveType[] })
     } finally {
       if (my === seq.current) setLoading(false)
     }
-  }, [employee, year, entity.id, toast])
+  }, [employee, year, entity.id, types, toast])
 
   useEffect(() => {
     load()

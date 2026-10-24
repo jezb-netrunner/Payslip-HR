@@ -58,6 +58,12 @@ export function fmtTime(d: string | Date | null | undefined): string {
   })
 }
 
+/** "13:05" -> "1:05 PM" (plain ASCII: also printed in PDFs, whose fonts lack narrow spaces) */
+export function clock12(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
+
 export function fmtHours(mins: number): string {
   const h = Math.floor(mins / 60)
   const m = Math.round(mins % 60)

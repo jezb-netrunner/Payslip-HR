@@ -22,9 +22,12 @@ import type { Employee, Entity, Holiday, PayrollRun, Payslip, TimeEntry } from '
 import { useEntity } from '../../lib/entity'
 import { fmtDate, money, moneyWhole, plural } from '../../lib/format'
 import { FREQUENCY_LABELS } from '../../lib/labels'
-import { addDays, eachDate, isoWeekday, todayManila } from '../../lib/manila'
+import { addDays, eachDate, todayManila } from '../../lib/manila'
+import { probationEnds } from '../../lib/insights'
+import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import type { ScheduleResolver } from '../../payroll/types'
 
 // Categorical palette — validated (dataviz six checks, light surface):
 // green → blue → orange, fixed assignment order.
@@ -125,12 +128,17 @@ interface DashData {
   /** from two weeks back (attendance) to 45 days ahead (upcoming list) */
   holidays: Holiday[]
   recentLeaves: { employee_id: string; start_date: string; end_date: string }[]
+  /** who is scheduled on the recent days (patterns, roster changes) */
+  schedules: Map<string, ScheduleResolver>
   pendingCorrections: number
   pendingLeaves: number
   pendingAdvances: number
+  /** company admins: the oldest verification date among the statutory tables in force (undefined = not loaded) */
+  statutoryVerified?: string | null
 }
 
 function ClientDashboard({ entity }: { entity: Entity }) {
+  const { isCompanyAdmin } = useAuth()
   const [data, setData] = useState<DashData | null>(null)
   const [loadError, setLoadError] = useState('')
   const today = todayManila()
@@ -141,7 +149,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
       const twoWeeksAgo = addDays(today, -13)
       // six payroll months for the cost chart, plus the current one
       const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
-      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances] = await Promise.all([
+      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances, scheduleRows, statutory] = await Promise.all([
         getEmployees(entity.id),
         fetchAll<TimeEntry>((from, to) =>
           supabase
@@ -180,8 +188,12 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         supabase.from('time_correction_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
         supabase.from('leave_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
         supabase.from('advance_requests').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id).eq('status', 'pending'),
+        fetchScheduleRows({ entityId: entity.id }, twoWeeksAgo, today),
+        isCompanyAdmin
+          ? supabase.from('statutory_versions').select('kind, verified_on').lte('effective_from', today).order('effective_from', { ascending: false })
+          : Promise.resolve(null),
       ])
-      const failed = runsRes.error ?? corr.error ?? leaves.error ?? advances.error
+      const failed = runsRes.error ?? corr.error ?? leaves.error ?? advances.error ?? statutory?.error
       if (failed) throw failed
       setData({
         employees: emps,
@@ -190,14 +202,16 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         slips,
         holidays: hols,
         recentLeaves,
+        schedules: resolversFor(emps, scheduleRows),
         pendingCorrections: corr.count ?? 0,
         pendingLeaves: leaves.count ?? 0,
         pendingAdvances: advances.count ?? 0,
+        statutoryVerified: statutory ? oldestCheck((statutory.data ?? []) as { kind: string; verified_on: string | null }[]) : undefined,
       })
     } catch (err) {
       setLoadError(errorMessage(err, 'Could not load the dashboard'))
     }
-  }, [entity.id, today])
+  }, [entity.id, today, isCompanyAdmin])
 
   useEffect(() => {
     load()
@@ -284,7 +298,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
                   formatter={(v, name) => [money(Number(v ?? 0)), String(name)]}
                   contentStyle={{ borderRadius: 12, border: '1px solid #e6e6ed', fontSize: 12 }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} formatter={(value) => <span style={{ color: '#41434f' }}>{value}</span>} />
+                <Legend itemSorter={null} wrapperStyle={{ fontSize: 12 }} formatter={(value) => <span style={{ color: '#41434f' }}>{value}</span>} />
                 <Bar dataKey="Net pay" stackId="a" fill={C.net} stroke="#ffffff" strokeWidth={2} maxBarSize={64} />
                 <Bar dataKey="Employee deductions" stackId="a" fill={C.ee} stroke="#ffffff" strokeWidth={2} maxBarSize={64} />
                 <Bar dataKey="Employer contributions" stackId="a" fill={C.er} stroke="#ffffff" strokeWidth={2} radius={[4, 4, 0, 0]} maxBarSize={64} />
@@ -371,6 +385,19 @@ interface ActionItem {
   icon: React.ReactNode
 }
 
+/** The oldest verification among the versions in force (the first row of each kind, newest first). */
+function oldestCheck(rows: { kind: string; verified_on: string | null }[]): string | null {
+  const seen = new Set<string>()
+  let oldest: string | null = null
+  for (const r of rows) {
+    if (seen.has(r.kind)) continue
+    seen.add(r.kind)
+    if (!r.verified_on) return null
+    if (!oldest || r.verified_on < oldest) oldest = r.verified_on
+  }
+  return oldest
+}
+
 /** YYYY-MM shifted by n months. */
 function addMonths(ym: string, n: number): string {
   const [y, m] = ym.split('-').map(Number)
@@ -394,7 +421,7 @@ function derive(data: DashData, entity: Entity, today: string) {
     if (h && h.kind !== 'special_working') return []
     return active.filter(
       (e) =>
-        e.work_schedule.days.includes(isoWeekday(date)) &&
+        (data.schedules.get(e.id)?.(date).shift ?? null) !== null &&
         e.hire_date <= date &&
         !data.recentLeaves.some((l) => l.employee_id === e.id && l.start_date <= date && l.end_date >= date),
     )
@@ -445,6 +472,17 @@ function derive(data: DashData, entity: Entity, today: string) {
       tone: 'warn',
       icon: <HandCoins className="size-4" />,
     })
+  // statutory tables ship with the software; rates usually change on January 1
+  if (data.statutoryVerified !== undefined && (!data.statutoryVerified || data.statutoryVerified < `${today.slice(0, 4)}-01-01`))
+    actions.push({
+      title: 'Statutory tables: this year’s check is due',
+      sub: data.statutoryVerified
+        ? `Last verified ${fmtDate(data.statutoryVerified)} — confirm the BIR, SSS, PhilHealth and Pag-IBIG tables with the system maintainer`
+        : 'A table in force has no verification date — confirm it with the system maintainer',
+      to: '/admin/statutory',
+      tone: 'warn',
+      icon: <Landmark className="size-4" />,
+    })
   const drafts = data.runs.filter((r) => r.status === 'draft')
   if (drafts.length > 0)
     actions.push({
@@ -457,7 +495,7 @@ function derive(data: DashData, entity: Entity, today: string) {
 
   const probationEnding = active.filter((e) => {
     if (e.employment_status !== 'probationary') return false
-    const end = addDays(e.hire_date, 180) // 6-month probation cap (Art. 296)
+    const end = probationEnds(e.hire_date) // six months = 180 days (Art. 296)
     return end >= today && end <= addDays(today, 30)
   })
   if (probationEnding.length > 0)

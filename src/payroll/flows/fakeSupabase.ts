@@ -14,7 +14,7 @@ type Row = Record<string, any>
 const TABLES = [
   'entities', 'employees', 'payroll_runs', 'payslips', 'time_entries', 'leave_requests', 'leave_types',
   'employee_allowances', 'recurring_deductions', 'payroll_adjustments', 'employee_tax_years',
-  'statutory_versions', 'holidays',
+  'statutory_versions', 'holidays', 'employee_schedules', 'schedule_overrides', 'payroll_deduction_overrides',
 ]
 
 export const db: { t: Record<string, Row[]>; seq: number } = { t: {}, seq: 0 }
@@ -340,6 +340,8 @@ export function addRun(entity: Row, over: Row & { period_start: string; period_e
     totals: {},
     ...over,
   }
+  // payroll_runs_annualize_december: the year-end adjustment is a December pay date's
+  if (r.annualize && String(r.pay_date).slice(5, 7) !== '12') throw new Error('payroll_runs_annualize_december')
   db.t.payroll_runs.push(r)
   return r
 }

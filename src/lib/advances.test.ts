@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { advanceLedger, advanceStatus, nextInstallment, payrollsToRepay } from './advances'
+import { advanceLedger, advanceStatus, installmentText, nextInstallment, payrollsToRepay, repaymentText } from './advances'
 
 const adv = { id: 'a1', total_amount: 3000, balance: 1300, released_on: '2026-10-05', created_at: '2026-10-05T02:00:00Z' }
 const slip = (runId: string, payDate: string, amount: number, finalized = true, meta = 'a1') => ({
@@ -59,5 +59,20 @@ describe('cash advance helpers', () => {
       { balance: 900, amount_per_period: 500, active: false },
       { balance: 0, amount_per_period: 500, active: true },
     ])).toBe(800)
+  })
+})
+
+describe('advances without a fixed installment', () => {
+  const adv = (amount_per_period: number, balance = 1000, active = true) => ({ amount_per_period, balance, active })
+  it('reads as agreed each payroll', () => {
+    expect(installmentText(0)).toBe('amount agreed each payroll')
+    expect(installmentText(500)).toBe('₱500.00 per payroll')
+    expect(payrollsToRepay(1000, 0)).toBe(0)
+  })
+  it('sums only the fixed installments and says when others are agreed', () => {
+    expect(nextInstallment([adv(0), adv(300)])).toBe(300)
+    expect(repaymentText([adv(0), adv(300)])).toBe('₱300.00 per payroll + amounts agreed each payroll')
+    expect(repaymentText([adv(0)])).toBe('amount agreed each payroll')
+    expect(repaymentText([adv(300), adv(0, 1000, false)])).toBe('₱300.00 per payroll')
   })
 })

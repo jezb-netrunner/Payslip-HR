@@ -4,12 +4,13 @@
 // implementing rules as amended by DOLE D.O. 195-2018).
 // Built-in PDF fonts have no peso sign, so amounts print as "PHP".
 
-import { jsPDF } from 'jspdf'
+import { safeDoc } from './text'
 
 export interface AdvanceFormData {
   employer: { name: string; address?: string | null; tin?: string | null }
   employee: { name: string; employeeNo: string; position?: string | null }
   amount: number
+  /** 0 = no fixed installment: an amount agreed for each payroll */
   perPayroll: number
   payrolls: number
   releasedOn: string
@@ -22,7 +23,7 @@ const longDate = (d: string) =>
   new Date(`${d}T00:00:00`).toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })
 
 export function generateAdvanceForm(f: AdvanceFormData): void {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  const doc = safeDoc({ unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 20
   const width = pageW - margin * 2
@@ -51,7 +52,12 @@ export function generateAdvanceForm(f: AdvanceFormData): void {
     ['Employee', `${f.employee.name} (${f.employee.employeeNo})${f.employee.position ? `, ${f.employee.position}` : ''}`],
     ['Amount advanced', php(f.amount)],
     ['Released on', `${longDate(f.releasedOn)}, by ${f.releaseMethod}`],
-    ['Repayment', `${php(f.perPayroll)} per payroll, about ${f.payrolls} payroll${f.payrolls === 1 ? '' : 's'}, starting with the payroll whose cutoff includes ${longDate(f.firstDeduction)}`],
+    [
+      'Repayment',
+      f.perPayroll > 0
+        ? `${php(f.perPayroll)} per payroll, about ${f.payrolls} payroll${f.payrolls === 1 ? '' : 's'}, starting with the payroll whose cutoff includes ${longDate(f.firstDeduction)}`
+        : `In the amount agreed with me for each payroll (no fixed installment), starting with the payroll whose cutoff includes ${longDate(f.firstDeduction)}, until fully repaid`,
+    ],
   ]
   for (const [k, v] of facts) {
     doc.setFont('helvetica', 'bold')
@@ -65,7 +71,9 @@ export function generateAdvanceForm(f: AdvanceFormData): void {
   y += 4
   const terms = [
     `I acknowledge receiving the amount above from ${f.employer.name} as an advance on my wages. It carries no interest, fee or other charge.`,
-    `I authorize ${f.employer.name} to deduct the installment above from my wages every payroll until the advance is fully repaid. A payroll deducts only as much as my net pay allows; any part it cannot deduct stays in the balance and is deducted from later payrolls.`,
+    f.perPayroll > 0
+      ? `I authorize ${f.employer.name} to deduct the installment above from my wages every payroll until the advance is fully repaid, or a different amount for a payroll when we agree on it. A payroll deducts only as much as my net pay allows; any part it cannot deduct stays in the balance and is deducted from later payrolls.`
+      : `I authorize ${f.employer.name} to deduct from my wages, in each payroll until the advance is fully repaid, the amount we agree on for that payroll. A payroll deducts only as much as my net pay allows; any part it cannot deduct stays in the balance.`,
     `If my employment ends before the advance is fully repaid, I authorize ${f.employer.name} to deduct the remaining balance from my last pay and final pay.`,
     'I may repay any part of the balance at any time. Every deduction and repayment is shown on my payslips and in my cash advance record.',
   ]
