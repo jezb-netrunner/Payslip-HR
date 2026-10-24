@@ -374,27 +374,25 @@ schedules, per-payroll deductions, Insights, read-only statutory tables,
 the legal-accuracy fixes) is on `claude/affectionate-carson-hyuwes` and
 reaches the site only when merged.
 
-**2026-10-24 migrations (owner approved applying them and opening the PR —
-draft PR #6, `claude/affectionate-carson-hyuwes` → `main`).**
-Live through MCP: `20261024112556 work_schedules` and `20261024221511
-payroll_deduction_overrides` (new tables, all with RLS; backward compatible
-with `main`; advisors unchanged after the first). `statutory_tables_managed`
-timed out on the MCP confirmation prompt — the false positive in the lesson
-below: the `;` inside its legal-basis strings (`'RA 11199 (…2018); SSS…'`)
-split an UPDATE into a WHERE-less piece. Reworded (commas), not yet
-re-applied; `legal_accuracy` follows it. Repo filenames of the two pending
-ones (`20261024230000`, `20261024230100`) are placeholders that keep the
-replay order; rename each to the version MCP records, then re-run
-`fingerprint.sql`. Merge the branch only once both are live:
-`legal_accuracy`'s authorization trigger refuses company loans, HMO and
-"other" deductions without `authorized_on`, which `main`'s forms can't send,
-and the branch's screens write columns only these migrations add. Live
-data checked first: no off-December annualize flags, no standard day above
-8 hours, statutory rows identical to the replica.
+**2026-10-24: all four migrations live (owner approved; PR #6 open,
+`claude/affectionate-carson-hyuwes` → `main`).** Through MCP
+`apply_migration`: `20261024112556 work_schedules`, `20261024221511
+payroll_deduction_overrides`, `20261024225035 statutory_tables_managed`,
+`20261024225137 legal_accuracy` (repo files renamed to those versions).
+`statutory_tables_managed` first timed out on the MCP confirmation — the
+`;` inside its legal-basis strings tripped the detector (see the lesson);
+reworded with commas, it applied on the retry. `fingerprint.sql` matches
+the replica on every kind (27 tables, 399 columns, 171 constraints, 77
+indexes, 58 policies, 51 functions, grants, 87 triggers); security
+advisors unchanged; live data: 5 documented statutory versions, 19 holidays
+for 2027, SPL/MCW at 6 months, no annualized runs. Until PR #6 is merged
+the live site runs `main`'s code against this schema: its deduction forms
+can't send `authorized_on`, so adding a company loan, HMO or "other"
+deduction there is refused — merge soon.
 
 Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10-23:
-- **All 17 migrations applied** (19 with `work_schedules` and
-  `payroll_deduction_overrides` on 2026-10-24). The 17th, `20261023105459
+- **All 21 migrations applied** (the four 2026-10-24 ones above; the
+  notes below describe the state as of 2026-10-23). The 17th, `20261023105459
   cash_advance_hardening` (CREATE OR REPLACE of the three advance trigger
   functions), went through MCP; fingerprint re-matched (functions hash
   changed on both sides identically). The 16th, `20261023102637 cash_advances`
