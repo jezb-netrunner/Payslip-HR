@@ -3,16 +3,20 @@
 // published table, the database checks its shape and figures, and it is
 // released as an update with its effective date (see README, "Updating the
 // statutory tables"). Nobody edits them here, so a typo can't misapply a rate;
-// a version finalized payrolls may have used is frozen in the database.
+// a version finalized payrolls may have used is frozen in the database. The
+// pay codes (how each allowance and one-time earning is taxed) ship the same way.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Calculator, ExternalLink, ShieldCheck } from 'lucide-react'
+import { Calculator, ExternalLink, ShieldCheck, Tags } from 'lucide-react'
 import { Badge, Card, Field, Input, LoadFailed, PageHeader, Spinner, TableShell, Td, Th } from '../../components/ui'
 import type { StatutoryVersion } from '../../lib/db'
 import { errorMessage } from '../../lib/errors'
 import { fmtDate, money } from '../../lib/format'
+import { INCOME_CLASS_LABELS, PAY_CODE_TAX_LABELS } from '../../lib/labels'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { usePayCodes } from '../../lib/usePayCodes'
+import { lineIncomeClass } from '../../payroll/payCodes'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
 import type {
   BirAnnualData,
@@ -20,6 +24,7 @@ import type {
   DeMinimisCeiling,
   DeMinimisData,
   PagibigData,
+  PayCode,
   PhilHealthData,
   SssTableData,
   TaxBracket,
@@ -90,6 +95,7 @@ export default function Statutory() {
   const [versions, setVersions] = useState<StatutoryVersion[] | null>(null)
   const [loadError, setLoadError] = useState('')
   const [sample, setSample] = useState('25000')
+  const payCodes = usePayCodes()
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -229,9 +235,53 @@ export default function Statutory() {
             </Card>
           )
         })}
+
+        <Card title="Pay codes" icon={<Tags />}>
+          <p className="mb-3 text-sm text-slate-600">
+            Every allowance and one-time earning carries a pay code. The code decides how the line is taxed, and whether
+            its taxable part is regular compensation (R: basic pay and allowances paid every period) or supplementary
+            compensation (S: overtime, premiums, commission, the part of bonuses above the ₱90,000 and other one-time
+            pay). Withholding tax takes the table row from R alone. The cumulative average method applies instead, for the
+            rest of the year, once S is paid while R is in the 0% row, S is at least R, or the employee had a previous
+            employer this year (RR 2-98 Sec. 2.79(B), as amended by RR 11-2018).
+          </p>
+          <TableShell>
+            <thead className="bg-slate-50">
+              <tr>
+                <Th>Pay code</Th>
+                <Th>Used for</Th>
+                <Th>Tax</Th>
+                <Th>Taxable part</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {payCodes.map((c) => (
+                <tr key={c.code}>
+                  <Td>
+                    <p className="font-semibold text-slate-700">{c.label}</p>
+                    <p className="text-xs text-slate-400">{c.code}</p>
+                  </Td>
+                  <Td>{[c.for_allowances && 'Allowances', c.for_one_time && 'One-time earnings'].filter(Boolean).join(', ')}</Td>
+                  <Td>{PAY_CODE_TAX_LABELS[c.tax_treatment]}</Td>
+                  <Td>{taxablePart(c)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </TableShell>
+        </Card>
       </div>
     </div>
   )
+}
+
+/** R or S of a pay code's taxable part, by how it is paid. */
+function taxablePart(c: PayCode): string {
+  if (c.tax_treatment === 'exempt') return '—'
+  const every = INCOME_CLASS_LABELS[lineIncomeClass(c, 'allowance')]
+  const once = INCOME_CLASS_LABELS[lineIncomeClass(c, 'one_time')]
+  if (!c.for_one_time) return every
+  if (!c.for_allowances || every === once) return once
+  return `${every} every period, ${once} once`
 }
 
 function VersionDetail({ version }: { version: StatutoryVersion }) {

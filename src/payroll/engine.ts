@@ -10,22 +10,28 @@
 //    versioned tables passed in; monthly amounts are allocated over the
 //    weekly / semi-monthly / monthly pay periods of the payroll month.
 //  - Withholding tax on compensation: BIR revised tables (TRAIN, RR 11-2018
-//    as amended) for the employee's pay frequency; annual graduated table
+//    as amended) for the employee's pay frequency, by the regular method or
+//    the cumulative average method (withholding.ts); annual graduated table
 //    when the payroll annualizes (year-end or separation). Union dues and
 //    mandatory contributions are excluded from taxable compensation; the
-//    statutory minimum wage package of MWEs is exempt.
+//    statutory minimum wage package of MWEs is exempt. Taxable pay is split
+//    into regular (R) and supplementary (S) compensation by pay code.
 //  - 13th month pay (PD 851): 1/12 of basic salary earned in the calendar
 //    year (installments supported); tax-exempt together with other benefits
 //    up to the statutory cap.
 
 import { annualizedWithholding, isTaxableBucket, type AnnualPayslipFact, type PriorEmployerInput } from './annual'
-import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax, taxFromBrackets } from './statutory'
+import { lineIncomeClass, PAY_CODES, payCodeForAllowanceCategory, payCodeForEarningCategory, payCodeOf } from './payCodes'
+import { computePagibig, computePhilHealth, computeSss } from './statutory'
 import {
   round2,
+  type AllowanceInput,
   type BirBucket,
   type ContributionTiming,
   type DayComputation,
   type DayType,
+  type IncomeClass,
+  type PayCode,
   type PayLine,
   type PayrollEmployeeInput,
   type PayrollSettingsInput,
@@ -36,7 +42,9 @@ import {
   type SssComputation,
   type StatutoryComputation,
   type StatutoryTables,
+  type WhtMethod,
 } from './types'
+import { periodWithholding, type PeriodWithholding, type PriorWithholding, type WithholdingYtdFact } from './withholding'
 
 export const DAY_MULT: Record<DayType, number> = {
   regular: 1,
@@ -168,6 +176,16 @@ export interface MonthContributionsInput {
   opens: boolean
 }
 
+/** What the withholding method needs besides this payroll (spec T2). */
+export interface WithholdingInput {
+  /** The payroll's pay date: it places the payroll in the tax year and counts the CAM periods. */
+  payDate: string
+  /** This employer's finalized payslips paid earlier in the tax year. */
+  ytd: WithholdingYtdFact[]
+  /** Previous employers this calendar year: trigger (c), and their pay and tax in CAM. */
+  prior?: PriorWithholding | null
+}
+
 export interface ComputePayslipParams {
   employee: PayrollEmployeeInput
   settings: PayrollSettingsInput
@@ -175,6 +193,10 @@ export interface ComputePayslipParams {
   tables: StatutoryTables
   days: DayComputation[]
   runType: RunType
+  /** The pay codes on file (omitted: the shipped list, src/payroll/payCodes.ts). */
+  payCodes?: readonly PayCode[]
+  /** Omitted: the period end is the pay date and nothing was paid earlier this year. */
+  withholding?: WithholdingInput
   /** Cash net-pay rounding for this employee (omitted = exact centavos). */
   rounding?: RoundingInput
   /** Annualize withholding in this payroll (last payroll of the year / separation). */
@@ -351,7 +373,66 @@ const FREQUENCY_LABEL: Record<PayrollSettingsInput['payFrequency'], string> = {
   monthly: 'monthly',
 }
 
+/** An allowance's pay code: its own, or its category's for a row saved before pay codes. */
+function allowanceCode(a: AllowanceInput, codes: readonly PayCode[]): PayCode {
+  return payCodeOf(a.payCode ?? payCodeForAllowanceCategory(a.category), codes)
+}
+
+const CAM_REASON: Record<NonNullable<PeriodWithholding['trigger']>, string> = {
+  a: 'regular compensation is in the 0% row of the table and supplementary compensation was paid this year',
+  b: 'supplementary compensation is at least the regular compensation',
+  c: 'the employee had a previous employer this year',
+  earlier: 'it started earlier this year and applies to the rest of the year',
+}
+
+const peso = (v: number) => `₱${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+/**
+ * Withholding by the regular method or CAM (withholding.ts), with the note
+ * that says which and why.
+ */
+function withholdingFor(
+  regular: number,
+  supplementary: number,
+  params: ComputePayslipParams,
+  supplementaryOnly = false,
+): { tax: number; method: WhtMethod; note: string | null; warning: string | null } {
+  const { settings, tables, period } = params
+  const w = params.withholding
+  const r = periodWithholding({
+    regular,
+    supplementary,
+    payDate: w?.payDate ?? period.end,
+    frequency: settings.payFrequency,
+    brackets: tables.bir_wht[WHT_TABLE[settings.payFrequency]],
+    ytd: w?.ytd ?? [],
+    prior: w?.prior,
+    supplementaryOnly,
+  })
+  const table = `${FREQUENCY_LABEL[settings.payFrequency]} BIR table`
+  if (r.method === 'regular') {
+    const note = r.tax <= 0
+      ? null
+      : supplementary > 0
+        ? `Withholding tax, regular method: the ${table} row of the regular compensation ${peso(regular)}, applied to it plus the supplementary compensation ${peso(supplementary)}.`
+        : `Withholding tax from the ${table}.`
+    return { tax: r.tax, method: 'regular', note, warning: null }
+  }
+  const prior = w?.prior
+  const since = r.trigger === 'earlier' && r.since ? ` (since the payroll paid ${shortDate(r.since)})` : ''
+  const note =
+    `Withholding tax, cumulative average method: ${CAM_REASON[r.trigger!]}${since}. ` +
+    `Taxable compensation this year ${peso(r.cum!)}${prior ? `, ${peso(prior.taxable)} of it from the previous employer` : ''}, ` +
+    `over ${r.n} ${FREQUENCY_LABEL[settings.payFrequency]} pay period${r.n === 1 ? '' : 's'} from ${shortDate(r.from!)}: ` +
+    `tax due ${peso(r.totalDue!)} on the ${table}, less ${peso(r.withheldBefore!)} already withheld${prior ? " (the previous employer's included)" : ''}.`
+  const warning = prior && !prior.employedFrom
+    ? "The previous employer's employment start date isn't on file, so the cumulative average method counts pay periods from January 1. Enter it with the previous employer's figures (BIR Form 2316) and recompute."
+    : null
+  return { tax: r.tax, method: 'cam', note, warning }
+}
+
 // Basis (₱90,000 ceiling, "benefitsExcess" below): NIRC §32(B)(7)(e), as amended by RA 10963 §9. RR 2-98 §2.78.1(B)(11).
+// Basis (taxable compensation, R and S): RR 2-98 §2.78.1(B)(11)–(13), §2.79(A) and §2.79(B)(3) Step 1, as amended by RR 11-2018 §§6–7 (effective Jan 1, 2018). RMC 50-2018 A3, A5, A6, A14 (May 11, 2018). RA 11199 §16.
 export function computePayslip(params: ComputePayslipParams): PayslipComputation {
   const { employee, settings, period, tables, runType } = params
   if (runType === 'thirteenth_month') return computeThirteenthMonth(params)
@@ -363,6 +444,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
   const perMinute = hourly / 60
   const isMwe = employee.isMinimumWageEarner
+  const codes = params.payCodes ?? PAY_CODES
 
   // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
   const wageFloor = settings.minimumWageDaily * (employee.apprentice ? 0.75 : 1)
@@ -559,8 +641,24 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   // ---- earnings ----
   const earnings: PayLine[] = []
-  const earn = (code: string, label: string, amount: number, bir: BirBucket, extra: Partial<PayLine> = {}) =>
-    earnings.push({ code, label, amount, bir, taxable: isTaxableBucket(bir, isMwe), ...extra })
+  // taxable lines are regular (R) or supplementary (S) compensation: basic
+  // pay is R, premiums, overtime and night differential are S
+  let regularLines = 0
+  let supplementaryLines = 0
+  const earn = (
+    code: string,
+    label: string,
+    amount: number,
+    bir: BirBucket,
+    extra: Partial<PayLine> = {},
+    incomeClass: IncomeClass = bir === 'basic' ? 'regular' : 'supplementary',
+  ) => {
+    const taxable = isTaxableBucket(bir, isMwe)
+    earnings.push({ code, label, amount, bir, taxable, ...extra })
+    if (!taxable) return
+    if (incomeClass === 'regular') regularLines = round2(regularLines + amount)
+    else supplementaryLines = round2(supplementaryLines + amount)
+  }
   let basicPay: number
 
   if (extrasOnly) {
@@ -645,33 +743,31 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       amt = allocateMonthly(a.amount, period.index, period.count)
     }
     if (amt === 0) continue
-    const taxable = isTaxableBucket(a.category, isMwe)
-    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, a.category)
+    const pc = allowanceCode(a, codes)
+    const taxable = isTaxableBucket(pc.bir_bucket, isMwe)
+    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, pc.bir_bucket, { payCode: pc.code }, lineIncomeClass(pc, 'allowance'))
   }
   for (const e of employee.oneTimeEarnings ?? []) {
     const amt = round2(e.amount)
     if (amt === 0) continue
-    if (e.benefit) {
-      // maternity pay is tax-exempt (RMC 105-2019); the salary differential
-      // counts toward the 13th month, the SSS benefit does not
-      earn('adjustment', e.label, amt, 'other_non_taxable', {
-        meta: e.id,
-        ...(e.benefit === 'maternity_differential' ? { thirteenthBasis: true } : {}),
-      })
-      continue
-    }
-    earn('adjustment', e.label, amt, e.category, { meta: e.id })
+    const pc = payCodeOf(e.payCode ?? payCodeForEarningCategory(e.category, e.benefit), codes)
+    // maternity pay is tax-exempt (RMC 105-2019); the salary differential
+    // counts toward the 13th month, the SSS benefit does not
+    earn('adjustment', e.label, amt, pc.bir_bucket, {
+      meta: e.id,
+      payCode: pc.code,
+      ...(pc.benefit === 'maternity_differential' ? { thirteenthBasis: true } : {}),
+    }, lineIncomeClass(pc, 'one_time'))
   }
 
   const grossPay = round2(earnings.reduce((s, l) => s + l.amount, 0))
-  const grossTaxable = round2(earnings.filter((l) => l.taxable).reduce((s, l) => s + l.amount, 0))
 
   // ---- statutory deductions ----
   // Pag-IBIG's monthly compensation is the basic salary plus allowances (up
   // to the maximum fund salary); PhilHealth is on the basic salary
   const allowancesMonthly = round2(
     employee.allowances
-      .filter((a) => a.category !== 'other_benefits')
+      .filter((a) => allowanceCode(a, codes).bir_bucket !== 'other_benefits')
       .reduce(
         (s, a) =>
           s + (a.basis === 'monthly' ? a.amount : a.basis === 'per_period' ? a.amount * period.count : (a.amount * settings.workingDaysDivisor) / 12),
@@ -827,18 +923,22 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       `₱${benefitsExcess.toLocaleString()} of this payroll's 13th month pay and other benefits is beyond the ₱${tables.bir_annual.other_benefits_exemption_cap.toLocaleString()} yearly exemption (₱${round2(exemptLeft).toLocaleString()} was left) and is taxed with this payroll.`,
     )
   }
-  let taxableIncome: number
+  // R and S (§2 step 3): the exclusions come out of R first, then S; the
+  // benefits excess is S, for minimum wage earners too
+  let carve = exclusions
   if (isMwe) {
     const exemptBasic = earnings.filter((l) => l.bir === 'basic').reduce((s, l) => s + l.amount, 0)
-    taxableIncome = round2(Math.max(0, grossTaxable - Math.max(0, exclusions - Math.max(0, exemptBasic))) + benefitsExcess)
+    carve = Math.max(0, exclusions - Math.max(0, exemptBasic))
     notes.push(
       'Minimum wage earner: statutory minimum wage, holiday, overtime, night differential and hazard pay are exempt from withholding tax.',
     )
-  } else {
-    taxableIncome = round2(Math.max(0, grossTaxable - exclusions) + benefitsExcess)
   }
+  const taxableRegular = round2(Math.max(0, regularLines - carve))
+  const taxableSupplementary = round2(Math.max(0, supplementaryLines - Math.max(0, carve - regularLines)) + benefitsExcess)
+  const taxableIncome = round2(taxableRegular + taxableSupplementary)
 
   let withholdingTax: number
+  let whtMethod: WhtMethod
   let whtLabel = 'Withholding Tax'
   if (params.annualization) {
     const current: AnnualPayslipFact = {
@@ -857,13 +957,17 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       params.annualization.peraCredit ?? 0,
     )
     withholdingTax = withholding
+    whtMethod = 'annualized'
     whtLabel = withholding < 0 ? 'Tax Refund (year-end adjustment)' : 'Withholding Tax (annualized)'
     notes.push(
       `Annualized: taxable compensation for the year ₱${summary.totalTaxable.toLocaleString()} → tax due ₱${summary.taxDue.toLocaleString()}; this payroll withholds the difference from tax already withheld.`,
     )
   } else {
-    withholdingTax = computeWithholdingTax(taxableIncome, WHT_TABLE[settings.payFrequency], tables.bir_wht)
-    if (withholdingTax > 0) notes.push(`Withholding tax from the ${FREQUENCY_LABEL[settings.payFrequency]} BIR table.`)
+    const w = withholdingFor(taxableRegular, taxableSupplementary, params)
+    withholdingTax = w.tax
+    whtMethod = w.method
+    if (w.note) notes.push(w.note)
+    if (w.warning) warnings.push(w.warning)
   }
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
   deductions.push(...otherLines)
@@ -935,6 +1039,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     basicPay: earnedBasic,
     grossPay,
     taxableIncome,
+    taxableRegular,
+    taxableSupplementary,
+    whtMethod,
     sssEe,
     sssEr,
     sssEcEr,
@@ -968,8 +1075,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
  * 13th month pay run (PD 851): 1/12 of basic salary earned within the
  * calendar year, less any installment already paid. Tax-exempt together
  * with other benefits up to the cap in the annual tax table version
- * (₱90,000); the excess is taxed as supplemental compensation at the
- * employee's marginal rate.
+ * (₱90,000); the excess is supplementary compensation of the period it is
+ * paid, withheld like any other (withholdingFor).
  */
 function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputation {
   const { employee, settings, tables, days, runType } = params
@@ -999,6 +1106,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     : []
 
   let withholdingTax = 0
+  let whtMethod: WhtMethod = 'regular'
   let whtLabel = 'Withholding Tax (13th month excess)'
   if (params.annualization) {
     // Paid after the year's tax was already annualized (last December
@@ -1018,30 +1126,25 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       params.annualization.peraCredit ?? 0,
     )
     withholdingTax = withholding
+    whtMethod = 'annualized'
     whtLabel = withholding < 0 ? 'Tax Refund (year-end adjustment)' : 'Withholding Tax (annualized)'
     notes.push(
       `Paid after this tax year was annualized: tax due for the year ₱${summary.taxDue.toLocaleString()} less tax already withheld.`,
     )
-  } else if (taxable13 > 0) {
-    // Supplemental compensation: marginal tax = tax(regular + excess) - tax(regular).
-    // A minimum wage earner's regular pay is exempt, but the excess is not
-    // (Soriano v. Secretary of Finance, G.R. 184450).
-    const stat = computeStatutory(
-      statutoryMonthlyBase,
-      { ...settings, payFrequency: 'monthly' },
-      { start: '', end: '', index: 1, count: 1 },
-      tables,
-    )
-    const monthlyTaxable = employee.isMinimumWageEarner
-      ? 0
-      : Math.max(0, statutoryMonthlyBase - stat.sss.ee - stat.sss.mpfEe - stat.philhealthEe - stat.pagibigEe)
-    withholdingTax = round2(
-      taxFromBrackets(monthlyTaxable + taxable13, tables.bir_wht.monthly) -
-        taxFromBrackets(monthlyTaxable, tables.bir_wht.monthly),
-    )
-    notes.push(
-      `₱${taxable13.toLocaleString()} of the 13th month pay exceeds the exemption cap and is taxed as supplemental compensation.`,
-    )
+  } else {
+    // The excess is supplementary compensation, for a minimum wage earner
+    // too (Soriano v. Secretary of Finance, G.R. 184450); a 13th month run
+    // pays no regular compensation of its own.
+    if (taxable13 > 0) {
+      notes.push(
+        `₱${taxable13.toLocaleString()} of the 13th month pay exceeds the exemption cap and is taxed as supplementary compensation.`,
+      )
+    }
+    const w = withholdingFor(0, taxable13, params, true)
+    withholdingTax = w.tax
+    whtMethod = w.method
+    if (w.note) notes.push(w.note)
+    if (w.warning) warnings.push(w.warning)
   }
 
   const deductions: PayLine[] = []
@@ -1070,6 +1173,9 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     basicPay: 0,
     grossPay: gross13,
     taxableIncome: taxable13,
+    taxableRegular: 0,
+    taxableSupplementary: taxable13,
+    whtMethod,
     sssEe: 0,
     sssEr: 0,
     sssEcEr: 0,

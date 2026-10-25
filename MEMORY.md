@@ -386,9 +386,37 @@ centavos (BigInt); de minimis ceilings ship as kind `de_minimis` effective
 Statutory page, not yet used by payroll). Tests 282 → 340 plus SQL suite 17;
 suites 10 and 15 counted five versions — now six.
 
+### 2026-10-25 — Spec T2: pay codes and the withholding method (same branch)
+
+**Did:** pay codes (`pay_codes`, 17 codes from the 14 categories plus
+COMMISSION, FIXED_ALLOWANCE/OTHER_TAXABLE split, MAT_SSS_BENEFIT,
+MAT_DIFFERENTIAL; mirror `src/payroll/payCodes.ts`); `pay_code` on
+allowances and earning adjustments (backfilled from the category, a BEFORE
+trigger keeps code and category in step); payslips store `taxable_regular`,
+`taxable_supplementary`, `wht_method`. The engine splits taxable pay into R
+and S (contributions and union dues out of R first; the ₱90k excess is S)
+and withholds by the regular method (row from R) or CAM
+(`src/payroll/withholding.ts`); 13th-month runs too (the old "marginal
+monthly table" method is gone). The service now always loads the tax
+year's payslips and previous-employer row. UI: pay-code selects for
+allowances and one-time earnings, "(CAM)" next to W/tax in the run, a pay
+code card on the Statutory page. Migration
+`20261025100000_pay_codes` (not live). Readings the spec doesn't settle are
+in `docs/payroll-spec-mapping.md` §5. Tests 340 → 405 plus SQL suite 18;
+one engine test (13th-month excess, 16,944.15 on the old method) updated to
+CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
+database (finalized run's adjustments coded, no audit rows, drafts marked).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-10-25: `20261025100000 pay_codes` (spec T2) is in the branch, NOT
+live.** Apply it BEFORE deploying T2's front end: the new screens and the
+payroll service read `pay_codes` and the new payslip columns and fail
+without them (the old front end keeps working on the migrated database —
+the trigger gives category-only rows their code). It marks every draft
+payroll for recomputing. Then run `fingerprint.sql` and the advisors.
 
 **2026-10-25: `20261025090000 de_minimis_ceilings` is in the branch, NOT
 live.** It swaps two constraints with DROP CONSTRAINT, so the MCP's
@@ -1119,9 +1147,37 @@ Regular payrolls used to classify every 13th-month/other-benefits line as
 non-taxable and left any excess to the December annualization. Now each
 regular payroll taxes what its benefits exceed of the tax year's remaining
 exemption (`benefitsExemptLeft`, from the tax-year payslips the service
-loads whenever a payroll pays a benefit), for MWEs too. Why it mattered: a
-June bonus of ₱150k under-withheld ~₱16.8k until December, and an
-employee who left before December was never trued up on it.
+loads for every payroll), for MWEs too; since spec T2 the excess is S of
+the period it is paid. Why it mattered: a June bonus of ₱150k
+under-withheld ~₱16.8k until December, and an employee who left before
+December was never trued up on it.
+
+### Withholding: the row comes from R; CAM from a trigger to year end (confirmed approach, spec T2)
+
+Taxable pay splits by pay code into R (basic pay, allowances paid every
+period, basic corrections) and S (overtime, premiums, ND, hazard pay,
+commission, other one-time pay, the ₱90k excess). Regular method:
+`taxOnRow(R + S, bracketFor(R))`. CAM (`periodWithholding`): when R is in
+the 0% row and S was paid this year (a), S ≥ R with S > 0 (b), a previous
+employer this year (c), or any of these earlier in the year — cum = the
+year's R + S + previous employer's taxable, n = pay periods of this
+frequency by pay date from the first pay of the year, due = n × base +
+rate × (cum − n × lower bound) exact, less everything withheld. Why it
+mattered: the old lookup on R + S over-withheld (W1: 11,875.05 instead of
+11,208.40), and an R in the 0% row withheld nothing on any S. The readings
+the spec leaves open are in `docs/payroll-spec-mapping.md` §5 — don't
+change them without the owner.
+
+### CHECK constraints fire in alphabetical order by name
+
+Postgres tests a row's CHECK constraints in name order (after NOT NULL).
+`sync_pay_code` leaves `pay_code` null when a category has no code, so the
+older `payroll_adjustments_category_check2` still refuses an earning with a
+deduction's category (it sorts before `..._pay_code_kind`), and it keeps a
+category-only row's own category so `payroll_adjustments_benefit_kind`
+still refuses "maternity benefit, taxable". Why it mattered: the first
+version overwrote the category from the code and silently "fixed" a
+contradictory row that suite 16 expects refused.
 
 ### SSS follows the month's actual compensation; the closing payroll settles it (confirmed approach)
 

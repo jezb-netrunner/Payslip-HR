@@ -9,7 +9,7 @@ import {
 } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
-import type { StatutoryTables } from '../payroll/types'
+import type { PayCode, StatutoryTables } from '../payroll/types'
 import { pickStatutoryTables } from '../payroll/versions'
 
 export async function getEntity(id: string): Promise<Entity> {
@@ -30,6 +30,13 @@ export async function getStatutoryTables(asOf: string): Promise<StatutoryTables>
     .order('effective_from', { ascending: false })
   if (error) throw error
   return pickStatutoryTables((data ?? []) as StatutoryVersion[], asOf)
+}
+
+/** The pay codes on file (reference data shipped by migration, read-only), in display order. */
+export async function getPayCodes(): Promise<PayCode[]> {
+  const { data, error } = await supabase.from('pay_codes').select('*').order('sort_order')
+  if (error) throw error
+  return (data ?? []) as PayCode[]
 }
 
 const HOLIDAY_STRENGTH: Record<Holiday['kind'], number> = {

@@ -30,7 +30,8 @@ are refused; the Generate button makes random ones.
 - Statutory tables (read-only): the WHT, SSS, PhilHealth, Pag-IBIG and BIR
   annual tables in force and every past version, each with its legal basis,
   source and the date it was last verified; a quick contribution check for
-  a sample salary; a yearly-check reminder on the dashboard
+  a sample salary; a yearly-check reminder on the dashboard; the pay codes
+  and how each is taxed
 - National holidays (clients add their own local holidays)
 - Dashboard across all clients
 
@@ -39,7 +40,8 @@ are refused; the Generate button makes random ones.
   nationality and ZIP (for the alphalist), **hire date and separation date with
   reason** (resignation, termination, retirement, end of contract, death…),
   career history, pay frequency, pay type, payment method (cash / bank /
-  e-wallet / check), allowances with BIR classification, recurring deductions
+  e-wallet / check), allowances with a pay code (how each is taxed, and
+  whether it is regular or supplementary compensation), recurring deductions
   and loans, union dues, previous-employer and PERA data per tax year
 - **Schedules**: client shift templates (start, end, meal break, flexible
   start, compressed-workweek days of up to 12 hours — DOLE Department
@@ -186,7 +188,7 @@ eBIRForms / eFPS.
 
 | Item | Basis | Implementation |
 |---|---|---|
-| Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward | Daily / weekly / semi-monthly / monthly tables + annual table for annualization, versioned in DB |
+| Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward; RR 2-98 Sec. 2.79(B) as amended by RR 11-2018 (regular and cumulative average methods) | Daily / weekly / semi-monthly / monthly tables + annual table for annualization, versioned in DB. Taxable pay is split by pay code into regular (R) and supplementary (S) compensation; the table row comes from R alone, and the cumulative average method applies from a trigger (S paid while R is in the 0% row, S at least R, or a previous employer this year) to the end of the year |
 | SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MySSS Pension Booster (MPF) above ₱20k; EC ₱10/₱30; MSC on the month's actual compensation (Sec. 8(f)) | Earlier payrolls of a month deduct a provisional share on the rate; the month's closing payroll settles it on everything the month paid (OT, allowances), refunding any over-deduction |
 | PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50; employee share paid by the government for PWDs (RA 11228) and solo parents (RA 11861, Circular 2026-0015) | Odd centavo carried by employer (official convention); waiver per employee with dates |
 | Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | On basic salary plus allowances, capped |
@@ -224,6 +226,12 @@ every API role. A change in the law ships as a migration:
    agency's own examples, and run `npm test` and `supabase/tests/run.sh`.
 4. Apply the migration, run the Supabase security advisors, and record the
    change in MEMORY.md (*Verified 2026 PH statutory figures*).
+
+**Pay codes** ship the same way: what each allowance and one-time earning
+is (`pay_codes`: BIR bucket, regular or supplementary, tax rule) is a
+migration, mirrored in `src/payroll/payCodes.ts` and checked by
+`supabase/tests/18_pay_codes_tests.sql`. Rows saved with only a category get
+that category's code (`default_pay_code`).
 
 Versions that finalized payrolls may have used are frozen. Only a published
 mistake is corrected in place, deliberately: the correcting migration runs
@@ -346,5 +354,12 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
   apply them yet: classifying allowances as de minimis within the ceilings
   stays the admin's responsibility until the per-item tracking (payroll tax
   rules spec, T7) is built.
+- The cumulative average method follows the payroll tax rules spec; where
+  it is silent the app reads it this way: a payroll with no pay at all is
+  not "S at least R"; a 13th-month payslip (no regular pay of its own) does
+  not count as the 0% row; periods are counted by pay date from the first
+  pay of the year (a previous employer's start date, or January 1 when it
+  isn't on file); payrolls paid before the rule count for the triggers with
+  their regular and supplementary pay as they were taxed.
 - This software assists with compliance but is not legal advice — always
   reconcile remittances with each agency's official schedules and forms.

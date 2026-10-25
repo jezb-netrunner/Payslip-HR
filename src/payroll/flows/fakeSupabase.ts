@@ -5,6 +5,7 @@
 // payroll_seq, loan balances, overlap + staleness checks).
 
 import { DE_MINIMIS_2026_EFFECTIVE, DEFAULT_TABLES } from '../defaults'
+import { PAY_CODES } from '../payCodes'
 import { slotFor } from '../../lib/payPeriods'
 import { eachDate, isoWeekday } from '../../lib/manila'
 
@@ -15,6 +16,7 @@ const TABLES = [
   'entities', 'employees', 'payroll_runs', 'payslips', 'time_entries', 'leave_requests', 'leave_types',
   'employee_allowances', 'recurring_deductions', 'payroll_adjustments', 'employee_tax_years',
   'statutory_versions', 'holidays', 'employee_schedules', 'schedule_overrides', 'payroll_deduction_overrides',
+  'pay_codes',
 ]
 
 export const db: { t: Record<string, Row[]>; seq: number } = { t: {}, seq: 0 }
@@ -27,6 +29,7 @@ export function resetDb() {
     const effective = kind === 'de_minimis' ? DE_MINIMIS_2026_EFFECTIVE : '2000-01-01'
     db.t.statutory_versions.push({ id: newId(), kind, effective_from: effective, data })
   }
+  db.t.pay_codes = PAY_CODES.map((c) => ({ ...c }))
 }
 
 export function newId(): string {

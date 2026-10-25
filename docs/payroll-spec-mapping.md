@@ -95,3 +95,27 @@ skipped (no 1601-C lines 15–19, no quarterly MWE hazard-pay list).
   the SSS, PhilHealth and Pag-IBIG tables only, and the spec's date is used.
 - **The live database is not touched.** Migrations ship on the branch and are
   applied when the owner approves (README, *Updating the statutory tables*).
+
+## 5. Readings taken in T2 (for the owner to confirm)
+
+The spec is silent on these; T2 implements the reading named, and each is
+a small change if the owner reads it otherwise.
+
+1. **Trigger (b) needs S above 0.** "S for the period is equal to or more
+   than R" would otherwise hold for a payroll with no pay at all (0 ≥ 0)
+   and start CAM for an employee on unpaid leave.
+2. **A 13th-month payslip is not a period in the 0% row (trigger a).** A
+   13th-month run pays no regular compensation of its own (the period's R
+   is in its regular payroll), so its R of 0 doesn't count; its taxable
+   excess still triggers (b), and CAM already on stays on.
+3. **Payrolls paid before T2 count for the triggers.** Their R and S are
+   derived from the stored lines (basic pay and allowances less the
+   contributions = R, the rest of the taxable pay = S). Their tax is not
+   changed (§0 step 7).
+4. **`n` is counted by pay date** (the tax year follows the pay date), in
+   periods of the current payroll frequency, from the first pay of the year
+   by any employer: the previous employer's start date (January 1 when it
+   isn't on file, with a warning), or this employer's first payroll.
+5. **Draft payrolls are marked for recomputing** when the T2 migration is
+   applied, so no draft computed on the old method is finalized.
+

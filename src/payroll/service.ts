@@ -2,7 +2,7 @@
 // Supabase for one client, computes every employee's payslip, and stores
 // the drafts. RLS limits all of this to admins of the run's client.
 
-import { getEntity, getHolidaysBetween, getStatutoryTables } from '../lib/api'
+import { getEntity, getHolidaysBetween, getPayCodes, getStatutoryTables } from '../lib/api'
 import { fetchAll } from '../lib/fetchAll'
 import { fmtDate } from '../lib/format'
 import { addDays } from '../lib/manila'
@@ -24,6 +24,7 @@ import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
 import { computePayslip, sssCompensation, type ContributionSet } from './engine'
 import { round2 } from './types'
+import { withholdingFactOf, type PriorWithholding } from './withholding'
 import type {
   BirBucket,
   HolidayLite,
@@ -53,6 +54,10 @@ export type YearPayslip = Pick<
   | 'earnings'
   | 'basic_pay'
   | 'gross_pay'
+  | 'taxable_income'
+  | 'taxable_regular'
+  | 'taxable_supplementary'
+  | 'wht_method'
   | 'sss_ee'
   | 'sss_mpf_ee'
   | 'philhealth_ee'
@@ -64,7 +69,7 @@ export type YearPayslip = Pick<
 > & { payroll_runs?: { annualize?: boolean } | null }
 
 const YEAR_PAYSLIP_COLUMNS =
-  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, net_pay, payroll_runs!inner(status, annualize)'
+  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, taxable_income, taxable_regular, taxable_supplementary, wht_method, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, net_pay, payroll_runs!inner(status, annualize)'
 
 /**
  * Finalized payslips of one client whose payroll month falls in `year` —
@@ -111,6 +116,17 @@ export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
     contributionsEe: Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee),
     unionDues: Number(p.union_dues),
     withholdingTax: Number(p.withholding_tax),
+  }
+}
+
+/** Previous employers this tax year, as the withholding method needs them (spec T2, trigger c). */
+function priorWithholdingOf(t: EmployeeTaxYear | undefined): PriorWithholding | null {
+  if (!t || !t.has_previous_employer) return null
+  const p = priorFromTaxYear(t)
+  return {
+    taxable: round2(p.taxableBasic + p.taxable13thOtherBenefits + p.taxableOther),
+    withheld: p.taxWithheld,
+    employedFrom: t.prev_employment_from,
   }
 }
 
@@ -401,24 +417,18 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   ])
 
   // Year-to-date data. 13th month: basic earned in the payroll year.
-  // Annualization (the run's flag, or the employee separating within the
-  // period — the last pay of a separated employee settles their tax):
-  // everything PAID in the tax year.
-  // 13th month: the exemption cap is per TAX year, and a 13th month paid
-  // after the year was annualized re-annualizes.
-  // A bonus or 13th month installment paid with a regular payroll: what the
-  // tax year already paid decides how much of it is still exempt.
+  // Everything PAID in the tax year: the withholding method (R, S and tax
+  // of the year so far, and previous employers), annualization (the run's
+  // flag, or the employee separating within the period — the last pay of a
+  // separated employee settles their tax), and the exemption cap for the
+  // 13th month and other benefits, which is per TAX year (a 13th month paid
+  // after the year was annualized re-annualizes).
   const annualizes = (e: Employee) => !isThirteenth && (run.annualize || separatedBy(e, run))
   const isBenefit = (bucket: string) => bucket === 'thirteenth' || bucket === 'other_benefits'
-  const paysBenefits = new Set([
-    ...allowances.filter((a) => isBenefit(a.category)).map((a) => a.employee_id),
-    ...adjustments.filter((a) => a.kind === 'earning' && isBenefit(a.category)).map((a) => a.employee_id),
-  ])
-  const needsTaxYear = isThirteenth || employees.some((e) => annualizes(e) || paysBenefits.has(e.id))
-  const [yearSlips, taxSlips, taxYears, monthSlips] = await Promise.all([
+  const [yearSlips, taxSlips, taxYears, monthSlips, payCodes] = await Promise.all([
     isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
-    needsTaxYear ? fetchFinalizedPayslipsForTaxYear(entity.id, taxYear) : Promise.resolve([] as YearPayslip[]),
-    needsTaxYear ? fetchTaxYears(entity.id, taxYear) : Promise.resolve([] as EmployeeTaxYear[]),
+    fetchFinalizedPayslipsForTaxYear(entity.id, taxYear),
+    fetchTaxYears(entity.id, taxYear),
     // contributions already deducted this payroll month (completing months
     // around hires and separations)
     isThirteenth
@@ -435,6 +445,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             .order('id')
             .range(from, to),
         ),
+    getPayCodes(),
   ])
 
   const groupBy = <T extends { employee_id: string }>(rows: T[]) => {
@@ -527,8 +538,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         p.run_type !== 'thirteenth_month' &&
         (p.payroll_runs?.annualize || p.run_type === 'final_pay' || (!!emp.separation_date && (p.period_end ?? '') >= emp.separation_date)),
     )
-    const prior = priorFromTaxYear(taxYears.find((t) => t.employee_id === emp.id))
-    const peraCredit = Number(taxYears.find((t) => t.employee_id === emp.id)?.pera_tax_credit ?? 0)
+    const taxYearRow = taxYears.find((t) => t.employee_id === emp.id)
+    const prior = priorFromTaxYear(taxYearRow)
+    const peraCredit = Number(taxYearRow?.pera_tax_credit ?? 0)
     const linesSum = (bucket: BirBucket) =>
       empYear.reduce(
         (s, p) => s + p.earnings.filter((l) => l.bir === bucket).reduce((a, l) => a + Number(l.amount), 0),
@@ -558,6 +570,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
           amount: Number(a.amount),
           category: a.category,
           basis: a.basis,
+          payCode: a.pay_code ?? undefined,
         })),
         extraDeductions: isThirteenth
           ? []
@@ -599,9 +612,16 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             amount: Number(a.amount),
             category: a.category as BirBucket,
             ...(a.benefit ? { benefit: a.benefit } : {}),
+            payCode: a.pay_code ?? undefined,
           })),
       },
       settings: engineSettings,
+      payCodes,
+      withholding: {
+        payDate: run.pay_date,
+        ytd: empTax.map((p) => withholdingFactOf({ ...p, pay_date: p.pay_date ?? run.pay_date, run_type: p.run_type ?? 'regular' })),
+        prior: priorWithholdingOf(taxYearRow),
+      },
       period: {
         start: run.period_start,
         end: run.period_end,
@@ -753,6 +773,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     basic_pay: slip.basicPay,
     gross_pay: slip.grossPay,
     taxable_income: slip.taxableIncome,
+    taxable_regular: slip.taxableRegular,
+    taxable_supplementary: slip.taxableSupplementary,
+    wht_method: slip.whtMethod,
     sss_ee: slip.sssEe,
     sss_er: slip.sssEr,
     sss_ec_er: slip.sssEcEr,

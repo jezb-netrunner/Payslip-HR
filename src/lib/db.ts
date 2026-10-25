@@ -10,6 +10,7 @@ import type {
   PayFrequency,
   RoundingMode,
   StatutoryKind,
+  WhtMethod,
   WorkSchedule,
 } from '../payroll/types'
 
@@ -157,8 +158,11 @@ export interface EmployeeAllowance {
   employee_id: string
   label: string
   amount: number
+  /** follows the pay code (a database trigger keeps them in step) */
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** pay_codes.code: what the allowance is (spec T2) */
+  pay_code: string
   active: boolean
 }
 
@@ -319,6 +323,8 @@ export interface PayslipLine {
   bir?: BirBucket
   hours?: number
   meta?: string
+  /** allowances and one-time earnings */
+  payCode?: string
 }
 
 export interface Payslip {
@@ -349,6 +355,11 @@ export interface Payslip {
   basic_pay: number
   gross_pay: number
   taxable_income: number
+  /** R and S (spec T2); null on payslips computed before them */
+  taxable_regular: number | null
+  taxable_supplementary: number | null
+  /** how withholding was computed; null on payslips computed before T2 */
+  wht_method: WhtMethod | null
   sss_ee: number
   sss_er: number
   sss_ec_er: number
@@ -388,8 +399,11 @@ export interface PayrollAdjustment {
   kind: 'earning' | 'deduction'
   label: string
   amount: number
+  /** earnings: follows the pay code; deductions: 'union_dues' or 'other' */
   category: string
-  /** RA 11210 maternity pay (category other_non_taxable) */
+  /** earnings only: pay_codes.code (spec T2) */
+  pay_code?: string | null
+  /** RA 11210 maternity pay (category other_non_taxable), set by the pay code */
   benefit?: MaternityBenefit | null
   /** date the employee signed the written authorization ('other' deductions, Labor Code Art. 113) */
   authorized_on?: string | null

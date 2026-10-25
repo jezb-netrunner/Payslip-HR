@@ -49,22 +49,18 @@ import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib
 import { useEntity } from '../../lib/entity'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
-import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
+import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
+import { payCodeHint, payCodeLabel, usePayCodes } from '../../lib/usePayCodes'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
-import { round2, type MaternityBenefit } from '../../payroll/types'
+import { round2 } from '../../payroll/types'
 
 // Categorical chart colours in fixed order (validated: lightness, chroma,
 // colour-blind and normal-vision separation; yellow sits below 3:1, so every
 // segment carries a printed value in its legend).
 const SERIES = { green: '#3a8a5c', blue: '#1d6fb1', yellow: '#eda100', violet: '#6250d6', orange: '#d9661a' }
-
-const EARNING_CATEGORIES = [
-  'basic', 'overtime', 'holiday', 'night_diff', 'hazard', 'other_benefits', 'de_minimis',
-  'representation', 'transportation', 'cola', 'housing', 'other_taxable', 'other_non_taxable',
-] as const
 
 export default function PayrollRunDetail() {
   const { id } = useParams()
@@ -75,6 +71,7 @@ export default function PayrollRunDetail() {
   const [slips, setSlips] = useState<Payslip[]>([])
   const [adjustments, setAdjustments] = useState<PayrollAdjustment[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const payCodes = usePayCodes()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [computing, setComputing] = useState(false)
@@ -445,7 +442,8 @@ export default function PayrollRunDetail() {
                     const snap = s.employee_snapshot as Record<string, string>
                     const mine = adjustments.filter((a) => a.employee_id === s.employee_id)
                     const statEe = Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.philhealth_ee) + Number(s.pagibig_ee)
-                    const tax = `${Number(s.withholding_tax) < 0 ? 'Tax refund' : 'W/tax'} ${money(Math.abs(Number(s.withholding_tax)))}`
+                    // CAM: the cumulative average method (see the payslip's computation notes)
+                    const tax = `${Number(s.withholding_tax) < 0 ? 'Tax refund' : 'W/tax'} ${money(Math.abs(Number(s.withholding_tax)))}${s.wht_method === 'cam' ? ' (CAM)' : ''}`
                     const shortcuts = canAdjust && coveredIds.has(s.employee_id)
                     const adjusts = (
                       <>
@@ -593,11 +591,7 @@ export default function PayrollRunDetail() {
                         <span className="text-slate-500"> · {a.label}</span>{' '}
                         <Badge tone={a.kind === 'earning' ? 'green' : 'red'}>{a.kind}</Badge>{' '}
                         <span className="text-xs text-slate-400">
-                          {a.benefit
-                            ? MATERNITY_BENEFIT_LABELS[a.benefit]
-                            : a.kind === 'earning'
-                              ? BIR_BUCKET_LABELS[a.category as keyof typeof BIR_BUCKET_LABELS]
-                              : a.category.replaceAll('_', ' ')}
+                          {a.kind === 'earning' ? payCodeLabel(payCodes, a.pay_code) : a.category.replaceAll('_', ' ')}
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -886,17 +880,20 @@ function AdjustmentModal({
   onSaved: () => Promise<void>
 }) {
   const toast = useToast()
+  const payCodes = usePayCodes()
   const [f, setF] = useState({
     employee_id: initialEmployeeId && employees.some((e) => e.id === initialEmployeeId) ? initialEmployeeId : (employees[0]?.id ?? ''),
     kind: initialKind as string,
     label: '',
     amount: '',
-    category: initialKind === 'earning' ? 'other_taxable' : 'other',
+    // earnings: what it is (its pay code); deductions: 'other' or 'union_dues'
+    payCode: 'OTHER_TAXABLE',
+    category: 'other',
     authorized: '',
   })
   const [busy, setBusy] = useState(false)
-  // maternity pay is picked like a classification: other non-taxable, marked with which one
-  const benefit = f.kind === 'earning' && f.category.startsWith('benefit:') ? (f.category.slice(8) as MaternityBenefit) : null
+  const oneTimeCodes = payCodes.filter((c) => c.for_one_time && c.active)
+  const code = f.kind === 'earning' ? payCodes.find((c) => c.code === f.payCode) : undefined
   const needsAuthorization = f.kind === 'deduction' && f.category === 'other'
 
   async function save() {
@@ -916,8 +913,8 @@ function AdjustmentModal({
       kind: f.kind,
       label: f.label.trim(),
       amount: Number(f.amount),
-      category: f.kind === 'earning' ? (benefit ? 'other_non_taxable' : f.category) : f.category === 'union_dues' ? 'union_dues' : 'other',
-      benefit,
+      // an earning's BIR category and maternity benefit follow its pay code (set by the database)
+      ...(f.kind === 'earning' ? { pay_code: f.payCode } : { category: f.category === 'union_dues' ? 'union_dues' : 'other' }),
       authorized_on: needsAuthorization ? f.authorized : null,
       created_by: userData.user?.id ?? null,
     })
@@ -940,7 +937,7 @@ function AdjustmentModal({
           <Field label="Type">
             <Select
               value={f.kind}
-              onChange={(e) => setF({ ...f, kind: e.target.value, category: e.target.value === 'earning' ? 'other_taxable' : 'other' })}
+              onChange={(e) => setF({ ...f, kind: e.target.value, payCode: 'OTHER_TAXABLE', category: 'other' })}
             >
               <option value="earning">Earning (added)</option>
               <option value="deduction">Deduction (subtracted)</option>
@@ -953,27 +950,27 @@ function AdjustmentModal({
         <Field label="Label (shown on the payslip)">
           <Input value={f.label} maxLength={120} placeholder="e.g. Unpaid OT on Oct 3" onChange={(e) => setF({ ...f, label: e.target.value })} />
         </Field>
-        <Field label={f.kind === 'earning' ? 'BIR classification' : 'Deduction kind'}>
-          <Select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
-            {f.kind === 'earning' ? (
-              <>
-                {EARNING_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{BIR_BUCKET_LABELS[c]}</option>
+        {f.kind === 'earning' ? (
+          <Field label="Pay code" hint={code && payCodeHint(code, 'one_time')}>
+            <Select value={f.payCode} onChange={(e) => setF({ ...f, payCode: e.target.value })}>
+              {oneTimeCodes.filter((c) => !c.benefit).map((c) => (
+                <option key={c.code} value={c.code}>{c.label}</option>
+              ))}
+              <optgroup label="Maternity leave (RA 11210)">
+                {oneTimeCodes.filter((c) => c.benefit).map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
                 ))}
-                <optgroup label="Maternity leave (RA 11210)">
-                  {(Object.keys(MATERNITY_BENEFIT_LABELS) as MaternityBenefit[]).map((b) => (
-                    <option key={b} value={`benefit:${b}`}>{MATERNITY_BENEFIT_LABELS[b]}</option>
-                  ))}
-                </optgroup>
-              </>
-            ) : (
-              <>
-                <option value="other">Other deduction</option>
-                <option value="union_dues">Union dues (tax-exempt)</option>
-              </>
-            )}
-          </Select>
-        </Field>
+              </optgroup>
+            </Select>
+          </Field>
+        ) : (
+          <Field label="Deduction kind">
+            <Select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
+              <option value="other">Other deduction</option>
+              <option value="union_dues">Union dues (tax-exempt)</option>
+            </Select>
+          </Field>
+        )}
         {needsAuthorization && (
           <Field
             label="Employee's written authorization signed on"
@@ -984,9 +981,9 @@ function AdjustmentModal({
         )}
         {f.kind === 'earning' && (
           <p className="text-xs text-slate-400">
-            {benefit
+            {code?.benefit
               ? 'Maternity leave days are not paid as salary: the SSS maternity benefit (advanced in full within 30 days of the leave application) and the salary differential up to full pay are their own earnings, both tax-exempt (RMC 105-2019).'
-              : 'Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory minimum wage package stays exempt for minimum wage earners. Monetized unused vacation leave is de minimis up to 12 days a year (RR 29-2025); classify the rest as Other taxable.'}
+              : 'Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory minimum wage package stays exempt for minimum wage earners. Monetized unused vacation leave is de minimis up to 12 days a year (RR 29-2025); use Other taxable pay for the rest.'}
           </p>
         )}
         <Button className="w-full" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Add adjustment'}</Button>

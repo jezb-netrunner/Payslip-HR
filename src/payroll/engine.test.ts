@@ -564,8 +564,13 @@ describe('13th month pay (PD 851)', () => {
     expect(slip.sssEe).toBe(0) // no contributions on 13th month
   })
 
-  it('taxes only the excess over the cap as supplemental compensation', () => {
+  it('taxes only the excess over the cap, as supplementary compensation withheld by CAM (spec T2)', () => {
     const highEarner: PayrollEmployeeInput = { ...monthlyEmployee, monthlyRate: 150000 }
+    // 23 semi-monthly payrolls paid Jan 15 to Dec 15: R 70,000 each, 13,437.45 withheld on the regular method
+    const ytd = Array.from({ length: 23 }, (_, i) => ({
+      payDate: `2026-${String(Math.floor(i / 2) + 1).padStart(2, '0')}-${i % 2 ? '28' : '15'}`,
+      regular: 70000, supplementary: 0, withheld: 13437.45, method: 'regular' as const, gross: 75000,
+    }))
     const slip = computePayslip({
       employee: highEarner,
       settings,
@@ -574,12 +579,16 @@ describe('13th month pay (PD 851)', () => {
       days: [],
       runType: 'thirteenth_month',
       ytdBasicPay: 1800000,
+      withholding: { payDate: '2026-12-20', ytd },
     })
     expect(slip.grossPay).toBe(150000)
     expect(slip.taxableIncome).toBe(60000)
-    // marginal: tax(145,550 + 60,000) - tax(145,550) on the monthly table
-    expect(slip.withholdingTax).toBe(16944.15)
-    expect(slip.netPay).toBe(133055.85)
+    expect(slip.taxableSupplementary).toBe(60000)
+    expect(slip.whtMethod).toBe('cam')
+    // 24 periods: 24 × 4,270.70 + 25% × (1,670,000 − 24 × 33,333) = 319,998.80 due, less 23 × 13,437.45
+    // (the old marginal method on the monthly table took 16,944.15)
+    expect(slip.withholdingTax).toBe(10937.45)
+    expect(slip.netPay).toBe(139062.55)
   })
 })
 

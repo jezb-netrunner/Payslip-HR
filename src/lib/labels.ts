@@ -1,7 +1,14 @@
 // Display labels and BIR codes shared across pages.
 
 import type { EmploymentStatus, PaymentMethod, SeparationReason } from './db'
-import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, RoundingMode } from '../payroll/types'
+import type {
+  AllowanceBasis,
+  ContributionTiming,
+  IncomeClass,
+  PayCodeTaxTreatment,
+  PayFrequency,
+  RoundingMode,
+} from '../payroll/types'
 
 export const FREQUENCY_LABELS: Record<PayFrequency, string> = {
   weekly: 'Weekly',
@@ -70,45 +77,25 @@ export const CONTRIBUTION_TIMING_LABELS: Record<ContributionTiming, string> = {
   last_period: 'All on the last payroll of the month',
 }
 
-export const ALLOWANCE_CATEGORY_LABELS: Record<AllowanceCategory, string> = {
-  de_minimis: 'De minimis benefit (non-taxable)',
-  other_benefits: 'Bonus / other benefits (₱90k cap with 13th month)',
-  hazard: 'Hazard pay',
-  representation: 'Representation (taxable)',
-  transportation: 'Transportation (taxable)',
-  cola: 'COLA mandated by a wage order',
-  housing: 'Fixed housing allowance (taxable)',
-  other_taxable: 'Other taxable allowance',
-  other_non_taxable: 'Other non-taxable compensation',
-}
-
 export const ALLOWANCE_BASIS_LABELS: Record<AllowanceBasis, string> = {
   monthly: 'per month (split across payrolls)',
   per_period: 'per payroll',
   per_day: 'per paid day',
 }
 
-export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
-  basic: 'Basic pay',
-  holiday: 'Holiday / premium pay',
-  overtime: 'Overtime pay',
-  night_diff: 'Night differential',
-  hazard: 'Hazard pay',
-  thirteenth: '13th month pay',
-  other_benefits: 'Bonus / other benefits',
-  de_minimis: 'De minimis',
-  representation: 'Representation',
-  transportation: 'Transportation',
-  cola: 'COLA (wage order)',
-  housing: 'Housing allowance',
-  other_taxable: 'Other taxable',
-  other_non_taxable: 'Other non-taxable',
+/** How a pay code's line is taxed (spec T2). */
+export const PAY_CODE_TAX_LABELS: Record<PayCodeTaxTreatment, string> = {
+  taxable: 'Taxable',
+  mwe_exempt: 'Taxable, exempt for minimum wage earners',
+  benefits: '₱90k bucket: taxable above ₱90,000 a year',
+  de_minimis: 'De minimis: non-taxable within the ceiling',
+  exempt: 'Non-taxable',
 }
 
-/** RA 11210 maternity pay, paid as one-time earnings (both tax-exempt, RMC 105-2019). */
-export const MATERNITY_BENEFIT_LABELS: Record<MaternityBenefit, string> = {
-  sss_maternity: 'SSS maternity benefit (tax-exempt)',
-  maternity_differential: 'Maternity salary differential (tax-exempt, counts for 13th month)',
+/** Regular (R) or supplementary (S) compensation. */
+export const INCOME_CLASS_LABELS: Record<IncomeClass, string> = {
+  regular: 'Regular (R)',
+  supplementary: 'Supplementary (S)',
 }
 
 /** Wage-board regions (for minimum wage and the MWE alphalist). */

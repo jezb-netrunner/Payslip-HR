@@ -66,7 +66,6 @@ import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials, plural } from '../../lib/format'
 import {
   ALLOWANCE_BASIS_LABELS,
-  ALLOWANCE_CATEGORY_LABELS,
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
   PAYMENT_METHOD_LABELS,
@@ -77,11 +76,12 @@ import { AUTHORIZED_DEDUCTIONS, DEDUCTION_CATEGORY_LABELS, repaymentText } from 
 import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
+import { payCodeHint, payCodeLabel, usePayCodes } from '../../lib/usePayCodes'
 import { ScheduleTab } from './EmployeeSchedule'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
-import type { AllowanceBasis, AllowanceCategory, PayFrequency } from '../../payroll/types'
+import type { AllowanceBasis, PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
 
 const eventLabels: Record<string, string> = {
@@ -591,6 +591,10 @@ function PayTab({
   const [listBusy, setListBusy] = useState(false)
   const [editingAlw, setEditingAlw] = useState<AllowanceForm | null>(null)
   const [editingDed, setEditingDed] = useState<DeductionForm | null>(null)
+  const payCodes = usePayCodes()
+  // what an allowance can be: codes for recurring allowances (and the one it already has)
+  const allowanceCodes = payCodes.filter((c) => (c.for_allowances && c.active) || c.code === editingAlw?.pay_code)
+  const pickedCode = payCodes.find((c) => c.code === editingAlw?.pay_code)
 
   async function savePay() {
     const dpy = f.days_per_year ? Number(f.days_per_year) : null
@@ -656,7 +660,8 @@ function PayTab({
       toast('error', 'Enter a label and an amount above zero.')
       return
     }
-    const row = { label: a.label.trim(), amount, category: a.category, basis: a.basis }
+    // the database sets the BIR category from the pay code
+    const row = { label: a.label.trim(), amount, pay_code: a.pay_code, basis: a.basis }
     const done = await listWrite(
       () =>
         a.id
@@ -805,7 +810,7 @@ function PayTab({
         title="Allowances and benefits"
         icon={<Gift />}
         actions={
-          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly' })}>
+          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', pay_code: 'DE_MINIMIS', basis: 'monthly' })}>
             <Plus className="size-4" /> Add
           </Button>
         }
@@ -817,14 +822,14 @@ function PayTab({
               <div className="min-w-0">
                 <p className="break-words text-sm font-semibold text-slate-700">{a.label}</p>
                 <p className="text-xs text-slate-400">
-                  {money(Number(a.amount))} {ALLOWANCE_BASIS_LABELS[a.basis]} · {ALLOWANCE_CATEGORY_LABELS[a.category]}
+                  {money(Number(a.amount))} {ALLOWANCE_BASIS_LABELS[a.basis]} · {payCodeLabel(payCodes, a.pay_code)}
                   {!a.active && ' · inactive'}
                 </p>
               </div>
               <div className="flex shrink-0 gap-3">
                 <button
                   type="button"
-                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis })}
+                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), pay_code: a.pay_code, basis: a.basis })}
                   className="text-xs font-semibold text-brand-600"
                 >
                   Edit
@@ -968,10 +973,10 @@ function PayTab({
                 </Select>
               </Field>
             </div>
-            <Field label="BIR classification">
-              <Select value={editingAlw.category} onChange={(e) => setEditingAlw({ ...editingAlw, category: e.target.value as AllowanceCategory })}>
-                {Object.entries(ALLOWANCE_CATEGORY_LABELS).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
+            <Field label="Pay code" hint={pickedCode && payCodeHint(pickedCode, 'allowance')}>
+              <Select value={editingAlw.pay_code} onChange={(e) => setEditingAlw({ ...editingAlw, pay_code: e.target.value })}>
+                {allowanceCodes.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
                 ))}
               </Select>
             </Field>
@@ -1036,7 +1041,8 @@ interface AllowanceForm {
   id?: string
   label: string
   amount: string
-  category: AllowanceCategory
+  /** pay_codes.code */
+  pay_code: string
   basis: AllowanceBasis
 }
 

@@ -250,6 +250,42 @@ export type AllowanceCategory =
 /** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
 export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'
 
+/**
+ * Regular compensation (R: basic salary and fixed allowances paid each
+ * period) or supplementary compensation (S: everything paid in addition to
+ * it), RR 2-98 Sec. 2.78.1(A), as amended by RR 11-2018.
+ */
+export type IncomeClass = 'regular' | 'supplementary'
+
+/**
+ * How a pay code's line is taxed (it follows the BIR bucket): always taxable,
+ * exempt for minimum wage earners only, in the ₱90k bucket, de minimis, or
+ * never taxable.
+ */
+export type PayCodeTaxTreatment = 'taxable' | 'mwe_exempt' | 'benefits' | 'de_minimis' | 'exempt'
+
+/** One `pay_codes` row: what an allowance or one-time earning is (spec T2). */
+export interface PayCode {
+  code: string
+  label: string
+  description: string
+  /** offered for recurring allowances */
+  for_allowances: boolean
+  /** offered for one-time earnings in a payroll */
+  for_one_time: boolean
+  bir_bucket: BirBucket
+  /** R or S of the taxable part when paid as an allowance each period (null: never taxable) */
+  income_class: IncomeClass | null
+  tax_treatment: PayCodeTaxTreatment
+  /** the maternity benefit the code pays */
+  benefit: MaternityBenefit | null
+  sort_order: number
+  active: boolean
+}
+
+/** How a payslip's withholding tax was computed. */
+export type WhtMethod = 'regular' | 'cam' | 'annualized'
+
 export interface PayrollEmployeeInput {
   id: string
   name: string
@@ -280,6 +316,8 @@ export interface AllowanceInput {
   amount: number
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** its pay code (omitted: the category's code, for rows saved before pay codes) */
+  payCode?: string
 }
 
 /**
@@ -295,6 +333,8 @@ export interface OneTimeEarningInput {
   amount: number
   category: BirBucket
   benefit?: MaternityBenefit
+  /** its pay code (omitted: the category's code, for rows saved before pay codes) */
+  payCode?: string
 }
 
 export interface ExtraDeductionInput {
@@ -356,6 +396,8 @@ export interface PayLine {
   meta?: string
   /** Earnings only: counts toward 13th month pay although not basic pay (the maternity salary differential). */
   thirteenthBasis?: boolean
+  /** Allowances and one-time earnings: the pay code. */
+  payCode?: string
 }
 
 export interface SssComputation {
@@ -392,7 +434,13 @@ export interface PayslipComputation {
   deductions: PayLine[]
   basicPay: number
   grossPay: number
+  /** Taxable compensation: taxableRegular + taxableSupplementary. */
   taxableIncome: number
+  /** R: taxable regular compensation, after the contributions and union dues. */
+  taxableRegular: number
+  /** S: taxable supplementary compensation, the ₱90k excess included. */
+  taxableSupplementary: number
+  whtMethod: WhtMethod
   sssEe: number
   sssEr: number
   sssEcEr: number
