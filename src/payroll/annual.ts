@@ -14,7 +14,7 @@
 //    across all employers (Sec. 32(B)(7)(e)); only the excess is taxable.
 
 import { taxFromBrackets } from './statutory'
-import { round2, type BirAnnualData, type BirBucket } from './types'
+import { round2, type BirAnnualData, type BirBucket, type IncomeClass } from './types'
 
 export interface AnnualPayslipFact {
   /** Month the pay was released (YYYY-MM-01): withholding tax is reported
@@ -22,7 +22,8 @@ export interface AnnualPayslipFact {
    *  the tax year and the December / January–November split. */
   payMonth: string
   isMwe: boolean
-  earnings: { amount: number; bir?: BirBucket; taxable?: boolean }[]
+  /** Lines from spec T5 on also say R or S (incomeClass) when taxable. */
+  earnings: { amount: number; bir?: BirBucket; taxable?: boolean; incomeClass?: IncomeClass }[]
   /** SSS (incl. MPF) + PhilHealth + Pag-IBIG employee shares. */
   contributionsEe: number
   unionDues: number
@@ -145,7 +146,7 @@ export function summarizeYear(
   const b = {
     mweBasic: 0, mweHoliday: 0, mweOvertime: 0, mweNightDiff: 0, mweHazard: 0, mweCola: 0,
     nonBasic: 0, holiday: 0, overtime: 0, nightDiff: 0, hazard: 0, cola: 0,
-    representation: 0, transportation: 0, housing: 0, otherTaxable: 0,
+    representation: 0, transportation: 0, housing: 0, otherTaxable: 0, otherSupplementary: 0,
     thirteenthOb: 0, deMinimis: 0, otherNonTaxable: 0,
     contribMwe: 0, contribNon: 0,
   }
@@ -158,7 +159,9 @@ export function summarizeYear(
     for (const l of f.earnings) {
       gross += l.amount
       const bucket: BirBucket = l.bir ?? (l.taxable ? 'other_taxable' : 'other_non_taxable')
-      if (f.isMwe && MWE_EXEMPT_BUCKETS.includes(bucket)) {
+      // an MWE's line of the exempt package is exempt unless the payslip
+      // taxed it (hazard pay without the criteria and the DOLE certification, spec T5)
+      if (f.isMwe && MWE_EXEMPT_BUCKETS.includes(bucket) && l.taxable !== true) {
         if (bucket === 'basic') b.mweBasic += l.amount
         else if (bucket === 'holiday') b.mweHoliday += l.amount
         else if (bucket === 'overtime') b.mweOvertime += l.amount
@@ -177,7 +180,11 @@ export function summarizeYear(
         case 'representation': b.representation += l.amount; break
         case 'transportation': b.transportation += l.amount; break
         case 'housing': b.housing += l.amount; break
-        case 'other_taxable': b.otherTaxable += l.amount; break
+        // the "Others" boxes: regular, or supplementary (an MWE's premium add-ons among them)
+        case 'other_taxable':
+          if (l.incomeClass === 'supplementary') b.otherSupplementary += l.amount
+          else b.otherTaxable += l.amount
+          break
         case 'thirteenth':
         case 'other_benefits': b.thirteenthOb += l.amount; break
         case 'de_minimis': b.deMinimis += l.amount; break
@@ -218,7 +225,7 @@ export function summarizeYear(
 
   const taxableBasic = b.nonBasic - nonCarve
   const taxableOtherRegular = b.otherTaxable - spill
-  const taxableOtherSupplementary = b.holiday + b.nightDiff
+  const taxableOtherSupplementary = b.holiday + b.nightDiff + b.otherSupplementary
   const totalTaxablePresent =
     taxableBasic + b.representation + b.transportation + b.cola + b.housing +
     taxableOtherRegular + taxable13 + b.hazard + b.overtime + taxableOtherSupplementary

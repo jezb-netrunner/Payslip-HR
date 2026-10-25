@@ -132,6 +132,19 @@ export function unworkedHolidaysPaid(
   return paid
 }
 
+// Basis: RR 2-98 §2.78.1(B)(13) and §2.79(A), as amended by RR 11-2018 §§6–7. The exemption covers only "holiday pay, overtime pay, night shift differential pay, and hazard pay". RMC 50-2018 A13 says income outside that list is taxable. Labor Code (PD 442) Art. 93 covers rest-day and special-holiday "additional compensation"; Art. 94 covers holiday pay.
+/**
+ * A minimum wage earner's pay for a day above what stays exempt, as a
+ * multiple of the day's rate: on a rest day or a special day the pay at the
+ * SMW rate (100%) is exempt and the additional compensation (30%, 50% for a
+ * special day on a rest day) is not; on a regular holiday holiday pay up to
+ * 200% is exempt and anything above it (a regular holiday on a rest day) is not.
+ */
+export function premiumAddOnMultiplier(dayType: DayType): number {
+  const exempt = isRegularHolidayType(dayType) ? 2 : 1
+  return Math.max(0, DAY_MULT[dayType] - exempt)
+}
+
 function otMultiplier(dayType: DayType): number {
   return dayType === 'regular' ? 1.25 : DAY_MULT[dayType] * 1.3
 }
@@ -533,6 +546,22 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   let restDayPay = 0
   let specialDayPremium = 0
   let holidayPremium = 0
+  // a minimum wage earner's premiums above the exempt part (spec T5)
+  let restDayAddOn = 0
+  let specialDayAddOn = 0
+  let holidayAddOn = 0
+  const premium = (dayType: DayType, amount: number, addOn: number) => {
+    if (dayType === 'rest_day') {
+      restDayPay += amount - addOn
+      restDayAddOn += addOn
+    } else if (dayType === 'special_day' || dayType === 'special_day_rest') {
+      specialDayPremium += amount - addOn
+      specialDayAddOn += addOn
+    } else if (isRegularHolidayType(dayType)) {
+      holidayPremium += amount - addOn
+      holidayAddOn += addOn
+    }
+  }
   let dailyBasic = 0 // daily-paid only
 
   const stdMin = settings.standardHoursPerDay * 60
@@ -599,11 +628,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
           extraRegularMinutes += Math.max(0, d.payableMinutes - (d.expectedMinutes ?? stdMin))
         }
         const extraMult = DAY_MULT[d.dayType] - builtIn
-        const extra = extraMult * hourly * (d.payableMinutes / 60)
-        if (d.dayType === 'rest_day') restDayPay += extra
-        else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
-          specialDayPremium += extra
-        else if (isRegularHolidayType(d.dayType)) holidayPremium += extra
+        const hours = d.payableMinutes / 60
+        premium(d.dayType, extraMult * hourly * hours, isMwe ? premiumAddOnMultiplier(d.dayType) * hourly * hours : 0)
       } else if (isRegularHolidayType(d.dayType)) {
         // Paid: a holiday on a day the divisor does NOT deem paid (e.g. a
         // rest day under divisor 261) earns 100% of the daily wage (Art.
@@ -617,11 +643,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       // daily-paid: no work, no pay — each worked day is paid at its multiplier
       if (worked) {
         dailyBasic += 1.0 * daily * fraction
-        const premium = (DAY_MULT[d.dayType] - 1) * daily * fraction
-        if (d.dayType === 'rest_day') restDayPay += premium
-        else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
-          specialDayPremium += premium
-        else if (isRegularHolidayType(d.dayType)) holidayPremium += premium
+        premium(d.dayType, (DAY_MULT[d.dayType] - 1) * daily * fraction, isMwe ? premiumAddOnMultiplier(d.dayType) * daily * fraction : 0)
       } else if (isRegularHolidayType(d.dayType)) {
         // Unworked regular holiday: 100% of daily wage (Labor Code Art. 94),
         // whether or not it falls on the rest day, on the workday-before rule
@@ -673,6 +695,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   // ---- earnings ----
   const earnings: PayLine[] = []
+  // an MWE's hazard pay is exempt only with the criteria met and a DOLE
+  // certification on file (spec T5)
+  const lineTaxable = (bir: BirBucket) => (bir === 'hazard' && isMwe ? !employee.hazardExempt : isTaxableBucket(bir, isMwe))
   // taxable lines are regular (R) or supplementary (S) compensation: basic
   // pay is R, premiums, overtime and night differential are S
   let regularLines = 0
@@ -685,9 +710,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     extra: Partial<PayLine> = {},
     incomeClass: IncomeClass = bir === 'basic' ? 'regular' : 'supplementary',
   ) => {
-    const taxable = isTaxableBucket(bir, isMwe)
+    const taxable = lineTaxable(bir)
     // the payroll's own lines are compensation for work: always in the SSS base
-    earnings.push({ code, label, amount, bir, taxable, sss: true, ...extra })
+    earnings.push({ code, label, amount, bir, taxable, sss: true, ...extra, ...(taxable ? { incomeClass } : {}) })
     if (!taxable) return
     if (incomeClass === 'regular') regularLines = round2(regularLines + amount)
     else supplementaryLines = round2(supplementaryLines + amount)
@@ -759,9 +784,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   if (otPay > 0) earn('ot', 'Overtime Pay', round2(otPay), 'overtime', { hours: round2(otHours) })
   if (ndPay > 0) earn('nd', 'Night Differential', round2(ndPay), 'night_diff', { hours: round2(ndHours) })
-  if (restDayPay > 0) earn('restday', 'Rest Day Pay', round2(restDayPay), 'holiday')
-  if (specialDayPremium > 0) earn('special', 'Special Day Premium', round2(specialDayPremium), 'holiday')
-  if (holidayPremium > 0) earn('holiday', 'Holiday Pay', round2(holidayPremium), 'holiday')
+  if (round2(restDayPay) > 0) earn('restday', 'Rest Day Pay', round2(restDayPay), 'holiday')
+  if (round2(specialDayPremium) > 0) earn('special', 'Special Day Premium', round2(specialDayPremium), 'holiday')
+  if (round2(holidayPremium) > 0) earn('holiday', 'Holiday Pay', round2(holidayPremium), 'holiday')
+  // a minimum wage earner's premiums above the exempt part: taxable S, outside
+  // the MWE boxes of the 2316 (spec T5)
+  if (round2(restDayAddOn) > 0) earn('restday_addon', 'Rest Day Premium (taxable)', round2(restDayAddOn), 'other_taxable', {}, 'supplementary')
+  if (round2(specialDayAddOn) > 0) earn('special_addon', 'Special Day Premium (taxable)', round2(specialDayAddOn), 'other_taxable', {}, 'supplementary')
+  if (round2(holidayAddOn) > 0) earn('holiday_addon', 'Holiday Pay above 200% (taxable)', round2(holidayAddOn), 'other_taxable', {}, 'supplementary')
 
   const paidDays = daysWorked + paidLeaveDays + paidUnworkedHolidays
   for (const a of extrasOnly ? [] : employee.allowances) {
@@ -777,7 +807,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
     if (amt === 0) continue
     const pc = allowanceCode(a, codes)
-    const taxable = isTaxableBucket(pc.bir_bucket, isMwe)
+    const taxable = lineTaxable(pc.bir_bucket)
     earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, pc.bir_bucket, { payCode: pc.code, sss: pc.sss_include }, lineIncomeClass(pc, 'allowance'))
   }
   for (const e of employee.oneTimeEarnings ?? []) {

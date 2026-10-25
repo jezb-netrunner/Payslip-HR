@@ -350,9 +350,13 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
   compensation by default (a company-admin setting on the Statutory Tables
   page can make it exempt); a client without a DOLE exemption for the year
   can't finalize a payroll that covers maternity leave without it.
-- Whether a minimum wage earner's rest-day and special-day premiums are
-  tax-exempt like holiday pay is not settled in the sources checked; the app
-  treats them as exempt — confirm with your accountant.
+- A minimum wage earner's pay for work on a rest day or special day is
+  exempt only up to the day's pay at the minimum wage; the premium above it
+  (30%, 50% on a special day that is a rest day) and anything above 200% on
+  a regular holiday that is a rest day are taxable supplementary
+  compensation (RR 2-98 Sec. 2.78.1(B)(13), RMC 50-2018 A13 — the owner's
+  spec, T5). Hazard pay stays exempt only with the criteria met and a DOLE
+  certification reference on the employee's record.
 - De minimis ceilings are on file as a statutory table (RR 29-2025, pay
   dated 2026-01-07 and later; Statutory Tables page), but payroll doesn't
   apply them yet: classifying allowances as de minimis within the ceilings

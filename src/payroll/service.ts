@@ -113,7 +113,7 @@ export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
   return {
     payMonth: p.pay_date ? `${p.pay_date.slice(0, 7)}-01` : (p.period_month ?? ''),
     isMwe: p.is_minimum_wage_earner,
-    earnings: p.earnings.map((l) => ({ amount: Number(l.amount), bir: l.bir, taxable: l.taxable })),
+    earnings: p.earnings.map((l) => ({ amount: Number(l.amount), bir: l.bir, taxable: l.taxable, incomeClass: l.incomeClass })),
     contributionsEe: Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee),
     unionDues: Number(p.union_dues),
     withholdingTax: Number(p.withholding_tax),
@@ -585,6 +585,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         monthlyRate: Number(emp.monthly_rate),
         dailyRate: Number(emp.daily_rate),
         isMinimumWageEarner: emp.is_minimum_wage_earner,
+        hazardExempt: !!emp.hazard_criteria_met && !!emp.hazard_dole_cert_ref?.trim(),
         apprentice: emp.employment_status === 'apprentice',
         philhealthEeWaiver: philhealthWaiverFor(emp, run),
         schedule: emp.work_schedule,

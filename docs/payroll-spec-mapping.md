@@ -156,3 +156,15 @@ below was made and is easy to change.
 - The exemption record is per client (category, DOLE approval reference,
   the year it covers), on Client Settings.
 
+**T5 (MWE premiums, hazard pay)**
+- The split applies to MWEs only; a non-MWE's premium lines are unchanged
+  (all taxable anyway). For an MWE paid monthly (divisor 261), the exempt
+  part of rest-day pay stays on the "Rest Day Pay" line, reported with
+  holiday pay in the MWE boxes; for a daily-paid MWE the day at the SMW is
+  basic pay, as before.
+- The hazard pay criteria and the DOLE certification reference are one flag
+  and one reference per employee (Employee → Pay), not per allowance.
+- Since T5 taxable lines say R or S; in the year summary (2316 figures)
+  other taxable S pay (commission, other one-time pay, the MWE add-ons) now
+  goes to the supplementary "Others" box instead of the regular one.
+

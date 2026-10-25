@@ -580,6 +580,8 @@ function PayTab({
     pay_frequency: employee.pay_frequency,
     days_per_year: employee.days_per_year === null ? '' : String(employee.days_per_year),
     is_mwe: employee.is_minimum_wage_earner,
+    hazard_met: employee.hazard_criteria_met,
+    hazard_ref: employee.hazard_dole_cert_ref ?? '',
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
     bank_account_no: employee.bank_account_no ?? '',
@@ -618,6 +620,8 @@ function PayTab({
           pay_frequency: f.pay_frequency,
           days_per_year: f.days_per_year ? Number(f.days_per_year) : null,
           is_minimum_wage_earner: f.is_mwe,
+          hazard_criteria_met: f.hazard_met,
+          hazard_dole_cert_ref: f.hazard_ref.trim() || null,
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
           bank_account_no: f.bank_account_no || null,
@@ -773,6 +777,21 @@ function PayTab({
             Daily equivalent {money(daily)} vs client minimum {money(Number(entity.minimum_wage_daily))}
             {entity.minimum_wage_region ? ` (${entity.minimum_wage_region})` : ''}.
           </p>
+          {f.is_mwe && (
+            <>
+              <Toggle
+                checked={f.hazard_met}
+                onChange={(v) => setF({ ...f, hazard_met: v })}
+                label="Hazard pay criteria met (hazard pay stays tax-exempt for this minimum wage earner)"
+              />
+              <Field
+                label="DOLE certification reference"
+                hint="Without the criteria and this reference, a minimum wage earner's hazard pay is taxable supplementary compensation. The rest-day and special-day premium above the minimum wage is always taxable."
+              >
+                <Input value={f.hazard_ref} onChange={(e) => setF({ ...f, hazard_ref: e.target.value })} />
+              </Field>
+            </>
+          )}
           {Number(employee.rounding_balance) > 0 && (
             <p className="text-xs text-slate-500">
               Cash-rounding centavos owed to this employee: {money(Number(employee.rounding_balance))} (paid on the next payroll).

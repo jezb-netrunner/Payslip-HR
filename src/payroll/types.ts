@@ -332,6 +332,11 @@ export interface PayrollEmployeeInput {
   extraDeductions: ExtraDeductionInput[]
   /** One-time earnings for this run (payroll adjustments). */
   oneTimeEarnings?: OneTimeEarningInput[]
+  /**
+   * A minimum wage earner's hazard pay is exempt only when the hazard pay
+   * criteria are met and a DOLE certification is on file (spec T5).
+   */
+  hazardExempt?: boolean
   /** Employment dates: days outside them are no one's missing time (warnings only; pay is unchanged). */
   hireDate?: string
   separationDate?: string | null
@@ -426,6 +431,8 @@ export interface PayLine {
   payCode?: string
   /** Earnings only: in the SSS compensation base (spec T3; payslips from before it have no flag). */
   sss?: boolean
+  /** Taxable earnings only: regular (R) or supplementary (S) compensation (payslips from before spec T5 have none). */
+  incomeClass?: IncomeClass
 }
 
 export interface SssComputation {

@@ -6,6 +6,7 @@ import type {
   AllowanceCategory,
   BirBucket,
   ContributionTiming,
+  IncomeClass,
   MaternityBenefit,
   PayFrequency,
   RoundingMode,
@@ -128,6 +129,9 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
+  /** a minimum wage earner's hazard pay is exempt only with these (spec T5) */
+  hazard_criteria_met: boolean
+  hazard_dole_cert_ref: string | null
   /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent) */
   philhealth_ee_waiver?: 'pwd' | 'solo_parent' | null
   philhealth_ee_waiver_from?: string | null
@@ -336,6 +340,8 @@ export interface PayslipLine {
   sss?: boolean
   /** counts toward the 13th month besides basic pay */
   thirteenthBasis?: boolean
+  /** taxable lines from spec T5 on: regular or supplementary compensation */
+  incomeClass?: IncomeClass
 }
 
 export interface Payslip {

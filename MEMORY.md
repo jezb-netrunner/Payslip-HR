@@ -407,6 +407,20 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T5: MWE premium add-ons and hazard pay (same branch)
+
+**Did:** for MWEs the engine splits rest-day / special-day pay into the
+exempt part (the day at the SMW rate; up to 200% on a regular holiday) and
+an add-on (`premiumAddOnMultiplier`: 30%, 50% special-on-rest, 60% regular
+holiday on a rest day) on new taxable S lines `restday_addon`,
+`special_addon`, `holiday_addon` (bucket other_taxable). OT and ND stay
+exempt. An MWE's hazard pay is taxable S unless `employees.hazard_criteria_met`
+and `hazard_dole_cert_ref` (`hazardExempt`). Taxable lines now store
+`incomeClass`; `summarizeYear` honours a line's `taxable: true` for MWE
+buckets and puts other_taxable S lines in the supplementary "Others" box.
+Migration `20261025130000_mwe_hazard_pay` (not live). Tests 427 → 439 plus
+SQL suite 21.
+
 ### 2026-10-25 — Spec T4: maternity leave rules (same branch)
 
 **Did:** MAT_DIFFERENTIAL is now taxable S by default (P1 setting:
@@ -445,8 +459,9 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 
 ## Current deployed state (update when it changes)
 
-**2026-10-25: `20261025110000 sss_pay_codes` (T3) and `20261025120000
-maternity_rules` (T4) are in the branch, NOT live** (apply in order after
+**2026-10-25: `20261025110000 sss_pay_codes` (T3), `20261025120000
+maternity_rules` (T4) and `20261025130000 mwe_hazard_pay` (T5) are in the
+branch, NOT live** (apply in order after
 T2's, before the front end; T4's drops and re-adds a constraint, so it
 needs the SQL editor).
 
@@ -1179,6 +1194,15 @@ hired May 27, 1996 → probation ended Nov 23, 1996. My first `probationEnds`
 returned hire + 179; the labor review caught it (`insights.ts`, test pins
 the case). Why it mattered: a day early tells HR to decide on
 regularization before the law's deadline is actually reached.
+
+### An MWE's premium above the minimum wage day is taxable (owner's spec T5)
+
+The MWE exemption covers the SMW, holiday pay, overtime, night differential
+and hazard pay only (RR 2-98 Sec. 2.78.1(B)(13), RMC 50-2018 A13): the 30% /
+50% rest-day and special-day premium, and pay above 200% on a regular
+holiday that is a rest day, are taxable S lines (`*_addon`). Why it
+mattered: the app used to exempt the whole premium (an open question in
+the README), under-withholding MWEs who work rest days.
 
 ### Bonuses past the ₱90,000 exemption are taxed when paid (correction)
 
