@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Building, ChevronRight, Hash, KeyRound, LayoutGrid, List, Repeat, Search, UserPlus, Wallet } from 'lucide-react'
+import { Building, ChevronRight, Hash, KeyRound, LayoutGrid, List, Repeat, Scale, Search, UserPlus, Wallet } from 'lucide-react'
 import {
   Avatar,
   Badge,
@@ -26,7 +26,8 @@ import { useAuth } from '../../lib/auth'
 import type { Employee, EmploymentStatus, Entity, PaymentMethod } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { mweToday, useMinimumWages } from '../../lib/useMinimumWages'
-import { fmtDate, fullName, money, personInitials } from '../../lib/format'
+import { usePayrollRules } from '../../lib/usePayrollRules'
+import { fmtDate, fullName, money, personInitials, plural } from '../../lib/format'
 import {
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
@@ -38,6 +39,7 @@ import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
 import { useQuickAction } from '../../lib/quickAction'
+import MweReviewModal from './MweReviewModal'
 
 const statusTones: Record<string, string> = {
   regular: 'green',
@@ -71,6 +73,9 @@ function EmployeeList({ entity }: { entity: Entity }) {
   const [employees, setEmployees] = useState<Employee[]>([])
   // MWE badges: status at today's rate and minimum wage (spec T12)
   const wages = useMinimumWages()
+  const rules = usePayrollRules()
+  const apprenticeMwe = rules?.apprenticeMwe
+  const [reviewing, setReviewing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [query, setQuery] = useState('')
@@ -121,6 +126,12 @@ function EmployeeList({ entity }: { entity: Entity }) {
     )
   })
   const activeCount = employees.filter((e) => isActiveOn(e, today)).length
+  // MWE status follows the pay rate (owner, 2026-10-25): employees whose
+  // status differs from the one last set or reviewed
+  const statusChanges =
+    wages && rules
+      ? employees.filter((e) => isActiveOn(e, today) && e.is_minimum_wage_earner !== mweToday(e, entity, wages, { apprenticeMwe }).isMwe)
+      : []
 
   return (
     <div>
@@ -140,6 +151,19 @@ function EmployeeList({ entity }: { entity: Entity }) {
           </Button>
         }
       />
+
+      {statusChanges.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <Scale className="size-4 shrink-0" />
+          <p className="min-w-0 flex-1">
+            Minimum wage earner status now follows the pay rate: <b>{plural(statusChanges.length, 'employee')}</b>{' '}
+            {statusChanges.length === 1 ? 'changes' : 'change'} status. Review who will owe tax at the year-end adjustment before
+            the next payroll.
+          </p>
+          <Button size="sm" variant="secondary" onClick={() => setReviewing(true)}>Review</Button>
+        </div>
+      )}
+      {reviewing && <MweReviewModal entity={entity} onClose={() => setReviewing(false)} onReviewed={load} />}
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:w-72">
@@ -202,7 +226,7 @@ function EmployeeList({ entity }: { entity: Entity }) {
       ) : view === 'grid' ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filtered.map((e) => (
-            <EmployeeCard key={e.id} e={e} today={today} mwe={mweToday(e, entity, wages).isMwe} onOpen={() => navigate(`/admin/employees/${e.id}`)} />
+            <EmployeeCard key={e.id} e={e} today={today} mwe={mweToday(e, entity, wages, { apprenticeMwe }).isMwe} onOpen={() => navigate(`/admin/employees/${e.id}`)} />
           ))}
         </div>
       ) : (
@@ -247,7 +271,7 @@ function EmployeeList({ entity }: { entity: Entity }) {
                       <Badge tone={statusTones[e.employment_status] ?? 'slate'}>
                         {EMPLOYMENT_STATUS_LABELS[e.employment_status]}
                       </Badge>
-                      {mweToday(e, entity, wages).isMwe && <Badge tone="orange">MWE</Badge>}
+                      {mweToday(e, entity, wages, { apprenticeMwe }).isMwe && <Badge tone="orange">MWE</Badge>}
                       {separated && <Badge tone="red">separated</Badge>}
                     </div>
                   </Td>
@@ -408,7 +432,13 @@ function AddEmployeeModal({
   const rate = Number(f.rate) || 0
   // payroll decides MWE status for each pay period from the minimum wage in force (spec T12)
   const wages = useMinimumWages()
-  const status = mweToday({ pay_type: f.pay_type, daily_rate: rate, monthly_rate: rate, days_per_year: null, employment_status: f.employment_status }, entity, wages)
+  const rules = usePayrollRules()
+  const status = mweToday(
+    { pay_type: f.pay_type, daily_rate: rate, monthly_rate: rate, days_per_year: null, employment_status: f.employment_status },
+    entity,
+    wages,
+    { apprenticeMwe: rules?.apprenticeMwe },
+  )
 
   async function save() {
     if (!f.first_name.trim() || !f.last_name.trim() || !f.employee_no.trim()) {
@@ -434,6 +464,8 @@ function AddEmployeeModal({
           daily_rate: f.pay_type === 'daily' ? rate : 0,
           pay_frequency: f.pay_frequency,
           payment_method: f.payment_method,
+          // the status shown here, so the status review doesn't list a new hire
+          is_minimum_wage_earner: status.isMwe,
         })
         .select('id')
         .single()

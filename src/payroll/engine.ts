@@ -544,6 +544,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       `Below minimum wage: the daily rate ₱${daily.toFixed(2)} is less than ${employee.apprentice ? '75% of ' : ''}the minimum wage ₱${settings.minimumWageDaily.toFixed(2)}${settings.minimumWageSource ? ` (${settings.minimumWageSource})` : ''}. Pay the difference (pay code "Wage order top-up") and update the rate.`,
     )
   }
+  // the apprentice rule is PENDING (owner 2026-10-25): say how it was applied
+  if (employee.apprentice && settings.minimumWageDaily > 0 && round2(daily) < round2(settings.minimumWageDaily)) {
+    notes.push(
+      isMwe
+        ? 'Apprentice or learner paid below the minimum wage: treated as a minimum wage earner (the apprentice rule, pending legal confirmation: Statutory Tables).'
+        : 'Apprentice or learner paid below the minimum wage: not treated as a minimum wage earner (the apprentice rule is off: Statutory Tables).',
+    )
+  }
 
   // A scheduled workday without a complete time in/out (an entry with no
   // time out doesn't count) and no approved leave is charged as an absence.

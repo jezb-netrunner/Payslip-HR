@@ -435,7 +435,18 @@ moves a year at or under the 0% row (`zeroRowCeiling`) to non-taxable:
 2316 items 29/37, alphalist "Salaries (P250,000 & below)" column;
 COMMISSION is item 45. Migration `20261025210000_form_2316_items`
 (employee RDO code with a format check, local/foreign addresses,
-`employee_tax_years.employer_type`), SQL suite 29.
+`employee_tax_years.employer_type`), SQL suite 29. T12 — status follows
+the pay rate (confirmed). The apprentice rule is PENDING:
+`payroll_rules.apprentice_mwe` (on by default) via `mweStatusOf(…,
+{ apprentice, apprenticeMwe })`, used by payroll, the YEA re-test (payslip
+snapshots now carry `employment_status`), the alphalist, `mweToday` and
+`retroactiveImpact`; apprentice payslips get a note. The status review:
+`employees.is_minimum_wage_earner` is now the status last reviewed (set on
+create and on a rate change); Employees banner + `MweReviewModal`
+(`loadMweReview` → `mweReview`: status changes, re-tested payslips, tax
+change so far, missing wage orders), "Mark as reviewed". Migration
+`20261025220000_mwe_status_review` (rule column, `set_payroll_rule`, the
+stale trigger ignores the reviewed status), SQL suite 30.
 
 ### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
 
@@ -622,10 +633,18 @@ maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5),
 de_minimis_items` (T7), `20261025160000 year_end_adjustment` (T8) and
 `20261025170000 due_dates` (T9), `20261025180000 pagibig_rules` (T11),
 `20261025190000 minimum_wages` (T12), and the owner-answer migrations
-`20261025200000 board_and_lodging` (T3) and `20261025210000
-form_2316_items` (T10) are in the branch, NOT live** (apply in order after T2's, before the front end;
+`20261025200000 board_and_lodging` (T3), `20261025210000
+form_2316_items` (T10) and `20261025220000 mwe_status_review` (T12) are in
+the branch, NOT live** (apply in order after T2's, before the front end;
 T4's drops and re-adds a constraint and T6's drops columns, so they need
 the SQL editor).
+Before the first payroll on T12's computed MWE status (owner, 2026-10-25):
+a company admin enters each client region's wage orders under Statutory
+Tables → Minimum wages (from the RTWPB orders, never from memory); each
+client's admins open Employees → Review on the MWE status banner, warn the
+employees who will owe catch-up tax at the year-end adjustment, and mark
+the list reviewed. The apprentice rule stays on (PENDING) unless the owner
+says otherwise.
 
 **2026-10-25: `20261025100000 pay_codes` (spec T2) is in the branch, NOT
 live.** Apply it BEFORE deploying T2's front end: the new screens and the
@@ -1272,6 +1291,15 @@ Entry module before relying on the CSV column positions.
 Both from the owner (CPA) with their Basis lines; the BIR PDFs were not
 read here. Why it mattered: the earlier build kept such pay in the taxable
 columns, which the owner's reading of the form puts in item 29.
+
+### Columns payroll doesn't read go in the stale trigger's ignore list
+
+> `stale_drafts_on_change` marks every draft of a client for recomputing when any `employees` column changes, except those in `v_ignore`. A column payroll no longer reads (the reviewed MWE status, 2026-10-25) must be added there, by copying the latest body of the function (20261025220000 copies 20261024221511's) — otherwise saving it alone sends every draft back for recomputing.
+
+Why it mattered: "Mark as reviewed" on the MWE status review would have
+made admins recompute every draft of the client for a change that doesn't
+affect pay. SQL suite 30.3 checks both sides (the reviewed status alone:
+untouched; a rate: recompute).
 
 ### Remittance due dates are not verified facts — only the owner's BIR rules are shown
 

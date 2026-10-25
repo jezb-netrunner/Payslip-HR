@@ -109,3 +109,39 @@ describe('T12 a past-dated SMW', () => {
     expect(retestMweFact(closed, false, false)).toBe(closed)
   })
 })
+
+// Owner's answer to the T12 question (2026-10-25): MWE status follows the pay
+// rate; the apprentice rule (an apprentice or learner paid 75% of the
+// minimum is an MWE) is PENDING — a setting, on by default, until a text
+// supports it.
+describe('owner 2026-10-25: the apprentice rule is PENDING (on by default)', () => {
+  it('an apprentice or learner at 75% of the minimum: an MWE while the rule is on, not when it is off', () => {
+    expect(mweStatusOf(521.25, 695, { apprentice: true })).toEqual({ isMwe: true, below: false })
+    expect(mweStatusOf(521.25, 695, { apprentice: true, apprenticeMwe: true })).toEqual({ isMwe: true, below: false })
+    expect(mweStatusOf(521.25, 695, { apprentice: true, apprenticeMwe: false })).toEqual({ isMwe: false, below: false })
+  })
+
+  it('paid the full minimum: an MWE either way; below 75% of it: below the minimum wage', () => {
+    expect(mweStatusOf(695, 695, { apprentice: true, apprenticeMwe: false })).toEqual({ isMwe: true, below: false })
+    expect(mweStatusOf(500, 695, { apprentice: true })).toEqual({ isMwe: true, below: true })
+    expect(mweStatusOf(500, 695, { apprentice: true, apprenticeMwe: false })).toEqual({ isMwe: false, below: true })
+  })
+
+  it('other employees: the rule does not apply', () => {
+    expect(mweStatusOf(690, 695, { apprenticeMwe: false })).toEqual({ isMwe: true, below: true })
+  })
+
+  it('a past-dated SMW: an apprentice\'s floor is 75% of it, and the rule decides the status', () => {
+    const entities = [{ id: 'c1', name: 'Acme', minimum_wage_region: 'NCR', minimum_wage_sector: '', working_days_divisor: 313 }]
+    const appr = (id: string, daily_rate: number) => ({
+      id, entity_id: 'c1', first_name: id, last_name: 'X', pay_type: 'daily' as const, daily_rate, monthly_rate: 0, days_per_year: null,
+      separation_date: null, employment_status: 'apprentice',
+    })
+    const added = row({ daily_rate: 720, effective_from: '2026-07-17', wage_order_ref: 'NCR-27 (ruling)' })
+    const before = table.filter((r) => r.wage_order_ref !== 'NCR-27')
+    const params = { before, after: [...before, added], changed: added, entities, employees: [appr('a500', 500), appr('a700', 700)], asOf: '2026-10-25' }
+    // 500 is now below 75% of 720 (540); 700 is now at or below the minimum
+    expect(retroactiveImpact(params).map((i) => [i.employeeId, i.change])).toEqual([['a500', 'below_minimum'], ['a700', 'becomes_mwe']])
+    expect(retroactiveImpact({ ...params, apprenticeMwe: false }).map((i) => [i.employeeId, i.change])).toEqual([['a500', 'below_minimum']])
+  })
+})

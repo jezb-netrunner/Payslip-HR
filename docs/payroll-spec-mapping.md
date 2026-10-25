@@ -76,6 +76,9 @@ skipped (no 1601-C lines 15–19, no quarterly MWE hazard-pay list).
    included); admins switch any Christmas bonus to the Christmas-bonus code.
 4. **MWE checkbox** (T12). The spec computes MWE status from the rate and the
    SMW. Proposal: the checkbox goes away and the status is shown, computed.
+   Confirmed again with the T12 answer (owner, 2026-10-25): the status
+   follows the pay rate; the checkbox's column stays as the status last
+   reviewed (see §6 T12).
 5. **Existing PhilHealth waivers** (T6). Proposal: the start date becomes the
    start month; a solo parent's end date becomes the SPIC expiry; an existing
    PWD waiver becomes `confirmed`, so today's results don't change.
@@ -319,13 +322,33 @@ below was made and is easy to change.
   for its sector, the region's general rate applies.
 - MWE status uses the rate in force on the period's last day, and the
   employee's basic daily rate (monthly rate × 12 ÷ the days-per-year
-  factor). An apprentice at 75% of the minimum is an MWE; the "Below
-  minimum wage" warning for an apprentice starts below 75%.
-- The old employee checkbox is no longer used (its column stays until the
-  new screens are live, then can be dropped). Employees whose checkbox
-  disagreed with their rate change status on their next payroll.
-  *Question: confirm, since it changes their tax (an employee paid above
-  the minimum loses the exemption; one at it gains it).*
+  factor). The "Below minimum wage" warning for an apprentice or learner
+  starts below 75% of the minimum (Labor Code Arts. 61 and 73).
+- Owner's answer (2026-10-25): confirmed, MWE status follows the pay rate
+  (RR 2-98 §2.78.1(B)(13); RMC 50-2018 A14). Before the first payroll on
+  the new rule: (1) enter the region's wage orders in the minimum wage
+  table; (2) list the employees whose status changes, so admins can warn
+  those who will owe catch-up tax at the year-end adjustment; (3) the
+  apprentice rule is PENDING.
+- (2) is the status review: the old checkbox (`employees.is_minimum_wage_earner`)
+  stays as the status last reviewed. The Employees page shows a banner
+  while an active employee's status at today's rate and minimum wage
+  differs from it; the review lists those employees and the ones whose
+  closed payslips this year the year-end adjustment re-tests, with the tax
+  change for the year so far (catch-up tax or a refund, `mweReview`), says
+  when no wage order is on file for the region or for some of the year's
+  payslips (step 1), and "Mark as reviewed" saves the status now. Adding an
+  employee or changing their rate saves the status shown for it, so the
+  banner shows only changes nobody made on the employee's page (the
+  transition, a new wage order). Saving the reviewed status alone doesn't
+  mark drafts for recomputing (payroll doesn't read it).
+- (3) The apprentice rule — an apprentice or learner paid below the minimum
+  (75% of it or more) is an MWE — is a setting on Statutory Tables with
+  the "Pending legal confirmation" badge, on by default (the behavior so
+  far): no text supports it yet. Off, such an apprentice is not an MWE
+  (one paid the full minimum still is). Payroll, the year-end re-test
+  (payslips now carry the employment status), the alphalist and the screens
+  apply it, and an apprentice's payslip says how it was applied.
 - "The YEA corrects the year": the year-end adjustment re-tests each
   finalized payslip of the year against the table (its period end, the
   rate on its snapshot) and treats it as MWE pay or not accordingly; the

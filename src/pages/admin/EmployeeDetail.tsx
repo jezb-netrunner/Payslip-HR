@@ -64,6 +64,7 @@ import type {
 } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { mweToday, useMinimumWages } from '../../lib/useMinimumWages'
+import { usePayrollRules } from '../../lib/usePayrollRules'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials, plural } from '../../lib/format'
 import {
@@ -160,6 +161,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
   useRecordClient(employee?.entity_id, '/admin/employees')
   // the MWE badge: status at today's rate and minimum wage (spec T12)
   const wages = useMinimumWages()
+  const rules = usePayrollRules()
 
   if (loading) return <Spinner />
   if (!employee) return <p className="text-sm text-slate-500">Employee not found.</p>
@@ -167,7 +169,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
   if (!entity) return <p className="text-sm text-slate-500">This employee's client is not available to you.</p>
 
   const name = fullName(employee)
-  const mwe = mweToday(employee, entity, wages)
+  const mwe = mweToday(employee, entity, wages, { apprenticeMwe: rules?.apprenticeMwe })
   const separated = !!employee.separation_date && employee.separation_date < todayManila()
   const pos = siblings.indexOf(employee.id)
   const prev = pos > 0 ? siblings[pos - 1] : null
@@ -602,6 +604,7 @@ function PayTab({
 }) {
   const toast = useToast()
   const wages = useMinimumWages()
+  const rules = usePayrollRules()
   // cash advances have their own page (agreement, ledger, repayments)
   const advances = deductions.filter((d) => d.category === 'cash_advance')
   const owedOnAdvances = advances.reduce((s, d) => s + Number(d.balance ?? 0), 0)
@@ -663,6 +666,13 @@ function PayTab({
           philhealth_waiver_start_month: f.ph_waiver ? `${f.ph_start}-01` : null,
           philhealth_spic_expiry: f.ph_waiver === 'solo_parent' ? f.ph_spic : null,
           philhealth_pwd_status: f.ph_waiver === 'pwd' ? f.ph_status : null,
+          // a new rate: the status shown for it is the one reviewed (the status review lists the changes nobody made here)
+          ...(f.pay_type !== employee.pay_type ||
+          Number(f.monthly_rate) !== Number(employee.monthly_rate) ||
+          Number(f.daily_rate) !== Number(employee.daily_rate) ||
+          dpy !== (employee.days_per_year === null ? null : Number(employee.days_per_year))
+            ? { is_minimum_wage_earner: status.isMwe }
+            : {}),
         })
         .eq('id', employee.id)
       if (error) throw error
@@ -762,6 +772,7 @@ function PayTab({
     },
     entity,
     wages,
+    { apprenticeMwe: rules?.apprenticeMwe },
   )
 
   return (

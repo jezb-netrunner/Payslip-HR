@@ -156,21 +156,38 @@ export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
 
 /**
  * A finalized payslip's year fact with its MWE status re-tested against the
- * minimum wage on file for its period's last day (spec T12): a past-dated
- * wage order changes the status of payslips already closed, and the
- * year-end adjustment corrects the year. Without a rate on file for that
- * day, or for a 13th month payslip, the fact stays as computed.
+ * minimum wage on file for its period's last day (spec T12) and the
+ * apprentice rule now set (owner, 2026-10-25): a past-dated wage order
+ * changes the status of payslips already closed, and the year-end
+ * adjustment corrects the year. Without a rate on file for that day, or for
+ * a 13th month payslip, the fact stays as computed. Whether the employee was
+ * an apprentice comes from the payslip (older payslips: `apprentice`, the
+ * employee now).
  */
 export function retestedFact(
   p: YearPayslip,
-  ctx: { rows: readonly MinimumWageRow[]; region: string; sector: string; factor: number; hazardExempt: boolean },
+  ctx: {
+    rows: readonly MinimumWageRow[]
+    region: string
+    sector: string
+    factor: number
+    hazardExempt: boolean
+    apprentice?: boolean
+    apprenticeMwe?: boolean
+  },
 ): { fact: AnnualPayslipFact; changed: boolean } {
   const fact = toAnnualFact(p)
-  const snap = (p.employee_snapshot ?? {}) as { pay_type?: string; daily_rate?: number | string; monthly_rate?: number | string }
+  const snap = (p.employee_snapshot ?? {}) as {
+    pay_type?: string
+    daily_rate?: number | string
+    monthly_rate?: number | string
+    employment_status?: string
+  }
   const smw = p.run_type === 'thirteenth_month' || !p.period_end ? null : minimumWageOn(ctx.rows, ctx.region, ctx.sector, p.period_end)
   if (!smw || !snap.pay_type) return { fact, changed: false }
   const daily = dailyRateOf({ pay_type: snap.pay_type, daily_rate: snap.daily_rate ?? 0, monthly_rate: snap.monthly_rate ?? 0 }, ctx.factor)
-  const out = retestMweFact(fact, mweStatusOf(daily, Number(smw.daily_rate)).isMwe, ctx.hazardExempt)
+  const apprentice = snap.employment_status ? snap.employment_status === 'apprentice' : !!ctx.apprentice
+  const out = retestMweFact(fact, mweStatusOf(daily, Number(smw.daily_rate), { apprentice, apprenticeMwe: ctx.apprenticeMwe }).isMwe, ctx.hazardExempt)
   return { fact: out, changed: out !== fact }
 }
 
@@ -607,7 +624,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       minimumWageSource: smwSource,
       holidayPayAfterAbsence: entity.holiday_pay_after_absence ?? 'apply_rule',
     }
-    const mwe = mweStatusOf(dailyRateOf(emp, engineSettings.workingDaysDivisor), smwDaily)
+    const apprentice = emp.employment_status === 'apprentice'
+    const mwe = mweStatusOf(dailyRateOf(emp, engineSettings.workingDaysDivisor), smwDaily, { apprentice, apprenticeMwe: rules.apprenticeMwe })
     const hazardExempt = !!emp.hazard_criteria_met && !!emp.hazard_dole_cert_ref?.trim()
 
     const leaveList: LeaveLite[] = (leavesBy.get(emp.id) ?? []).map((l) => ({
@@ -681,7 +699,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     )
 
     // the year's closed payslips, their MWE status re-tested (a past-dated wage order, spec T12)
-    const retested = empTax.map((p) => retestedFact(p, { rows: wageRows, region, sector, factor: engineSettings.workingDaysDivisor, hazardExempt }))
+    const retested = empTax.map((p) =>
+      retestedFact(p, { rows: wageRows, region, sector, factor: engineSettings.workingDaysDivisor, hazardExempt, apprentice, apprenticeMwe: rules.apprenticeMwe }),
+    )
 
     const slip = computePayslip({
       employee: {
@@ -692,7 +712,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         dailyRate: Number(emp.daily_rate),
         isMinimumWageEarner: mwe.isMwe,
         hazardExempt,
-        apprentice: emp.employment_status === 'apprentice',
+        apprentice,
         managerial: emp.job_level === 'managerial_supervisory',
         // the NG share by payroll month (contributions follow the payroll month)
         philhealthEeWaiver: philhealthWaiverFor(waiverOf(emp), run.period_month),
@@ -866,7 +886,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         const n = flipped.filter((r) => r.fact.isMwe === toMwe).length
         if (n > 0) {
           slip.trace.notes.push(
-            `The year-end adjustment treats ${n} earlier payslip${n === 1 ? '' : 's'} of the year as ${toMwe ? 'minimum wage pay' : 'pay above the minimum wage'} under the minimum wage now on file for their periods (the finalized payrolls themselves are not changed).`,
+            `The year-end adjustment treats ${n} earlier payslip${n === 1 ? '' : 's'} of the year as ${toMwe ? 'minimum wage pay' : apprentice ? 'pay that is not minimum wage pay' : 'pay above the minimum wage'} under the minimum wage now on file for their periods${apprentice ? ' and the apprentice rule now set' : ''} (the finalized payrolls themselves are not changed).`,
           )
         }
       }
@@ -920,6 +940,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       pagibig_no: e.pagibig_no,
       tin: e.tin,
       pay_type: e.pay_type,
+      // whether the apprentice rule applies when the year-end adjustment re-tests it
+      employment_status: e.employment_status,
       pay_frequency: e.pay_frequency,
       payment_method: e.payment_method,
       monthly_rate: e.monthly_rate,

@@ -11,6 +11,7 @@ vi.mock('../../lib/supabase', () => ({ supabase: fakeSupabase }))
 
 import { computeRun } from '../service'
 import { loadAlphalist } from '../alphalistData'
+import { loadMweReview } from '../mweReviewData'
 import { endOfMonth } from '../../lib/manila'
 
 type Row = Record<string, unknown>
@@ -95,5 +96,88 @@ describe('T12 flows: computed MWE status', () => {
     const r = await month(ent, 8)
     const [slip] = slipsOf(r.id as string)
     expect((slip.earnings as Row[]).find((l) => l.code === 'holiday')?.amount).toBe(700)
+  })
+})
+
+// Owner's answer to the T12 question (2026-10-25): MWE status follows the pay
+// rate; the apprentice rule is PENDING (a setting, on by default); before
+// the first payroll on the new rule admins list the employees whose status
+// changes, with what the year-end adjustment will do to their tax.
+describe('owner 2026-10-25: the apprentice rule and the status review', () => {
+  beforeEach(() => resetDb())
+  const notesOf = (slip: Row) => ((slip.computation_trace as Row).notes as string[]).join(' ')
+
+  it('an apprentice at 75% of the minimum: an MWE while the rule is on (the payslip says it is pending), not when it is off', async () => {
+    const ent = addEntity({ default_pay_frequency: 'monthly', minimum_wage_region: 'NCR', minimum_wage_sector: '', minimum_wage_daily: 600 })
+    smw(695, '2025-07-17')
+    const e = addEmployee(ent, { pay_type: 'daily', daily_rate: 521.25, monthly_rate: 0, pay_frequency: 'monthly', employment_status: 'apprentice' })
+    addAttendance(e, '2026-09-01', '2026-10-31')
+    const sep = await month(ent, 9)
+    const [on] = slipsOf(sep.id as string)
+    expect(on.is_minimum_wage_earner).toBe(true)
+    expect(notesOf(on)).toMatch(/Apprentice or learner paid below the minimum wage: treated as a minimum wage earner \(the apprentice rule, pending legal confirmation/)
+    expect(warningsOf(on)).not.toMatch(/Below minimum wage/)
+    expect((on.employee_snapshot as Row).employment_status).toBe('apprentice')
+    db.t.payroll_rules[0].apprentice_mwe = false
+    const oct = await month(ent, 10)
+    const [off] = slipsOf(oct.id as string)
+    expect(off.is_minimum_wage_earner).toBe(false)
+    expect(notesOf(off)).toMatch(/not treated as a minimum wage earner \(the apprentice rule is off/)
+  })
+
+  it('the rule turned off: the year-end adjustment re-tests the year\'s apprentice payslips', async () => {
+    const ent = addEntity({ default_pay_frequency: 'monthly', minimum_wage_region: 'NCR', minimum_wage_sector: '', minimum_wage_daily: 600 })
+    smw(695, '2025-07-17')
+    const e = addEmployee(ent, { pay_type: 'daily', daily_rate: 521.25, monthly_rate: 0, pay_frequency: 'monthly', employment_status: 'apprentice' })
+    addAttendance(e, '2026-10-01', '2026-12-31')
+    for (const m of [10, 11]) finalize((await month(ent, m)).id as string)
+    db.t.payroll_rules[0].apprentice_mwe = false
+    const dec = await month(ent, 12, { pay_date: '2026-12-22', annualize: true })
+    const [slip] = slipsOf(dec.id as string)
+    expect(slip.is_minimum_wage_earner).toBe(false)
+    expect(notesOf(slip)).toMatch(/treats 2 earlier payslips of the year as pay that is not minimum wage pay under the minimum wage now on file for their periods and the apprentice rule/)
+  })
+
+  it('the review: who changes status against the old checkbox, and the year-end adjustment\'s catch-up tax', async () => {
+    // the old rule: payroll took the checkbox; the client's own setting was 700
+    const ent = addEntity({ default_pay_frequency: 'monthly', minimum_wage_region: 'NCR', minimum_wage_sector: '', minimum_wage_daily: 700 })
+    const daily = { pay_type: 'daily', monthly_rate: 0, pay_frequency: 'monthly', hire_date: '2025-01-06' }
+    const ticked = addEmployee(ent, { ...daily, employee_no: 'E1', last_name: 'Abad', daily_rate: 700, is_minimum_wage_earner: true })
+    const fine = addEmployee(ent, { ...daily, employee_no: 'E2', last_name: 'Bello', daily_rate: 800, is_minimum_wage_earner: false })
+    const below = addEmployee(ent, { ...daily, employee_no: 'E3', last_name: 'Cruz', daily_rate: 690, is_minimum_wage_earner: false })
+    for (const x of [ticked, fine, below]) addAttendance(x, '2026-01-01', '2026-09-30')
+    const commission = (r: Row) =>
+      db.t.payroll_adjustments.push({
+        id: newId(), payroll_run_id: r.id, employee_id: ticked.id, entity_id: ent.id, kind: 'earning', label: 'Commission', amount: 200000,
+        category: 'other_taxable', benefit: null, pay_code: 'COMMISSION',
+      })
+    for (let m = 1; m <= 9; m++) finalize((await month(ent, m, {}, m === 1 ? commission : undefined)).id as string)
+    // 700 a day was at the client's own minimum: paid as an MWE
+    expect(db.t.payslips.filter((p) => p.employee_id === ticked.id).every((p) => p.is_minimum_wage_earner)).toBe(true)
+    // payroll before the new rule took the checkbox: Cruz was paid as not an MWE
+    for (const p of db.t.payslips.filter((x) => x.employee_id === below.id)) {
+      p.is_minimum_wage_earner = false
+      p.earnings = (p.earnings as Row[]).map((l) => (['basic', 'holiday', 'overtime', 'night_diff'].includes(l.bir as string) ? { ...l, taxable: true } : l))
+    }
+
+    // before the wage orders are entered: nothing to re-test, the status by the client's setting
+    const early = await loadMweReview(ent as never, 2026, '2026-10-25')
+    expect(early.rateOnFile).toBe(false)
+    expect(early.untested).toBe(27)
+    expect(early.rows.map((r) => [r.name, r.before, r.now])).toEqual([['Cruz, Juan', false, true]])
+
+    // the region's wage order: 695 from July 17, 2025
+    smw(695, '2025-07-17')
+    const review = await loadMweReview(ent as never, 2026, '2026-10-25')
+    expect(review.rateOnFile).toBe(true)
+    expect(review.untested).toBe(0)
+    expect(review.rows.map((r) => [r.name, r.before, r.now, r.retested])).toEqual([
+      ['Abad, Juan', true, false, 9],
+      ['Cruz, Juan', false, true, 9],
+    ])
+    const abad = review.rows[0]
+    expect(abad.daily).toBe(700)
+    expect(abad.taxChange).toBeGreaterThan(0)
+    expect(review.rows[1].taxChange).toBe(0)
   })
 })

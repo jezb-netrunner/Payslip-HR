@@ -527,7 +527,7 @@ function derive(data: DashData, entity: Entity, today: string) {
   // the minimum wage in force today: the table kept by company admins, else the client's own setting (spec T12)
   const minWage = minimumWageFor(entity, today, data.minimumWages)
   const belowMin = active.filter((e) => {
-    const s = mweToday(e, entity, data.minimumWages, today)
+    const s = mweToday(e, entity, data.minimumWages, { date: today })
     return s.daily > 0 && s.below
   })
   if (belowMin.length > 0)

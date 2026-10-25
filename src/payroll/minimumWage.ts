@@ -38,12 +38,26 @@ export function dailyRateOf(e: { pay_type: string; daily_rate: number | string; 
   return e.pay_type === 'monthly' ? round2((Number(e.monthly_rate) * 12) / factor) : round2(Number(e.daily_rate))
 }
 
-// Basis: RR 2-98 §2.78.1(B)(13): the SMW is "the rate fixed by the Regional Tripartite Wage and Productivity Board". RMC 50-2018 A14.
-/** At or below the SMW: an MWE; below it: also below the minimum wage. No SMW: not an MWE. */
-export function mweStatusOf(daily: number, smw: number | null): { isMwe: boolean; below: boolean } {
+export interface MweStatusOptions {
+  /** An apprentice or learner: the wage may start at 75% of the minimum. */
+  apprentice?: boolean
+  /** The apprentice rule (PENDING, on by default): an apprentice or learner paid below the SMW is an MWE. */
+  apprenticeMwe?: boolean
+}
+
+// Basis: RR 2-98 §2.78.1(B)(13): the SMW is "the rate fixed by the Regional Tripartite Wage and Productivity Board". RMC 50-2018 A14. Owner, 2026-10-25: MWE status follows the pay rate.
+// Basis (apprentices): Labor Code Arts. 61 and 73 (an apprentice's or learner's wage starts at no less than 75% of the minimum). PENDING: that an apprentice or learner paid below the SMW is an MWE (no text yet, owner 2026-10-25).
+/**
+ * At or below the SMW: an MWE; below it: also below the minimum wage. No
+ * SMW: not an MWE. An apprentice or learner is below the minimum wage only
+ * under 75% of it, and paid less than the SMW is an MWE only while the
+ * apprentice rule is on.
+ */
+export function mweStatusOf(daily: number, smw: number | null, opts: MweStatusOptions = {}): { isMwe: boolean; below: boolean } {
   if (smw === null || !(smw > 0)) return { isMwe: false, below: false }
   const rate = round2(daily)
-  return { isMwe: rate <= smw, below: rate < smw }
+  if (!opts.apprentice) return { isMwe: rate <= smw, below: rate < smw }
+  return { isMwe: rate <= smw && (opts.apprenticeMwe !== false || rate >= smw), below: rate < round2(smw * 0.75) }
 }
 
 const MWE_BUCKETS: readonly BirBucket[] = ['basic', 'holiday', 'overtime', 'night_diff', 'hazard', 'cola']
@@ -83,6 +97,7 @@ export interface SmwEmployee {
   monthly_rate: number | string
   days_per_year: number | null
   separation_date: string | null
+  employment_status?: string
 }
 
 export interface SmwImpact {
@@ -113,8 +128,10 @@ export function retroactiveImpact(params: {
   entities: readonly SmwClient[]
   employees: readonly SmwEmployee[]
   asOf: string
+  /** The apprentice rule (PENDING, on by default). */
+  apprenticeMwe?: boolean
 }): SmwImpact[] {
-  const { before, after, changed, entities, employees } = params
+  const { before, after, changed, entities, employees, apprenticeMwe } = params
   const date = changed.effective_from
   const out: SmwImpact[] = []
   for (const c of entities.filter((x) => x.minimum_wage_region === changed.region)) {
@@ -123,8 +140,9 @@ export function retroactiveImpact(params: {
     if (was === now) continue
     for (const e of employees.filter((x) => x.entity_id === c.id && (!x.separation_date || x.separation_date >= date))) {
       const daily = dailyRateOf(e, Number(e.days_per_year ?? c.working_days_divisor))
-      const a = mweStatusOf(daily, was)
-      const b = mweStatusOf(daily, now)
+      const opts = { apprentice: e.employment_status === 'apprentice', apprenticeMwe }
+      const a = mweStatusOf(daily, was, opts)
+      const b = mweStatusOf(daily, now, opts)
       const change = b.isMwe && !a.isMwe ? 'becomes_mwe' : !b.isMwe && a.isMwe ? 'no_longer_mwe' : b.below && !a.below ? 'below_minimum' : null
       if (change) out.push({ employeeId: e.id, name: `${e.last_name}, ${e.first_name}`, client: c.name, daily, before: was, after: now, change, below: b.below })
     }

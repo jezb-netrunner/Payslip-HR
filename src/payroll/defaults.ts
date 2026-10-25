@@ -143,4 +143,6 @@ export const DEFAULT_PAYROLL_RULES: PayrollRules = {
   // P5: today's rule — basic pay plus the regular allowances, up to the table's maximum fund salary
   pagibigBase: { basic: true, cola: true, otherAllowances: true },
   pagibigCeiling: null,
+  // the apprentice rule, PENDING (owner 2026-10-25): today's behavior
+  apprenticeMwe: true,
 }

@@ -2,7 +2,7 @@
 // client's employees, the finalized payslips paid in the tax year, the
 // previous-employer records and the minimum wage rates paid at year end.
 
-import { getEmployees, getMinimumWages, getStatutoryTables } from '../lib/api'
+import { getEmployees, getMinimumWages, getPayrollRules, getStatutoryTables } from '../lib/api'
 import type { Entity } from '../lib/db'
 import { fetchAll } from '../lib/fetchAll'
 import { supabase } from '../lib/supabase'
@@ -17,7 +17,7 @@ import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, retestedFact } from '.
  * leaves: spec T8).
  */
 export async function loadAlphalist(entity: Entity, year: number, employeeId?: string): Promise<AlphalistRow[]> {
-  const [employees, payslips, taxYears, tables, mweRates, wageRows] = await Promise.all([
+  const [employees, payslips, taxYears, tables, mweRates, wageRows, rules] = await Promise.all([
     getEmployees(entity.id),
     // tax year = compensation PAID in the year (pay date)
     fetchFinalizedPayslipsForTaxYear(entity.id, year),
@@ -41,6 +41,7 @@ export async function loadAlphalist(entity: Entity, year: number, employeeId?: s
         .range(from, to),
     ),
     getMinimumWages(entity.minimum_wage_region),
+    getPayrollRules(),
   ])
   const yearEndRates = new Map<string, YearEndRate>()
   for (const r of mweRates) {
@@ -53,7 +54,8 @@ export async function loadAlphalist(entity: Entity, year: number, employeeId?: s
   const slips = employeeId ? payslips.filter((p) => p.employee_id === employeeId) : payslips
   const byId = new Map(employees.map((e) => [e.id, e]))
   // each payslip's MWE status re-tested against the minimum wage now on
-  // file, as the year-end adjustment did (spec T12)
+  // file and the apprentice rule now set, as the year-end adjustment did
+  // (spec T12)
   const factOf = (p: (typeof slips)[number]) => {
     const e = byId.get(p.employee_id)
     return retestedFact(p, {
@@ -62,6 +64,8 @@ export async function loadAlphalist(entity: Entity, year: number, employeeId?: s
       sector: entity.minimum_wage_sector ?? '',
       factor: Number(e?.days_per_year ?? entity.working_days_divisor),
       hazardExempt: !!e?.hazard_criteria_met && !!e?.hazard_dole_cert_ref?.trim(),
+      apprentice: e?.employment_status === 'apprentice',
+      apprenticeMwe: rules.apprenticeMwe,
     }).fact
   }
   // each employee's leave cash conversions under the client's leave policy

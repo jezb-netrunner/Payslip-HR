@@ -34,6 +34,7 @@ export function resetDb() {
   db.t.payroll_rules = [{
     id: true, maternity_contributions: 'as_usual',
     pagibig_base_basic: true, pagibig_base_cola: true, pagibig_base_other_allowances: true, pagibig_ceiling: null,
+    apprentice_mwe: true,
   }]
 }
 

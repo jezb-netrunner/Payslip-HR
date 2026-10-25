@@ -16,6 +16,7 @@ import { PH_REGIONS } from '../../lib/labels'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { reloadMinimumWages, useMinimumWages } from '../../lib/useMinimumWages'
+import { usePayrollRules } from '../../lib/usePayrollRules'
 import { retroactiveImpact, type SmwClient, type SmwEmployee, type SmwImpact } from '../../payroll/minimumWage'
 
 type Form = { id?: string; region: string; sector: string; daily_rate: string; effective_from: string; effective_to: string; wage_order_ref: string }
@@ -29,6 +30,7 @@ const CHANGE_LABELS: Record<SmwImpact['change'], string> = {
 export default function MinimumWagesCard({ isCompanyAdmin }: { isCompanyAdmin: boolean }) {
   const toast = useToast()
   const rows = useMinimumWages()
+  const rules = usePayrollRules()
   const [region, setRegion] = useState('')
   const [editing, setEditing] = useState<Form | null>(null)
   const [busy, setBusy] = useState(false)
@@ -47,7 +49,7 @@ export default function MinimumWagesCard({ isCompanyAdmin }: { isCompanyAdmin: b
     const { data: emps, error: empErr } = ids.length
       ? await supabase
           .from('employees')
-          .select('id, entity_id, first_name, last_name, pay_type, daily_rate, monthly_rate, days_per_year, separation_date')
+          .select('id, entity_id, first_name, last_name, pay_type, daily_rate, monthly_rate, days_per_year, separation_date, employment_status')
           .in('entity_id', ids)
       : { data: [], error: null }
     if (empErr) throw empErr
@@ -58,6 +60,7 @@ export default function MinimumWagesCard({ isCompanyAdmin }: { isCompanyAdmin: b
       entities: (ents ?? []) as SmwClient[],
       employees: (emps ?? []) as SmwEmployee[],
       asOf: today,
+      apprenticeMwe: rules?.apprenticeMwe,
     })
   }
 

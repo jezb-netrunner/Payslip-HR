@@ -19,6 +19,7 @@ import { INCOME_CLASS_LABELS, PAY_CODE_TAX_LABELS } from '../../lib/labels'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { reloadPayCodes, usePayCodes } from '../../lib/usePayCodes'
+import { reloadPayrollRules } from '../../lib/usePayrollRules'
 import { lineIncomeClass } from '../../payroll/payCodes'
 import MinimumWagesCard from './MinimumWagesCard'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
@@ -113,7 +114,7 @@ export default function Statutory() {
     try {
       await save()
       await reloadPayCodes()
-      setRules(await getPayrollRules())
+      setRules(await reloadPayrollRules())
       toast('success', `${what} saved. Recompute draft payrolls.`)
     } catch (err) {
       toast('error', errorMessage(err, 'Could not save the setting'))
@@ -313,6 +314,27 @@ export default function Statutory() {
                     />
                   </Field>
                 </div>
+              </div>
+            )}
+            {rules && (
+              <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-center">
+                <div>
+                  <p className="font-semibold text-slate-700">Apprentices and learners paid below the minimum wage</p>
+                  <p className="text-xs text-slate-500">
+                    Labor Code Arts. 61 and 73 let their wage start at 75% of the minimum. Whether that pay is a minimum wage
+                    earner's (tax-exempt) has no text yet: RR 2-98 Sec. 2.78.1(B)(13) exempts the statutory minimum wage the
+                    regional board fixes. Default: a minimum wage earner. Paid the full minimum, they are one either way.
+                  </p>
+                  <div className="mt-1"><PendingBadge /></div>
+                </div>
+                <Select
+                  value={rules.apprenticeMwe ? 'mwe' : 'not_mwe'}
+                  disabled={!isCompanyAdmin || savingCode !== ''}
+                  onChange={(e) => saveRule('apprentice', 'The apprentice rule', () => setPayrollRule('apprentice_mwe', String(e.target.value === 'mwe')))}
+                >
+                  <option value="mwe">A minimum wage earner</option>
+                  <option value="not_mwe">Not a minimum wage earner</option>
+                </Select>
               </div>
             )}
             <p className="py-3 text-xs text-slate-500">

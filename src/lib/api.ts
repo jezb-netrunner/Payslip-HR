@@ -64,10 +64,11 @@ export async function getPayrollRules(): Promise<PayrollRules> {
       otherAllowances: flag(row.pagibig_base_other_allowances, base.otherAllowances),
     },
     pagibigCeiling: row.pagibig_ceiling == null ? DEFAULT_PAYROLL_RULES.pagibigCeiling : Number(row.pagibig_ceiling),
+    apprenticeMwe: flag(row.apprentice_mwe, DEFAULT_PAYROLL_RULES.apprenticeMwe),
   }
 }
 
-/** Company admins: set one PENDING rule (spec P4, P5). */
+/** Company admins: set one PENDING rule (spec P4, P5, the apprentice rule). */
 export async function setPayrollRule(rule: string, value: string): Promise<void> {
   const { error } = await supabase.rpc('set_payroll_rule', { p_rule: rule, p_value: value })
   if (error) throw error

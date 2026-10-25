@@ -9,7 +9,6 @@ import type { Employee, Entity, MinimumWage } from './db'
 import { fmtDate } from './format'
 import { todayManila } from './manila'
 import { dailyRateOf, minimumWageOn, mweStatusOf, type MinimumWageRow } from '../payroll/minimumWage'
-import { round2 } from '../payroll/types'
 
 let loading: Promise<MinimumWage[]> | null = null
 const listeners = new Set<(rows: MinimumWage[]) => void>()
@@ -70,19 +69,20 @@ export function minimumWageFor(
 }
 
 /**
- * An employee's MWE status today, at their current rate (payroll decides it
- * for each pay period). An apprentice or learner may be paid 75% of the
- * minimum (Labor Code Arts. 61 and 73): below that, the rate is below the
- * minimum wage.
+ * An employee's MWE status on a date (today by default), at their current
+ * rate (payroll decides it for each pay period). An apprentice or learner
+ * may be paid 75% of the minimum (Labor Code Arts. 61 and 73): below that,
+ * the rate is below the minimum wage; paid less than the minimum, they are
+ * an MWE only while the apprentice rule (PENDING, on by default) is on.
  */
 export function mweToday(
   e: Pick<Employee, 'pay_type' | 'daily_rate' | 'monthly_rate' | 'days_per_year'> & { employment_status?: string },
   entity: Pick<Entity, 'minimum_wage_region' | 'minimum_wage_sector' | 'minimum_wage_daily' | 'working_days_divisor'>,
   rows: readonly MinimumWageRow[] | null,
-  date = todayManila(),
+  opts: { date?: string; apprenticeMwe?: boolean } = {},
 ): { isMwe: boolean; below: boolean; daily: number; smw: number | null; source: string } {
   const daily = dailyRateOf(e, Number(e.days_per_year ?? entity.working_days_divisor))
-  const smw = minimumWageFor(entity, date, rows)
-  const floor = smw.daily === null ? null : round2(smw.daily * (e.employment_status === 'apprentice' ? 0.75 : 1))
-  return { isMwe: mweStatusOf(daily, smw.daily).isMwe, below: mweStatusOf(daily, floor).below, daily, smw: smw.daily, source: smw.source }
+  const smw = minimumWageFor(entity, opts.date ?? todayManila(), rows)
+  const status = mweStatusOf(daily, smw.daily, { apprentice: e.employment_status === 'apprentice', apprenticeMwe: opts.apprenticeMwe })
+  return { ...status, daily, smw: smw.daily, source: smw.source }
 }

@@ -327,6 +327,12 @@ export interface PayrollRules {
   pagibigBase: { basic: boolean; cola: boolean; otherAllowances: boolean }
   /** P5: the ceiling of Pag-IBIG's monthly compensation; null = the statutory table's maximum fund salary. */
   pagibigCeiling: number | null
+  /**
+   * The apprentice rule (owner 2026-10-25, PENDING: no text yet): an
+   * apprentice or learner paid below the minimum wage (75% of it or more) is
+   * a minimum wage earner. On by default.
+   */
+  apprenticeMwe: boolean
 }
 
 export interface PayrollEmployeeInput {
