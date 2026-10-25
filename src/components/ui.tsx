@@ -341,6 +341,14 @@ export function Badge({
   )
 }
 
+/**
+ * Next to a setting whose legal answer isn't confirmed yet (payroll tax rules
+ * spec, PENDING items): the default is used until it is.
+ */
+export function PendingBadge() {
+  return <Badge tone="amber">Pending legal confirmation</Badge>
+}
+
 // ---------- forms ----------
 
 /**

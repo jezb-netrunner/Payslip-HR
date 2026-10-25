@@ -8,14 +8,17 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { Calculator, ExternalLink, ShieldCheck, Tags } from 'lucide-react'
-import { Badge, Card, Field, Input, LoadFailed, PageHeader, Spinner, TableShell, Td, Th } from '../../components/ui'
+import { Badge, Card, Field, Input, LoadFailed, PageHeader, PendingBadge, Spinner, TableShell, Td, Th } from '../../components/ui'
+import { useToast } from '../../components/toast'
+import { setPayCodeSssInclude } from '../../lib/api'
+import { useAuth } from '../../lib/auth'
 import type { StatutoryVersion } from '../../lib/db'
 import { errorMessage } from '../../lib/errors'
 import { fmtDate, money } from '../../lib/format'
 import { INCOME_CLASS_LABELS, PAY_CODE_TAX_LABELS } from '../../lib/labels'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
-import { usePayCodes } from '../../lib/usePayCodes'
+import { reloadPayCodes, usePayCodes } from '../../lib/usePayCodes'
 import { lineIncomeClass } from '../../payroll/payCodes'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
 import type {
@@ -96,6 +99,22 @@ export default function Statutory() {
   const [loadError, setLoadError] = useState('')
   const [sample, setSample] = useState('25000')
   const payCodes = usePayCodes()
+  const { isCompanyAdmin } = useAuth()
+  const toast = useToast()
+  const [savingCode, setSavingCode] = useState('')
+
+  async function toggleSss(c: PayCode) {
+    setSavingCode(c.code)
+    try {
+      await setPayCodeSssInclude(c.code, !c.sss_include)
+      await reloadPayCodes()
+      toast('success', `${c.label}: ${c.sss_include ? 'out of' : 'in'} the SSS base from now on. Recompute draft payrolls.`)
+    } catch (err) {
+      toast('error', errorMessage(err, 'Could not save the setting'))
+    } finally {
+      setSavingCode('')
+    }
+  }
 
   const load = useCallback(async () => {
     setLoadError('')
@@ -243,7 +262,10 @@ export default function Statutory() {
             compensation (S: overtime, premiums, commission, the part of bonuses above the ₱90,000 and other one-time
             pay). Withholding tax takes the table row from R alone. The cumulative average method applies instead, for the
             rest of the year, once S is paid while R is in the 0% row, S is at least R, or the employee had a previous
-            employer this year (RR 2-98 Sec. 2.79(B), as amended by RR 11-2018).
+            employer this year (RR 2-98 Sec. 2.79(B), as amended by RR 11-2018). The SSS column says whether the pay is
+            in the month's SSS compensation (RA 11199 Sec. 8(f)): bonuses are, except the Christmas bonus, and liquidated
+            transportation, board or lodging is not. Where the law isn't settled, company admins choose; until then it
+            stays out.
           </p>
           <TableShell>
             <thead className="bg-slate-50">
@@ -252,6 +274,7 @@ export default function Statutory() {
                 <Th>Used for</Th>
                 <Th>Tax</Th>
                 <Th>Taxable part</Th>
+                <Th>SSS</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -264,6 +287,25 @@ export default function Statutory() {
                   <Td>{[c.for_allowances && 'Allowances', c.for_one_time && 'One-time earnings'].filter(Boolean).join(', ')}</Td>
                   <Td>{PAY_CODE_TAX_LABELS[c.tax_treatment]}</Td>
                   <Td>{taxablePart(c)}</Td>
+                  <Td>
+                    {c.sss_include_pending && isCompanyAdmin ? (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={c.sss_include}
+                          disabled={savingCode !== ''}
+                          onChange={() => toggleSss(c)}
+                          aria-label={`${c.label} in the SSS base`}
+                        />
+                        <span>{c.sss_include ? 'In the base' : 'Out'}</span>
+                      </label>
+                    ) : (
+                      <span>{c.sss_include ? 'In the base' : 'Out'}</span>
+                    )}
+                    {c.sss_include_pending && <div className="mt-1"><PendingBadge /></div>}
+                    {c.is_christmas_bonus && <p className="mt-0.5 text-xs text-slate-400">Christmas bonus</p>}
+                    {c.subject_to_liquidation && <p className="mt-0.5 text-xs text-slate-400">Liquidated: not compensation</p>}
+                  </Td>
                 </tr>
               ))}
             </tbody>

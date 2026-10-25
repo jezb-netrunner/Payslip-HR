@@ -244,18 +244,28 @@ export interface ComputePayslipParams {
 }
 
 /**
- * Earnings that are SSS compensation — "all actual remuneration for
- * employment", allowances included (RA 11199 Sec. 8(f)) — but not the 13th
- * month, bonuses, de minimis benefits or other non-taxable pay (maternity
- * benefits among them).
+ * Payslips from before spec T3 have no SSS flag on their lines: their SSS
+ * compensation was these buckets (no bonuses, 13th month, de minimis or
+ * other non-taxable pay).
  */
 export const SSS_COMPENSATION_BUCKETS: readonly BirBucket[] = [
   'basic', 'holiday', 'overtime', 'night_diff', 'hazard', 'cola',
   'representation', 'transportation', 'housing', 'other_taxable',
 ]
 
-export function sssCompensation(lines: readonly Pick<PayLine, 'amount' | 'bir'>[]): number {
-  return round2(lines.filter((l) => l.bir && SSS_COMPENSATION_BUCKETS.includes(l.bir)).reduce((s, l) => s + Number(l.amount), 0))
+// Basis: RA 11199 §8(f), §8(h) (approved Feb 7, 2019). SSS IRR of RA 11199, Rule 12 §6 ("All actual remuneration for employment … including but not limited to"; "Bonuses (except Christmas bonus)"; "Maternity leave with pay"; transportation, board and lodging allowance "if not subject to liquidation"; "Commission advances and monthly allowances") and Rule 12 §8 (SSS site).
+/**
+ * SSS compensation in these lines: each line's own flag (its pay code's
+ * sss_include; the payroll's own lines — basic pay, premiums, overtime,
+ * night differential — are always in), or the bucket rule for a line saved
+ * before the flag existed.
+ */
+export function sssCompensation(lines: readonly Pick<PayLine, 'amount' | 'bir' | 'sss'>[]): number {
+  return round2(
+    lines
+      .filter((l) => l.sss ?? (!!l.bir && SSS_COMPENSATION_BUCKETS.includes(l.bir)))
+      .reduce((s, l) => s + Number(l.amount), 0),
+  )
 }
 
 const NO_SSS: SssComputation = { msc: 0, ee: 0, er: 0, ecEr: 0, mpfEe: 0, mpfEr: 0 }
@@ -654,7 +664,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     incomeClass: IncomeClass = bir === 'basic' ? 'regular' : 'supplementary',
   ) => {
     const taxable = isTaxableBucket(bir, isMwe)
-    earnings.push({ code, label, amount, bir, taxable, ...extra })
+    // the payroll's own lines are compensation for work: always in the SSS base
+    earnings.push({ code, label, amount, bir, taxable, sss: true, ...extra })
     if (!taxable) return
     if (incomeClass === 'regular') regularLines = round2(regularLines + amount)
     else supplementaryLines = round2(supplementaryLines + amount)
@@ -745,7 +756,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     if (amt === 0) continue
     const pc = allowanceCode(a, codes)
     const taxable = isTaxableBucket(pc.bir_bucket, isMwe)
-    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, pc.bir_bucket, { payCode: pc.code }, lineIncomeClass(pc, 'allowance'))
+    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, pc.bir_bucket, { payCode: pc.code, sss: pc.sss_include }, lineIncomeClass(pc, 'allowance'))
   }
   for (const e of employee.oneTimeEarnings ?? []) {
     const amt = round2(e.amount)
@@ -756,6 +767,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     earn('adjustment', e.label, amt, pc.bir_bucket, {
       meta: e.id,
       payCode: pc.code,
+      sss: pc.sss_include,
       ...(pc.benefit === 'maternity_differential' ? { thirteenthBasis: true } : {}),
     }, lineIncomeClass(pc, 'one_time'))
   }
@@ -1101,8 +1113,10 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   )
   if (ytdBasic === 0) warnings.push('YTD basic pay is zero — no finalized payslips found for this year.')
 
+  // SSS on 13th month pay is a setting (spec P2): the month's last regular payroll settles it
+  const code13 = payCodeOf('THIRTEENTH_MONTH', params.payCodes ?? PAY_CODES)
   const earnings: PayLine[] = gross13 > 0
-    ? [{ code: 'thirteenth', label: '13th Month Pay', amount: gross13, taxable: false, bir: 'thirteenth' }]
+    ? [{ code: 'thirteenth', label: '13th Month Pay', amount: gross13, taxable: false, bir: 'thirteenth', payCode: code13.code, sss: code13.sss_include }]
     : []
 
   let withholdingTax = 0

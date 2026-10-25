@@ -119,3 +119,23 @@ a small change if the owner reads it otherwise.
 5. **Draft payrolls are marked for recomputing** when the T2 migration is
    applied, so no draft computed on the old method is finalized.
 
+## 6. Decisions taken in T3–T12 (owner: "continue with all the edits", 2026-10-25)
+
+The owner asked for T3–T12 without stopping between tasks and will answer
+questions at the end. Where the spec or the code left a choice, the choice
+below was made and is easy to change.
+
+**T3 (SSS base)**
+- New codes: CHRISTMAS_BONUS (one-time only), LIQUIDATED_ALLOWANCE (a
+  liquidated transportation, board or lodging allowance or reimbursement)
+  and THIRTEENTH_MONTH (the 13th month run's own code, so P2 has a setting
+  for it). LIQUIDATED_ALLOWANCE is also treated as not taxable, as a
+  reimbursement rather than compensation; the spec only says it is out of
+  the SSS base. *Question: confirm the tax treatment.*
+- The P2/P3 settings apply to all clients (the codes are shared); only
+  company admins change them, on the Statutory Tables page, and a change
+  marks every client's draft payrolls for recomputing.
+- With 13th month pay switched into the SSS base, the month's last regular
+  payroll settles it; a 13th month paid after that payroll was finalized
+  shows a warning to reopen and recompute it.
+

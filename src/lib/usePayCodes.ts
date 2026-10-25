@@ -1,7 +1,7 @@
-// The pay codes on file: reference data that ships with the software, so it
-// is loaded once per session. Screens start with the shipped list
-// (src/payroll/payCodes.ts mirrors the database) and switch to the
-// database's rows once they arrive.
+// The pay codes on file: reference data that ships with the software (a few
+// fields are company-admin settings), loaded once per session. Screens start
+// with the shipped list (src/payroll/payCodes.ts mirrors the database) and
+// switch to the database's rows once they arrive.
 
 import { useEffect, useState } from 'react'
 import { getPayCodes } from './api'
@@ -10,23 +10,35 @@ import { lineIncomeClass, PAY_CODES } from '../payroll/payCodes'
 import type { PayCode } from '../payroll/types'
 
 let loading: Promise<PayCode[]> | null = null
+const listeners = new Set<(codes: readonly PayCode[]) => void>()
+
+function load(): Promise<PayCode[]> {
+  loading ??= getPayCodes().catch((err: unknown) => {
+    loading = null
+    throw err
+  })
+  return loading
+}
+
+/** Load the pay codes again (a setting changed) and update every screen showing them. */
+export async function reloadPayCodes(): Promise<void> {
+  loading = null
+  const rows = await load()
+  for (const l of listeners) l(rows)
+}
 
 export function usePayCodes(): readonly PayCode[] {
   const [codes, setCodes] = useState<readonly PayCode[]>(PAY_CODES)
   useEffect(() => {
     let live = true
-    loading ??= getPayCodes().catch((err: unknown) => {
-      loading = null
-      throw err
-    })
-    loading.then(
-      (rows) => {
-        if (live && rows.length > 0) setCodes(rows)
-      },
-      () => {}, // keep the shipped list; saving still goes through the database's checks
-    )
+    const update = (rows: readonly PayCode[]) => {
+      if (live && rows.length > 0) setCodes(rows)
+    }
+    listeners.add(update)
+    load().then(update, () => {}) // keep the shipped list; saving still goes through the database's checks
     return () => {
       live = false
+      listeners.delete(update)
     }
   }, [])
   return codes

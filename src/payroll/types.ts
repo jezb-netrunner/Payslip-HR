@@ -264,14 +264,14 @@ export type IncomeClass = 'regular' | 'supplementary'
  */
 export type PayCodeTaxTreatment = 'taxable' | 'mwe_exempt' | 'benefits' | 'de_minimis' | 'exempt'
 
-/** One `pay_codes` row: what an allowance or one-time earning is (spec T2). */
+/** One `pay_codes` row: what an allowance or one-time earning is (spec T2, T3). */
 export interface PayCode {
   code: string
   label: string
   description: string
   /** offered for recurring allowances */
   for_allowances: boolean
-  /** offered for one-time earnings in a payroll */
+  /** offered for one-time earnings in a payroll (neither: a code the payroll itself uses, like THIRTEENTH_MONTH) */
   for_one_time: boolean
   bir_bucket: BirBucket
   /** R or S of the taxable part when paid as an allowance each period (null: never taxable) */
@@ -279,6 +279,14 @@ export interface PayCode {
   tax_treatment: PayCodeTaxTreatment
   /** the maternity benefit the code pays */
   benefit: MaternityBenefit | null
+  /** in the SSS compensation base (RA 11199 Sec. 8(f), SSS IRR Rule 12 Sec. 6) */
+  sss_include: boolean
+  /** sss_include is a setting until the law is confirmed (spec P2, P3) */
+  sss_include_pending: boolean
+  /** the Christmas bonus: out of the SSS base */
+  is_christmas_bonus: boolean
+  /** transportation, board or lodging the employee liquidates: not compensation */
+  subject_to_liquidation: boolean
   sort_order: number
   active: boolean
 }
@@ -398,6 +406,8 @@ export interface PayLine {
   thirteenthBasis?: boolean
   /** Allowances and one-time earnings: the pay code. */
   payCode?: string
+  /** Earnings only: in the SSS compensation base (spec T3; payslips from before it have no flag). */
+  sss?: boolean
 }
 
 export interface SssComputation {

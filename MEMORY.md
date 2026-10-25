@@ -407,9 +407,28 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T3: SSS base by pay code (same branch)
+
+**Asked:** the owner OK'd T2 and asked for T3–T12 without stopping between
+tasks (questions collected for the end, `docs/payroll-spec-mapping.md` §6).
+**Did:** `pay_codes` gained `sss_include`, `sss_include_pending` (P2/P3),
+`is_christmas_bonus`, `subject_to_liquidation`; new codes CHRISTMAS_BONUS,
+LIQUIDATED_ALLOWANCE (non-taxable, out of SSS) and THIRTEENTH_MONTH (the
+13th month run's own code, P2). Every new earnings line stores `sss`;
+`sssCompensation` sums the flags. The month's SSS base now also reads its
+13th-month payslips (they count only when that setting is on; a 13th month
+paid after the month's last payroll was final warns to recompute it).
+`set_pay_code_sss_include` RPC (company admins, pending codes only,
+audit-logged, marks drafts stale); toggles with the Pending badge on the
+Statutory page. Migration `20261025110000_sss_pay_codes` (not live).
+Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-10-25: `20261025110000 sss_pay_codes` (spec T3) is in the branch,
+NOT live** (apply after T2's, before T3's front end).
 
 **2026-10-25: `20261025100000 pay_codes` (spec T2) is in the branch, NOT
 live.** Apply it BEFORE deploying T2's front end: the new screens and the
@@ -1189,7 +1208,10 @@ deducts what the month's actual pay requires less what was already taken —
 a negative line refunds an over-deduction; a month with no compensation
 owes none, and a payroll that paid no compensation (a period on maternity
 or unpaid leave) takes no provisional share. PhilHealth stays on the basic rate, Pag-IBIG on basic +
-allowances. Flow tests that expected a full rate-based month for mid-month
+allowances. Since spec T3 a line is in the base by its pay code's
+`sss_include` (stored on the line as `sss`; lines from before keep the old
+bucket rule): bonuses are in except CHRISTMAS_BONUS, LIQUIDATED_ALLOWANCE is
+out, and the P2/P3 codes are company-admin settings (off by default). Flow tests that expected a full rate-based month for mid-month
 hires/absences were wrong and were changed. Why it mattered: rate-based
 SSS under-remits for anyone with OT or allowances (SSS assesses
 deficiencies with 2%/month penalties) and over-deducts partial months.

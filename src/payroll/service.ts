@@ -183,6 +183,7 @@ const CONTRIBUTION_COLUMNS =
 type MonthSlip = Pick<
   Payslip,
   | 'employee_id'
+  | 'run_type'
   | 'earnings'
   | 'sss_ee'
   | 'sss_mpf_ee'
@@ -429,22 +430,21 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
     fetchFinalizedPayslipsForTaxYear(entity.id, taxYear),
     fetchTaxYears(entity.id, taxYear),
-    // contributions already deducted this payroll month (completing months
-    // around hires and separations)
-    isThirteenth
-      ? Promise.resolve([] as MonthSlip[])
-      : fetchAll<MonthSlip>((from, to) =>
-          supabase
-            .from('payslips')
-            .select(`employee_id, earnings, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status, period_index, periods_in_month)`)
-            .eq('entity_id', entity.id)
-            .eq('period_month', run.period_month)
-            .neq('payroll_run_id', run.id)
-            .neq('run_type', 'thirteenth_month')
-            .in('payroll_runs.status', ['finalized', 'paid'])
-            .order('id')
-            .range(from, to),
-        ),
+    // the payroll month's finalized payslips: contributions already
+    // deducted (completing months around hires and separations) and the
+    // SSS compensation they paid (13th month payslips included: whether
+    // their pay is in the SSS base is a setting)
+    fetchAll<MonthSlip>((from, to) =>
+      supabase
+        .from('payslips')
+        .select(`employee_id, run_type, earnings, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status, period_index, periods_in_month)`)
+        .eq('entity_id', entity.id)
+        .eq('period_month', run.period_month)
+        .neq('payroll_run_id', run.id)
+        .in('payroll_runs.status', ['finalized', 'paid'])
+        .order('id')
+        .range(from, to),
+    ),
     getPayCodes(),
   ])
 
@@ -530,7 +530,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
 
     const empYear = yearBy.get(emp.id) ?? []
     const empTax = taxBy.get(emp.id) ?? []
-    const empMonth = monthBy.get(emp.id) ?? []
+    const empMonthAll = monthBy.get(emp.id) ?? []
+    // the month's regular payrolls (a 13th month run deducts no contributions)
+    const empMonth = empMonthAll.filter((p) => p.run_type !== 'thirteenth_month')
     // the year's tax was already trued up (annualizing run, final pay, or
     // the payroll that included the separation)
     const taxYearAnnualized = empTax.some(
@@ -648,7 +650,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ? undefined
         : {
             already: sumContributions(empMonth),
-            compensationAlready: sssCompensation(empMonth.flatMap((p) => p.earnings ?? [])),
+            compensationAlready: sssCompensation(empMonthAll.flatMap((p) => p.earnings ?? [])),
             // the month's last slot, a separation, or a payroll for earlier
             // days computed after the month's closing payroll was final
             closes:
@@ -671,6 +673,15 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : Math.max(0, tables.bir_annual.other_benefits_exemption_cap - prior.thirteenthOtherBenefitsExempt - taxYearBenefits),
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
+    // 13th month pay in the SSS base (a setting, spec P2) is settled by the
+    // month's last regular payroll: one already final has to be recomputed
+    const closedMonth = empMonth.some((p) => (p.payroll_runs?.period_index ?? 0) >= (p.payroll_runs?.periods_in_month ?? Infinity))
+    if (isThirteenth && closedMonth && sssCompensation(slip.earnings) > 0) {
+      const month = new Date(`${run.period_month}T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })
+      slip.trace.warnings.push(
+        `${month}'s last payroll is already final, so its SSS doesn't include this 13th month pay (in the SSS base by the pay code setting). Reopen and recompute it.`,
+      )
+    }
     if (isThirteenth) {
       // 13th month is due by Dec 24 (PD 851), often before the year's last
       // payrolls are final: say what the basic pay counted runs through

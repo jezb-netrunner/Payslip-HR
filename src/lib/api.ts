@@ -39,6 +39,12 @@ export async function getPayCodes(): Promise<PayCode[]> {
   return (data ?? []) as PayCode[]
 }
 
+/** Company admins: whether a pay code whose SSS treatment the law hasn't settled is in the SSS base (spec P2, P3). */
+export async function setPayCodeSssInclude(code: string, include: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_pay_code_sss_include', { p_code: code, p_include: include })
+  if (error) throw error
+}
+
 const HOLIDAY_STRENGTH: Record<Holiday['kind'], number> = {
   regular: 3,
   special_non_working: 2,

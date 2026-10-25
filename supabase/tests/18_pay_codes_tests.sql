@@ -27,11 +27,14 @@ end $$;
 grant execute on function pg_temp.check(boolean, text) to authenticated, anon, service_role;
 
 \echo '--- 18.1 the pay codes on file'
-select pg_temp.check((select count(*) from pay_codes) = 17, '17 pay codes');
+-- (the 17 codes of T2; later tasks add more)
 select pg_temp.check(
   (select string_agg(code || ':' || bir_bucket || ':' || coalesce(income_class, '-') || ':' || tax_treatment
      || ':' || (case when for_allowances then 'A' else '' end) || (case when for_one_time then 'O' else '' end)
-     || coalesce(':' || benefit, ''), ' ' order by code) from pay_codes) =
+     || coalesce(':' || benefit, ''), ' ' order by code) from pay_codes
+   where code in ('BASIC_ADJ','BONUS','COLA','COMMISSION','DE_MINIMIS','FIXED_ALLOWANCE','HAZARD','HOLIDAY_ADJ','HOUSING',
+                  'MAT_DIFFERENTIAL','MAT_SSS_BENEFIT','NIGHT_DIFF_ADJ','NON_TAXABLE','OTHER_TAXABLE','OVERTIME_ADJ',
+                  'REPRESENTATION','TRANSPORTATION')) =
   'BASIC_ADJ:basic:regular:mwe_exempt:O BONUS:other_benefits:supplementary:benefits:AO '
   'COLA:cola:regular:mwe_exempt:AO COMMISSION:other_taxable:supplementary:taxable:O '
   'DE_MINIMIS:de_minimis:supplementary:de_minimis:AO FIXED_ALLOWANCE:other_taxable:regular:taxable:A '
@@ -54,7 +57,7 @@ select pg_temp.check((select bool_and(public.default_pay_code(c, null, false) is
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :owner, true);
-select pg_temp.check((select count(*) from pay_codes) = 17, 'a company admin reads them');
+select pg_temp.check((select count(*) from pay_codes) >= 17, 'a company admin reads them');
 select pg_temp.expect_error($$insert into pay_codes (code, label, for_one_time, bir_bucket, income_class, tax_treatment)
   values ('X_CODE', 'x', true, 'other_taxable', 'supplementary', 'taxable')$$, '%permission denied%');
 select pg_temp.expect_error($$update pay_codes set income_class = 'regular' where code = 'COMMISSION'$$, '%permission denied%');
