@@ -228,3 +228,19 @@ below was made and is easy to change.
 - The previous-employer fields already existed (Employee → BIR data); a
   payslip now warns when an employee hired during the tax year has no BIR
   data row for it (saving the form with "no previous employer" clears it).
+
+**T9 (due dates)**
+- Existing clients start with no filing mode, so no 1601-C date is shown
+  until an admin chooses "Manual or eBIRForms" or "eFPS" and the group on
+  Client Settings (the spec gives no default; a wrong date is worse than
+  none).
+- The P6 settings are one number per agency: the day of the next month the
+  client's remittance is due (blank = not set). The agencies' real rules go
+  by employer number or name; a day that doesn't exist in a month (the 31st
+  in February) becomes its last day.
+- Only Saturdays and Sundays are marked, as the spec says; holidays are not
+  (they are on the Holidays page). Overrides need a note, are per client,
+  and are audit-logged.
+- The calendar is BIR & Reports → Due dates (one year at a time: each
+  month's 1601-C and contributions, then the tax year's annual dates); the
+  dashboard's obligation tiles show the date in force.

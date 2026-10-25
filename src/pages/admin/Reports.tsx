@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, ShieldCheck } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th, StatGroup } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadCsv } from '../../lib/api'
@@ -17,6 +17,7 @@ import { refundDeadline, yearRemittanceSchedule, type RemittanceRow } from '../.
 import { fetchRemittanceSlips } from '../../payroll/service'
 import { round2 } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
+import DueDates from './DueDates'
 import Insights from './Insights'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
@@ -54,6 +55,7 @@ export default function Reports() {
           { key: 'alphalist', label: 'Alphalist (1604-C schedules)', icon: <ListOrdered /> },
           { key: '1604c', label: '1604-C summary', icon: <FileText /> },
           { key: '1601c', label: '1601-C remittances', icon: <Landmark /> },
+          { key: 'due', label: 'Due dates', icon: <CalendarClock /> },
           { key: 'contrib', label: 'SSS / PhilHealth / Pag-IBIG', icon: <ShieldCheck /> },
         ]}
         active={tab}
@@ -63,6 +65,7 @@ export default function Reports() {
       {tab === 'alphalist' && <Alphalist key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === '1604c' && <Summary1604C key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === '1601c' && <Remittances key={`${entity.id}${year}`} entity={entity} year={year} />}
+      {tab === 'due' && <DueDates key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === 'contrib' && <Contributions key={`${entity.id}${year}`} entity={entity} year={year} />}
     </div>
   )

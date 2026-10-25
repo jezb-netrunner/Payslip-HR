@@ -175,6 +175,13 @@ The app captures everything the annual information return needs:
   (deducted from pay only after the employee signs an authorization). An
   employee who leaves gets their 2316 figures from the finalized run
   ("BIR 2316 (final pay)")
+- Due dates (BIR & Reports → Due dates): each month's 1601-C by the
+  client's filing mode (manual or eBIRForms: the 10th, January 15 for
+  December; eFPS: the group's day, A 15th to E 11th), the year-end dates
+  (refunds by January 25, 2316 and 1604-C by January 31, scanned 2316
+  duplicates by February 28) and, once set per client, SSS / PhilHealth /
+  Pag-IBIG days. Weekends are marked, never moved; any date can be
+  overridden with a note
 - 1601-C remittances (date, bank/agency, TRA/eROR/eAR, amounts) for the
   1604-C remittance schedule; each month shows the tax withheld, tax paid
   by the employer and year-end refunds recovered (a refund a month can't

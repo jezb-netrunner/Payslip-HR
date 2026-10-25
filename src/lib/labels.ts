@@ -9,6 +9,7 @@ import type {
   PayFrequency,
   RoundingMode,
 } from '../payroll/types'
+import type { EfpsGroup, FilingMode, ObligationKey } from '../payroll/dueDates'
 
 export const FREQUENCY_LABELS: Record<PayFrequency, string> = {
   weekly: 'Weekly',
@@ -81,6 +82,33 @@ export const ALLOWANCE_BASIS_LABELS: Record<AllowanceBasis, string> = {
   monthly: 'per month (split across payrolls)',
   per_period: 'per payroll',
   per_day: 'per paid day',
+}
+
+/** How a client files its BIR returns (spec T9). */
+export const FILING_MODE_LABELS: Record<FilingMode, string> = {
+  manual_or_ebirforms: 'Manual or eBIRForms',
+  efps: 'eFPS',
+}
+
+/** eFPS filing groups and their 1601-C day of the next month. */
+export const EFPS_GROUP_LABELS: Record<EfpsGroup, string> = {
+  A: 'Group A (15th)',
+  B: 'Group B (14th)',
+  C: 'Group C (13th)',
+  D: 'Group D (12th)',
+  E: 'Group E (11th)',
+}
+
+/** What each due date is for (spec T9). */
+export const OBLIGATION_LABELS: Record<ObligationKey, string> = {
+  '1601c': 'BIR 1601-C (withholding tax)',
+  sss: 'SSS contributions',
+  philhealth: 'PhilHealth contributions',
+  pagibig: 'Pag-IBIG contributions',
+  yea_refund: 'Year-end tax refunds to employees',
+  '2316_employees': 'BIR 2316 to employees (at final pay for those who leave)',
+  '1604c': 'BIR 1604-C with the alphalist',
+  '2316_duplicates': 'Scanned 2316 duplicates with the certified list',
 }
 
 /** RA 11210 Sec. 5(c): who may be exempted, with DOLE approval each year, from the maternity salary differential. */

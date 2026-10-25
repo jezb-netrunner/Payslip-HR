@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Baby, Banknote, Building2, Coins, FileText, Hash, SlidersHorizontal } from 'lucide-react'
-import { Button, Card, Field, Input, NoClient, PageHeader, Select, Textarea, Toggle } from '../../components/ui'
+import { Baby, Banknote, Building2, CalendarClock, Coins, FileText, Hash, SlidersHorizontal } from 'lucide-react'
+import { Button, Card, Field, Input, NoClient, PageHeader, PendingBadge, Select, Textarea, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
 import type { Entity, MaternityExemptionCategory } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { CONTRIBUTION_TIMING_LABELS, FREQUENCY_LABELS, MATERNITY_EXEMPTION_LABELS, PH_REGIONS, ROUNDING_LABELS } from '../../lib/labels'
+import { CONTRIBUTION_TIMING_LABELS, EFPS_GROUP_LABELS, FILING_MODE_LABELS, FREQUENCY_LABELS, MATERNITY_EXEMPTION_LABELS, PH_REGIONS, ROUNDING_LABELS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { splitClientTin } from '../../lib/format'
@@ -33,7 +33,18 @@ function settingsRangeProblem(s: Entity): string | null {
     return 'Days from period end to pay date must be a whole number, 0–31.'
   if (s.maternity_exemption_category && (!s.maternity_exemption_dole_ref?.trim() || !int(s.maternity_exemption_year) || n(s.maternity_exemption_year) < 2019))
     return 'Maternity differential exemption: enter the DOLE approval reference and the year it covers.'
+  if (s.filing_mode === 'efps' && !s.efps_group) return 'Choose the eFPS filing group.'
+  for (const [label, v] of [['SSS', s.sss_due_day], ['PhilHealth', s.philhealth_due_day], ['Pag-IBIG', s.pagibig_due_day]] as const) {
+    if (v !== null && v !== undefined && String(v) !== '' && !(int(v) && n(v) >= 1 && n(v) <= 31)) {
+      return `${label} due date: a day of the month, 1–31 (or blank).`
+    }
+  }
   return null
+}
+
+/** A contribution due day from the form: blank = not set. */
+function dueDay(v: number | string | null | undefined): number | null {
+  return v === null || v === undefined || String(v) === '' ? null : Number(v)
 }
 
 function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Promise<void> }) {
@@ -91,6 +102,11 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           maternity_exemption_category: s.maternity_exemption_category || null,
           maternity_exemption_dole_ref: s.maternity_exemption_category ? s.maternity_exemption_dole_ref?.trim() : null,
           maternity_exemption_year: s.maternity_exemption_category ? Number(s.maternity_exemption_year) : null,
+          filing_mode: s.filing_mode || null,
+          efps_group: s.filing_mode === 'efps' ? s.efps_group : null,
+          sss_due_day: dueDay(s.sss_due_day),
+          philhealth_due_day: dueDay(s.philhealth_due_day),
+          pagibig_due_day: dueDay(s.pagibig_due_day),
         })
         .eq('id', s.id)
       if (error) throw error
@@ -198,6 +214,63 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 <Input value={s.minimum_wage_reference} onChange={(e) => set('minimum_wage_reference', e.target.value)} />
               </Field>
             </div>
+          </Card>
+          <Card title="Filing and due dates" icon={<CalendarClock />}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="BIR filing" hint="Sets the 1601-C due dates (BIR & Reports → Due dates)">
+                <Select
+                  value={s.filing_mode ?? ''}
+                  onChange={(e) => {
+                    const mode = (e.target.value || null) as Entity['filing_mode']
+                    setS({ ...s, filing_mode: mode, efps_group: mode === 'efps' ? s.efps_group : null })
+                  }}
+                >
+                  <option value="">Not set</option>
+                  {Object.entries(FILING_MODE_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </Select>
+              </Field>
+              {s.filing_mode === 'efps' && (
+                <Field label="eFPS filing group">
+                  <Select value={s.efps_group ?? ''} onChange={(e) => set('efps_group', (e.target.value || null) as Entity['efps_group'])}>
+                    <option value="">Select…</option>
+                    {Object.entries(EFPS_GROUP_LABELS).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+            </div>
+            <p className="mb-2 mt-4 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
+              Contribution due dates <PendingBadge />
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {(
+                [
+                  ['sss_due_day', 'SSS'],
+                  ['philhealth_due_day', 'PhilHealth'],
+                  ['pagibig_due_day', 'Pag-IBIG'],
+                ] as const
+              ).map(([k, label]) => (
+                <Field key={k} label={label}>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    placeholder="Not set"
+                    aria-label={`${label}: day of the next month`}
+                    value={s[k] ?? ''}
+                    onChange={(e) => set(k, e.target.value === '' ? null : (e.target.value as unknown as number))}
+                  />
+                </Field>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">
+              Day of the next month each agency's remittance for a month is due. The agencies set it by employer number or
+              name: enter the day that applies to this client, or leave it blank. Dates never move for weekends or holidays;
+              override a date under BIR &amp; Reports → Due dates.
+            </p>
           </Card>
         </div>
 

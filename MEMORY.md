@@ -407,6 +407,22 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T9: due-date calendar (same branch)
+
+**Did:** `src/payroll/dueDates.ts` — `due1601c` (10th of the next month, or
+the eFPS group's day A 15 … E 11; December: January 15 or the group's day),
+`annualDueDates` (refunds Jan 25, 2316 and 1604-C Jan 31, scanned 2316
+duplicates Feb 28), `contributionDue` (a day of the next month, clamped),
+`dueCalendar` (a year's items with overrides, weekends marked, nothing
+moved). Client settings `filing_mode` (null until chosen), `efps_group`
+(required for eFPS), and the P6 days `sss_due_day`, `philhealth_due_day`,
+`pagibig_due_day` (no default, Pending badge) on Client Settings;
+`due_date_overrides` (one per obligation and period, note required,
+client admins, audit-logged). BIR & Reports → Due dates lists the year,
+overrides with a note; the dashboard tiles show the date in force.
+Migration `20261025170000_due_dates` (not live). Tests 487 → 496 plus SQL
+suite 25 (seen failing without the migration).
+
 ### 2026-10-25 — Spec T8: year-end adjustment additions (same branch)
 
 **Did:** an annualizing payroll (December flag, separation, 13th month after
@@ -520,8 +536,8 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 **2026-10-25: `20261025110000 sss_pay_codes` (T3), `20261025120000
 maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5),
 `20261025140000 philhealth_ng_share` (T6), `20261025150000
-de_minimis_items` (T7) and `20261025160000 year_end_adjustment` (T8) are in
-the branch, NOT live** (apply in order after T2's, before the front end;
+de_minimis_items` (T7), `20261025160000 year_end_adjustment` (T8) and
+`20261025170000 due_dates` (T9) are in the branch, NOT live** (apply in order after T2's, before the front end;
 T4's drops and re-adds a constraint and T6's drops columns, so they need
 the SQL editor).
 
@@ -1161,12 +1177,19 @@ PhilHealth/Pag-IBIG collected (`src/payroll/flows/contributionOrder.test.ts`).
 Re-verify the exact column order against the current BIR Alphalist Data
 Entry module before relying on the CSV column positions.
 
-### Remittance due dates are not verified facts — the dashboard doesn't state them
+### Remittance due dates are not verified facts — only the owner's BIR rules are shown
 
-> On 2026-10-20 the dashboard's "File 1601-C by the 10th", "SSS by month-end", "Pag-IBIG by the 10th–15th" hints turned out to be unverified and contradicted by current sources (BIR eFPS deadlines go by filing group; Pag-IBIG's window runs to month-end by the first letter of the employer's name; PhilHealth's goes by employer number). The tiles now only say "remit next month — check the agency's schedule".
+> On 2026-10-20 the dashboard's "File 1601-C by the 10th", "SSS by month-end", "Pag-IBIG by the 10th–15th" hints turned out to be unverified and contradicted by current sources (BIR eFPS deadlines go by filing group; Pag-IBIG's window runs to month-end by the first letter of the employer's name; PhilHealth's goes by employer number). The tiles said only "remit next month — check the agency's schedule".
 
-Verify against each agency's own issuance before showing exact dates again
-(same rule as statutory figures: data from official sources, never memory).
+Since spec T9 (2026-10-25) the BIR dates come from the owner's spec (CPA,
+with its Basis lines: 1601-C guidelines, RR 26-2002 as applied by RMC
+125-2020, RR 11-2018, RMC 55-2026; a 2025 tax calendar confirmed eFPS
+groups D and E on the 12th and 11th) and show only once the client's
+filing mode is chosen. SSS, PhilHealth and Pag-IBIG stay per-client
+settings with no default (P6) until each agency's own issuance is read.
+Dates are never moved for weekends or holidays (P8): the user overrides
+them with a note. Why it mattered: a wrong deadline shown as fact is worse
+than none.
 
 
 ### The look lives in theme tokens and ui.tsx primitives (confirmed approach)

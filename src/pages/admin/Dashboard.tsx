@@ -27,6 +27,7 @@ import { probationEnds } from '../../lib/insights'
 import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import { dueCalendar, type DueDateOverride, type DueItem, type ObligationKey } from '../../payroll/dueDates'
 import type { ScheduleResolver } from '../../payroll/types'
 
 // Categorical palette — validated (dataviz six checks, light surface):
@@ -135,6 +136,8 @@ interface DashData {
   pendingAdvances: number
   /** company admins: the oldest verification date among the statutory tables in force (undefined = not loaded) */
   statutoryVerified?: string | null
+  /** due dates the user set in place of the computed ones (spec T9) */
+  dueOverrides: DueDateOverride[]
 }
 
 function ClientDashboard({ entity }: { entity: Entity }) {
@@ -149,7 +152,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
       const twoWeeksAgo = addDays(today, -13)
       // six payroll months for the cost chart, plus the current one
       const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
-      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances, scheduleRows, statutory] = await Promise.all([
+      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances, scheduleRows, statutory, overrides] = await Promise.all([
         getEmployees(entity.id),
         fetchAll<TimeEntry>((from, to) =>
           supabase
@@ -192,8 +195,9 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         isCompanyAdmin
           ? supabase.from('statutory_versions').select('kind, verified_on').lte('effective_from', today).order('effective_from', { ascending: false })
           : Promise.resolve(null),
+        supabase.from('due_date_overrides').select('obligation, period, due_date, note').eq('entity_id', entity.id).gte('period', sinceMonth),
       ])
-      const failed = runsRes.error ?? corr.error ?? leaves.error ?? advances.error ?? statutory?.error
+      const failed = runsRes.error ?? corr.error ?? leaves.error ?? advances.error ?? statutory?.error ?? overrides.error
       if (failed) throw failed
       setData({
         employees: emps,
@@ -207,6 +211,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         pendingLeaves: leaves.count ?? 0,
         pendingAdvances: advances.count ?? 0,
         statutoryVerified: statutory ? oldestCheck((statutory.data ?? []) as { kind: string; verified_on: string | null }[]) : undefined,
+        dueOverrides: (overrides.data ?? []) as DueDateOverride[],
       })
     } catch (err) {
       setLoadError(errorMessage(err, 'Could not load the dashboard'))
@@ -349,11 +354,11 @@ function ClientDashboard({ entity }: { entity: Entity }) {
             <ObligationTile
               label={`BIR withholding tax — paid in ${derived.lastPayMonthLabel ?? '—'}`}
               amount={derived.monthObligations.tax}
-              due="1601-C next month — the due date depends on your BIR filing group"
+              due={dueLine(derived.due.tax, '1601-C', '1601-C next month — choose the client\'s BIR filing in Client Settings to see its due date')}
             />
-            <ObligationTile label="SSS (EE + ER + EC)" amount={derived.monthObligations.sss} due="Remit next month — check the SSS schedule for your due date" />
-            <ObligationTile label="PhilHealth" amount={derived.monthObligations.philhealth} due="Remit next month — PhilHealth's schedule depends on your employer number" />
-            <ObligationTile label="Pag-IBIG" amount={derived.monthObligations.pagibig} due="Remit next month — Pag-IBIG's window depends on your employer name" />
+            <ObligationTile label="SSS (EE + ER + EC)" amount={derived.monthObligations.sss} due={dueLine(derived.due.sss, 'Remit', 'Remit next month — check the SSS schedule for your due date')} />
+            <ObligationTile label="PhilHealth" amount={derived.monthObligations.philhealth} due={dueLine(derived.due.philhealth, 'Remit', 'Remit next month — PhilHealth\'s schedule depends on your employer number')} />
+            <ObligationTile label="Pag-IBIG" amount={derived.monthObligations.pagibig} due={dueLine(derived.due.pagibig, 'Remit', 'Remit next month — Pag-IBIG\'s window depends on your employer name')} />
           </div>
         ) : (
           <p className="text-sm text-slate-400">Totals appear after the first finalized run.</p>
@@ -365,6 +370,12 @@ function ClientDashboard({ entity }: { entity: Entity }) {
       </Card>
     </div>
   )
+}
+
+/** A tile's due line: the date in force (spec T9), else the general hint. */
+function dueLine(item: DueItem | null, verb: string, fallback: string): string {
+  if (!item?.date) return fallback
+  return `${verb} by ${fmtDate(item.date)}${item.overridden ? ` (${item.note})` : item.weekend ? ' (a weekend: not moved)' : ''}`
 }
 
 function ObligationTile({ label, amount, due }: { label: string; amount: number; due: string }) {
@@ -629,6 +640,25 @@ function derive(data: DashData, entity: Entity, today: string) {
     k ? new Date(`${k}-01T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }) : null
   const lastMonthLabel = monthLabel(lastMonthKey)
   const lastPayMonthLabel = monthLabel(lastPayMonthKey)
+  // the due dates of those months (spec T9): tax by pay month, contributions by payroll month
+  const dueOf = (key: ObligationKey, monthKey: string | undefined): DueItem | null => {
+    if (!monthKey) return null
+    const period = `${monthKey}-01`
+    return (
+      dueCalendar({
+        year: Number(monthKey.slice(0, 4)),
+        filing: { mode: entity.filing_mode, group: entity.efps_group },
+        contributionDays: { sss: entity.sss_due_day, philhealth: entity.philhealth_due_day, pagibig: entity.pagibig_due_day },
+        overrides: data.dueOverrides,
+      }).find((i) => i.key === key && i.period === period) ?? null
+    )
+  }
+  const due = {
+    tax: dueOf('1601c', lastPayMonthKey),
+    sss: dueOf('sss', lastMonthKey),
+    philhealth: dueOf('philhealth', lastMonthKey),
+    pagibig: dueOf('pagibig', lastMonthKey),
+  }
 
   return {
     active,
@@ -641,5 +671,6 @@ function derive(data: DashData, entity: Entity, today: string) {
     lastMonthLabel,
     lastPayMonthLabel,
     monthObligations,
+    due,
   }
 }

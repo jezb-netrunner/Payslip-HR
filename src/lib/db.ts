@@ -15,6 +15,7 @@ import type {
   WhtMethod,
   WorkSchedule,
 } from '../payroll/types'
+import type { EfpsGroup, FilingMode, ObligationKey } from '../payroll/dueDates'
 
 export type Role = 'company_admin' | 'entity_admin' | 'employee'
 
@@ -59,6 +60,13 @@ export interface Entity {
   maternity_exemption_category: MaternityExemptionCategory | null
   maternity_exemption_dole_ref: string | null
   maternity_exemption_year: number | null
+  /** how the client files with the BIR, which sets its 1601-C dates (spec T9); null = not chosen yet */
+  filing_mode: FilingMode | null
+  efps_group: EfpsGroup | null
+  /** day of the next month each agency's remittance is due (spec P6, pending: no default) */
+  sss_due_day: number | null
+  philhealth_due_day: number | null
+  pagibig_due_day: number | null
   standard_hours_per_day: number
   working_days_divisor: number
   grace_period_minutes: number
@@ -70,6 +78,17 @@ export interface Entity {
   payslip_footer_note: string
   is_active: boolean
   created_at: string
+}
+
+/** A due date the user set in place of the computed one, with the reason (spec T9). */
+export interface DueDateOverrideRow {
+  id: string
+  entity_id: string
+  obligation: ObligationKey
+  /** the month covered, or January 1 of the tax year for the annual dates */
+  period: string
+  due_date: string
+  note: string
 }
 
 export interface EntityAdmin {
