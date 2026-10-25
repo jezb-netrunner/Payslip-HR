@@ -429,6 +429,13 @@ classify the year's conversions under the client's current leave policy
 annualizing payslip the order is contributions and union dues, then the
 YEA tax (capped at what is left), then loans and other deductions from
 what remains (shortfall warning), then cash advances; no "forgive".
+T10 — `form2316Parts` prints the September 2021 (ENCS) item numbers 1–56
+(lines carry `item`, `signature`, `note`); `lowIncomeReport` (annual.ts)
+moves a year at or under the 0% row (`zeroRowCeiling`) to non-taxable:
+2316 items 29/37, alphalist "Salaries (P250,000 & below)" column;
+COMMISSION is item 45. Migration `20261025210000_form_2316_items`
+(employee RDO code with a format check, local/foreign addresses,
+`employee_tax_years.employer_type`), SQL suite 29.
 
 ### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
 
@@ -613,8 +620,10 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5),
 `20261025140000 philhealth_ng_share` (T6), `20261025150000
 de_minimis_items` (T7), `20261025160000 year_end_adjustment` (T8) and
-`20261025170000 due_dates` (T9), `20261025180000 pagibig_rules` (T11) and
-`20261025190000 minimum_wages` (T12) are in the branch, NOT live** (apply in order after T2's, before the front end;
+`20261025170000 due_dates` (T9), `20261025180000 pagibig_rules` (T11),
+`20261025190000 minimum_wages` (T12), and the owner-answer migrations
+`20261025200000 board_and_lodging` (T3) and `20261025210000
+form_2316_items` (T10) are in the branch, NOT live** (apply in order after T2's, before the front end;
 T4's drops and re-adds a constraint and T6's drops columns, so they need
 the SQL editor).
 
@@ -1255,6 +1264,14 @@ PhilHealth/Pag-IBIG collected (`src/payroll/flows/contributionOrder.test.ts`).
 
 Re-verify the exact column order against the current BIR Alphalist Data
 Entry module before relying on the CSV column positions.
+
+### BIR Form 2316 is the September 2021 (ENCS) form; the 0% row is reported non-taxable (owner, 2026-10-25)
+
+> The 2316 is BIR Form 2316 September 2021 (ENCS) (RMC 34-2022, Mar 30, 2022), items 1–56 — not January 2018, whose numbering differs (the T10 build left numbers out because sources disagreed). A year whose taxable pay (with the previous employer's) is within the annual table's 0% row is reported as non-taxable: 2316 item 29 (basic) and 37 (the rest), alphalist Schedule 1 column "Salaries (P250,000 & below) & Other Forms of Compensation" (RMC 160-2022, Dec 27, 2022). Tax due 0; the 1601-C is untouched.
+
+Both from the owner (CPA) with their Basis lines; the BIR PDFs were not
+read here. Why it mattered: the earlier build kept such pay in the taxable
+columns, which the owner's reading of the form puts in item 29.
 
 ### Remittance due dates are not verified facts — only the owner's BIR rules are shown
 

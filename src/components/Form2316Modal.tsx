@@ -1,8 +1,7 @@
 // BIR Form 2316 figures for one employee and tax year (from the alphalist
-// row): issued by January 31 of the next year, or at final pay for an
-// employee who leaves (spec T8, T10). The layout follows the form's parts:
-// a minimum wage earner's exempt pay apart from taxable compensation, and
-// the previous employer's data.
+// row), item by item as on the September 2021 (ENCS) form: issued by
+// January 31 of the next year, or at final pay for an employee who leaves
+// (spec T8, T10).
 import { Printer } from 'lucide-react'
 import { Button, Modal } from './ui'
 import type { Entity } from '../lib/db'
@@ -20,21 +19,24 @@ export default function Form2316Modal({ row, entity, year, onClose }: { row: Alp
     const esc = (v: string) =>
       v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
     const val = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : esc(v))
+    const cell = 'padding:3px 4px;border-bottom:1px solid #e2e8f0;vertical-align:top'
     const sections = parts
       .map(
         (p) =>
           `<h3 style="margin:18px 0 6px;font-size:13px">${esc(p.title)}</h3><table style="width:100%;border-collapse:collapse;font-size:12px">${p.lines
-            .map(
-              (l) =>
-                `<tr><td style="padding:3px 0;border-bottom:1px solid #e2e8f0${l.total ? ';font-weight:bold' : ''}">${esc(l.label)}</td><td style="text-align:right;border-bottom:1px solid #e2e8f0${l.total ? ';font-weight:bold' : ''}">${val(l.value)}</td></tr>`,
-            )
+            .map((l) => {
+              const bold = l.total ? ';font-weight:bold' : ''
+              const value = l.signature ? '<div style="height:28px;border-bottom:1px solid #0f172a;min-width:220px"></div>' : val(l.value)
+              const note = l.note ? `<div style="font-size:10px;color:#475569">${esc(l.note)}</div>` : ''
+              return `<tr><td style="${cell};width:36px;color:#475569">${esc(l.item)}</td><td style="${cell}${bold}">${esc(l.label)}${note}</td><td style="${cell};text-align:right${bold}">${value}</td></tr>`
+            })
             .join('')}</table>`,
       )
       .join('')
     w.document.write(
       `<html><head><title>BIR 2316 data — ${esc(fullName(e))}</title></head><body style="font-family:sans-serif;padding:24px;color:#0f172a">
       <h2 style="margin:0">BIR Form 2316 figures — ${year}</h2>
-      <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2316 (Certificate of Compensation Payment / Tax Withheld, January 2018 ENCS).</p>
+      <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2316 (Certificate of Compensation Payment / Tax Withheld, September 2021 ENCS), by item number.</p>
       ${sections}</body></html>`,
     )
     w.document.close()
@@ -46,16 +48,22 @@ export default function Form2316Modal({ row, entity, year, onClose }: { row: Alp
       <div className="space-y-4">
         <p className="text-xs text-slate-500">
           {e.last_name}, {e.first_name} · TIN {e.tin || '—'} · {fmtDate(row.from)} – {fmtDate(row.to)}
-          {row.schedule === 2 && ` · MWE (${row.region}) ₱${row.smwPerDay}/day × ${row.factor} days`}
+          {row.schedule === 2 && ` · MWE (${row.region}) ₱${row.smwPerDay}/day × ${row.factor} days`} · September 2021 (ENCS) items
         </p>
         {parts.map((p) => (
           <div key={p.title}>
             <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">{p.title}</p>
             <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4">
               {p.lines.map((l) => (
-                <div key={l.label} className="flex justify-between gap-4 py-1.5 text-sm">
-                  <span className={l.total ? 'font-semibold text-slate-800' : 'text-slate-600'}>{l.label}</span>
-                  <span className="shrink-0 font-semibold text-slate-800">{typeof l.value === 'number' ? money(l.value) : l.value || '—'}</span>
+                <div key={l.item} className="flex justify-between gap-4 py-1.5 text-sm">
+                  <span className={l.total ? 'font-semibold text-slate-800' : 'text-slate-600'}>
+                    <span className="mr-2 inline-block w-8 text-xs text-slate-400">{l.item}</span>
+                    {l.label}
+                    {l.note && <span className="ml-10 block text-xs text-slate-500">{l.note}</span>}
+                  </span>
+                  <span className="shrink-0 font-semibold text-slate-800">
+                    {l.signature ? <span className="text-xs font-normal text-slate-400">signed on the printed form</span> : typeof l.value === 'number' ? money(l.value) : l.value || '—'}
+                  </span>
                 </div>
               ))}
             </div>

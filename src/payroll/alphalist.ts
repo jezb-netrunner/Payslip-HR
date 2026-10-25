@@ -6,7 +6,7 @@
 
 import type { Employee, EmployeeTaxYear, Entity } from '../lib/db'
 import { EMPLOYMENT_STATUS_BIR, SEPARATION_REASON_BIR } from '../lib/labels'
-import { NO_PRIOR_EMPLOYER, summarizeYear, type AnnualPayslipFact, type AnnualSummary, type PriorEmployerInput } from './annual'
+import { lowIncomeReport, NO_PRIOR_EMPLOYER, summarizeYear, zeroRowCeiling, type AnnualPayslipFact, type AnnualSummary, type PriorEmployerInput } from './annual'
 import { round2, type BirAnnualData } from './types'
 
 export function priorFromTaxYear(t: EmployeeTaxYear | undefined): PriorEmployerInput {
@@ -55,6 +55,11 @@ export interface AlphalistRow {
   prior: PriorEmployerInput
   /** The DOLE certification reference justifying a minimum wage earner's exempt hazard pay (spec T10). */
   hazardCertRef: string
+  /** BIR Form 2316 item 15. */
+  employerType: 'main' | 'secondary'
+  /** From the annual table: the 13th month and other benefits exemption (item 34) and the top of the 0% row (item 29). */
+  benefitsCap: number
+  zeroRowCeiling: number
   /** Data to fix before filing. */
   issues: string[]
   /** Withheld vs due difference, settled by an annualizing run; normal while the year is in progress. */
@@ -92,7 +97,8 @@ export function buildAlphalist(params: {
     if (facts.length === 0) continue
     const ty = taxYears.find((t) => t.employee_id === e.id && t.year === year)
     const prior = priorFromTaxYear(ty)
-    const summary = summarizeYear(facts, annual, prior, Number(ty?.pera_tax_credit ?? 0) || 0)
+    // as the 2316 and alphalist report it: within the 0% row, all non-taxable (owner, 2026-10-25)
+    const summary = lowIncomeReport(summarizeYear(facts, annual, prior, Number(ty?.pera_tax_credit ?? 0) || 0), zeroRowCeiling(annual))
 
     const separatedInYear = !!e.separation_date && e.separation_date <= dec31 && e.separation_date >= jan1
     // paid this year for work before leaving last year (e.g. the Dec 16-31
@@ -150,6 +156,9 @@ export function buildAlphalist(params: {
       prevSeparationCode: ty?.has_previous_employer && ty.prev_separation_reason ? SEPARATION_REASON_BIR[ty.prev_separation_reason] : '',
       prior,
       hazardCertRef: e.hazard_dole_cert_ref?.trim() ?? '',
+      employerType: ty?.employer_type === 'secondary' ? 'secondary' : 'main',
+      benefitsCap: annual.other_benefits_exemption_cap,
+      zeroRowCeiling: zeroRowCeiling(annual),
       issues,
       withholdingGap:
         summary.variance > 0
@@ -179,7 +188,7 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
     ...(schedule === 2 ? ['Region', 'SMW per Day', 'SMW per Month', 'SMW per Year', 'Factor (days/yr)'] : []),
     'Gross Compensation (present)',
     'NT: Basic SMW (MWE)', 'NT: Holiday Pay (MWE)', 'NT: Overtime Pay (MWE)', 'NT: Night Shift Diff (MWE)', 'NT: Hazard Pay (MWE)',
-    'NT: 13th Month & Other Benefits', 'NT: De Minimis', 'NT: SSS/PHIC/HDMF & Union Dues', 'NT: Salaries & Other Compensation',
+    'NT: 13th Month & Other Benefits', 'NT: De Minimis', 'NT: SSS/PHIC/HDMF & Union Dues', 'NT: Salaries (P250,000 & below) & Other Forms of Compensation',
     'Total Non-Taxable',
     'MWE Hazard Pay: Employed From', 'MWE Hazard Pay: Employed To', 'MWE Hazard Pay Amount', 'MWE Hazard Pay Justification (DOLE certification)',
     'TX: Basic Salary', 'TX: Representation', 'TX: Transportation', 'TX: COLA', 'TX: Housing Allowance', 'TX: Other Regular',
@@ -207,11 +216,11 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
         ...(schedule === 2 ? [r.region, r.smwPerDay, r.smwPerMonth, r.smwPerYear, r.factor] : []),
         s.gross,
         s.mweBasic, s.mweHoliday, s.mweOvertime, s.mweNightDiff, s.mweHazard,
-        s.thirteenthOtherBenefitsExempt, s.deMinimis, s.contributions, s.otherNonTaxable,
+        s.thirteenthOtherBenefitsExempt, s.deMinimis, s.contributions, round2(s.otherNonTaxable + s.lowIncomeBasic + s.lowIncomeOther),
         s.totalNonTaxable,
         ...mweHazardFields(r),
         s.taxableBasic, s.taxableRepresentation, s.taxableTransportation, s.taxableCola, s.taxableHousing, s.taxableOtherRegular,
-        s.taxable13thOtherBenefits, s.taxableHazard, s.taxableOvertime, s.taxableOtherSupplementary,
+        s.taxable13thOtherBenefits, s.taxableHazard, s.taxableOvertime, round2(s.taxableOtherSupplementary + s.taxableCommission),
         s.totalTaxablePresent,
         r.prevEmployerTin, r.prevEmployerName, r.prevStatusCode, r.prevFrom, r.prevTo, r.prevSeparationCode,
         s.prevGross,

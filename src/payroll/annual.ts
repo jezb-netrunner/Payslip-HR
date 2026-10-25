@@ -88,8 +88,10 @@ export interface AnnualSummary {
   taxable13thOtherBenefits: number
   taxableHazard: number
   taxableOvertime: number
-  /** Holiday/premium pay and night differential of non-MWEs. */
+  /** Holiday/premium pay and night differential of non-MWEs (and other supplementary pay but commission). */
   taxableOtherSupplementary: number
+  /** Commission (2316 item 45). */
+  taxableCommission: number
   totalTaxablePresent: number
   // ---- previous employer ----
   prevGross: number
@@ -113,6 +115,14 @@ export interface AnnualSummary {
   variance: number
   /** Every payslip of the year was computed as a minimum wage earner. */
   allMwe: boolean
+  /**
+   * Reported as non-taxable (taxable pay for the year within the 0% row,
+   * see lowIncomeReport): the taxable basic salary and the rest of the
+   * taxable pay moved to the non-taxable figures.
+   */
+  lowIncome: boolean
+  lowIncomeBasic: number
+  lowIncomeOther: number
 }
 
 const MWE_EXEMPT_BUCKETS: BirBucket[] = ['basic', 'holiday', 'overtime', 'night_diff', 'hazard', 'cola']
@@ -152,7 +162,7 @@ export function summarizeYear(
   const b = {
     mweBasic: 0, mweHoliday: 0, mweOvertime: 0, mweNightDiff: 0, mweHazard: 0, mweCola: 0,
     nonBasic: 0, holiday: 0, overtime: 0, nightDiff: 0, hazard: 0, cola: 0,
-    representation: 0, transportation: 0, housing: 0, otherTaxable: 0, otherSupplementary: 0,
+    representation: 0, transportation: 0, housing: 0, otherTaxable: 0, otherSupplementary: 0, commission: 0,
     thirteenthOb: 0, deMinimis: 0, otherNonTaxable: 0,
     contribMwe: 0, contribNon: 0,
   }
@@ -192,7 +202,8 @@ export function summarizeYear(
         case 'housing': b.housing += l.amount; break
         // the "Others" boxes: regular, or supplementary (an MWE's premium add-ons among them)
         case 'other_taxable':
-          if (l.incomeClass === 'supplementary') b.otherSupplementary += l.amount
+          if (l.payCode === 'COMMISSION') b.commission += l.amount
+          else if (l.incomeClass === 'supplementary') b.otherSupplementary += l.amount
           else b.otherTaxable += l.amount
           break
         case 'thirteenth':
@@ -241,7 +252,7 @@ export function summarizeYear(
   const taxableOtherSupplementary = b.holiday + b.nightDiff + b.otherSupplementary
   const totalTaxablePresent =
     taxableBasic + b.representation + b.transportation + b.cola + b.housing +
-    taxableOtherRegular + taxable13 + b.hazard + b.overtime + taxableOtherSupplementary
+    taxableOtherRegular + b.commission + taxable13 + b.hazard + b.overtime + taxableOtherSupplementary
 
   const prevNonTaxable =
     prior.mweExempt + prior.thirteenthOtherBenefitsExempt + prior.deMinimis +
@@ -274,6 +285,7 @@ export function summarizeYear(
     taxableHazard: round2(b.hazard),
     taxableOvertime: round2(b.overtime),
     taxableOtherSupplementary: round2(taxableOtherSupplementary),
+    taxableCommission: round2(b.commission),
     totalTaxablePresent: round2(totalTaxablePresent),
     prevGross: round2(prevNonTaxable + prevTaxable),
     prevNonTaxable: round2(prevNonTaxable),
@@ -289,6 +301,49 @@ export function summarizeYear(
     peraCredit: round2(peraCredit),
     variance: round2(taxDue - prior.taxWithheld - withheldAsAdjusted - peraCredit),
     allMwe: facts.length > 0 && facts.every((f) => f.isMwe),
+    lowIncome: false,
+    lowIncomeBasic: 0,
+    lowIncomeOther: 0,
+  }
+}
+
+/** The top of the annual table's 0% row (₱250,000 in the 2023 table): the first row taxed above 0%. */
+export function zeroRowCeiling(annual: BirAnnualData): number {
+  return annual.brackets.find((b) => b.rate > 0)?.over ?? 0
+}
+
+// Basis: BIR Form 2316 (September 2021 ENCS) item 29; alphalist Schedule 1, revised format (RMC 160-2022, Dec 27, 2022). Owner, 2026-10-25.
+/**
+ * The year as the 2316 and alphalist report it: when the employee's
+ * taxable pay for the year (this employer plus any previous employer,
+ * before the move) is within the 0% row, the taxable basic salary goes to
+ * item 29 and the rest of the taxable pay to item 37 — the alphalist puts
+ * all of it in "Salaries (P250,000 & below) & Other Forms of Compensation".
+ * Tax due stays 0. Withholding and the 1601-C are unchanged.
+ */
+export function lowIncomeReport(s: AnnualSummary, threshold: number): AnnualSummary {
+  if (!(s.totalTaxable <= threshold) || s.totalTaxablePresent <= 0) return s
+  const basic = s.taxableBasic
+  const other = round2(s.totalTaxablePresent - basic)
+  return {
+    ...s,
+    taxableBasic: 0,
+    taxableRepresentation: 0,
+    taxableTransportation: 0,
+    taxableCola: 0,
+    taxableHousing: 0,
+    taxableOtherRegular: 0,
+    taxable13thOtherBenefits: 0,
+    taxableHazard: 0,
+    taxableOvertime: 0,
+    taxableOtherSupplementary: 0,
+    taxableCommission: 0,
+    totalTaxablePresent: 0,
+    totalNonTaxable: round2(s.totalNonTaxable + s.totalTaxablePresent),
+    totalTaxable: s.prevTaxable,
+    lowIncome: true,
+    lowIncomeBasic: basic,
+    lowIncomeOther: other,
   }
 }
 

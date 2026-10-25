@@ -42,9 +42,9 @@ depend on them.
 | T5 MWE premiums | An MWE's rest-day, special-day and holiday premiums (bucket `holiday`) are fully exempt; hazard pay is always exempt. | The add-on above the SMW day (30% / 50%, and above 200% on a regular holiday that is a rest day) becomes S. Hazard pay is exempt only with the criteria flag and a DOLE reference. Add-ons stay out of the MWE boxes of the 2316 and 1601-C. |
 | T6 PhilHealth | Waiver by date range, checked on the period end. No status, SPIC expiry or documents. | Monthly waiver: `waiver_start_month`, `spic_expiry` (the month must be fully covered), PWD `philhealth_status`. 30-day SPIC warning, past-period warning on PWD confirmation, five document slots. The tax exclusion is already 0 in waived months (nothing is deducted). |
 | T7 De minimis | No ceilings, no per-item tracking, no leave-conversion pay. | Per-item usage by month, semester or year, with the excess going to the ₱90k bucket. Client `leave_policy`. VL conversion (12 days de minimis) and SIL conversion (S). Meal allowance cap from the SMW table (T12). |
-| T8 YEA | Annualizes in the last December payroll or at separation; a refund is negative withholding. | Shortfall capped at net pay, the rest recorded as "tax paid by employer" and an employee advance. Refund by Jan 25, recovered against 1601-C remittances. 2316 at final pay. Previous-employer figures also feed CAM. |
+| T8 YEA | Annualizes in the last December payroll or at separation; a refund is negative withholding. | Shortfall capped at the pay left after contributions and union dues (the tax before loans, owner 2026-10-25), the rest recorded as "tax paid by employer" and an employee advance. Refund by Jan 25, recovered against 1601-C remittances. 2316 at final pay. Previous-employer figures also feed CAM. |
 | T9 Due dates | No dates (on purpose). | Client `filing_mode` and `efps_group`; computed 1601-C and annual dates with weekend marks and overrides; SSS, PhilHealth and Pag-IBIG dates as settings with no default (P6). |
-| T10 Exports | Alphalist CSV (working data for the BIR module), 2316 figures, 1604-C summary, 1601-C records. | MWE hazard-pay fields in the alphalist. 2316 with MWE amounts shown separately, the previous employer, and issue at final pay. 1601-C lines 15–19 only "if the app outputs them" (it doesn't today). |
+| T10 Exports | Alphalist CSV (working data for the BIR module), 2316 figures, 1604-C summary, 1601-C records. | MWE hazard-pay fields in the alphalist. 2316 (September 2021 ENCS, item numbers printed, owner 2026-10-25) with MWE amounts shown separately, the previous employer, and issue at final pay. ₱250,000 and below reported non-taxable. 1601-C lines 15–19 only "if the app outputs them" (it doesn't today). |
 | T11 Pag-IBIG | Base = basic + allowances except other benefits; ceiling from the table. | Settings for the base components and the ceiling (defaults = today), P5 badge. Exclude only the compulsory share from taxable pay. |
 | T12 SMW and MWE | One minimum wage per client; MWE is a manual checkbox. | Dated minimum-wage table per region and sector with wage-order references. MWE status computed per period (rate ≤ SMW), "Below minimum wage" warning, recompute of open periods after a retroactive wage order, WAGE_ORDER_TOPUP code, client setting for the holiday-pay rule. |
 
@@ -266,14 +266,31 @@ below was made and is easy to change.
   dashboard's obligation tiles show the date in force.
 
 **T10 (BIR exports)**
-- The 2316 figures follow the form's parts and wording but without item
-  numbers: the BIR's own copy couldn't be read from this environment and
-  the copies found elsewhere number the items differently. *Question:
-  confirm the January 2018 ENCS item numbers if you want them printed.*
-- "Basic salary (including the exempt ₱250,000 and below)": a non-MWE's
-  basic pay stays under taxable compensation even when the year's tax is
-  zero, as before (the alphalist does the same). *Question: should basic
-  pay of employees at or below ₱250,000 move to the non-taxable column?*
+- Owner's answer (2026-10-25; spec updated: the 2316 is September 2021
+  (ENCS), RMC 34-2022, Mar 30, 2022, not January 2018): the 2316 figures
+  print the form's item numbers. Part I 1–11 (5 RDO code; 6/6A registered
+  address and ZIP; 6B/6C local home address and ZIP; 6D foreign address; 7
+  birth date; 8 contact number; 9–10 SMW per day and per month; 11 the MWE
+  box), Part II 12–15 (15 main or secondary employer), Part III 16–18A,
+  Part IV-A 19–28 (25A/25B present and previous employer), IV-B A 29–38,
+  IV-B B regular 39–44B, supplementary 45–52 (45 commission, 46 profit
+  sharing, 47 fees including director's fees, 48–51B), signatures 53–56
+  (55 and 56 for substituted filing). New fields: the employee's RDO code,
+  local home address and ZIP and foreign address (Personal info), and the
+  employer type per tax year (BIR data, main by default). Items 46 and 47
+  are 0: no pay code feeds them; COMMISSION feeds item 45 (the alphalist
+  keeps it in "Other supplementary", which has no commission column).
+- Owner's answer (2026-10-25): when an employee's taxable pay for the year
+  (this employer plus any previous employer, before the move) is within
+  the annual table's 0% row (₱250,000, read from the table), the present
+  employer's taxable pay is reported as non-taxable: on the 2316 basic
+  salary in item 29 and the rest in item 37 (items 21 and 52 become 0;
+  item 22 keeps the previous employer's figure as entered); in the
+  alphalist all of it in "Salaries (P250,000 & below) & Other Forms of
+  Compensation". Tax due stays 0, the 1601-C is not changed. Basis: BIR
+  Form 2316 (September 2021 ENCS) item 29; alphalist Schedule 1, revised
+  format (RMC 160-2022, Dec 27, 2022). `lowIncomeReport` in
+  `src/payroll/annual.ts`.
 - The MWE hazard pay fields are four columns in both schedule CSVs (period
   of employment from/to, amount, DOLE certification reference), filled only
   for exempt MWE hazard pay; an MWE's hazard pay taxed for lack of the

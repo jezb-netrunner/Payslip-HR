@@ -404,6 +404,10 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
       toast('error', 'A separation needs both the last day and the reason (or neither).')
       return
     }
+    if (!/^([0-9]{2,3}[A-Z]?)?$/.test((f.rdo_code ?? '').trim().toUpperCase())) {
+      toast('error', 'RDO code: the BIR district number, like 039 or 21A.')
+      return
+    }
     setBusy(true)
     try {
       const { error } = await supabase
@@ -418,6 +422,10 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
           phone: f.phone || null,
           address: f.address || null,
           zip_code: f.zip_code || null,
+          rdo_code: (f.rdo_code ?? '').trim().toUpperCase(),
+          local_address: f.local_address || null,
+          local_zip_code: f.local_zip_code || null,
+          foreign_address: f.foreign_address || null,
           birth_date: f.birth_date || null,
           gender: f.gender || null,
           civil_status: f.civil_status || null,
@@ -486,6 +494,13 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
             <Textarea rows={2} value={f.address ?? ''} onChange={(e) => set('address', e.target.value)} />
           </Field>
           <Field label="ZIP code"><Input value={f.zip_code ?? ''} onChange={(e) => set('zip_code', e.target.value)} /></Field>
+          <Field label="Local home address (if different)" className="sm:col-span-3">
+            <Textarea rows={2} value={f.local_address ?? ''} onChange={(e) => set('local_address', e.target.value)} />
+          </Field>
+          <Field label="ZIP code"><Input value={f.local_zip_code ?? ''} onChange={(e) => set('local_zip_code', e.target.value)} /></Field>
+          <Field label="Foreign address (if any)" className="sm:col-span-4">
+            <Input value={f.foreign_address ?? ''} onChange={(e) => set('foreign_address', e.target.value)} />
+          </Field>
         </div>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <Field label="Emergency contact"><Input value={f.emergency_contact_name ?? ''} onChange={(e) => set('emergency_contact_name', e.target.value)} /></Field>
@@ -494,6 +509,7 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
         <h4 className="mt-5 mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Government IDs</h4>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="TIN" hint="Required for BIR 1604-C / alphalist"><Input value={f.tin ?? ''} placeholder="000-000-000" onChange={(e) => set('tin', e.target.value)} /></Field>
+          <Field label="RDO code" hint="The employee's BIR Revenue District Office (2316 item 5)"><Input value={f.rdo_code ?? ''} placeholder="039" onChange={(e) => set('rdo_code', e.target.value)} /></Field>
           <Field label="SSS no."><Input value={f.sss_no ?? ''} onChange={(e) => set('sss_no', e.target.value)} /></Field>
           <Field label="PhilHealth no."><Input value={f.philhealth_no ?? ''} onChange={(e) => set('philhealth_no', e.target.value)} /></Field>
           <Field label="Pag-IBIG MID"><Input value={f.pagibig_no ?? ''} onChange={(e) => set('pagibig_no', e.target.value)} /></Field>
@@ -1457,7 +1473,7 @@ function BirTab({ employee }: { employee: Employee }) {
         if (error) setLoadError(errorMessage(error, 'Failed to load'))
         else
           setRow({
-            ...((data as EmployeeTaxYear | null) ?? { has_previous_employer: false, substituted_filing: 'auto', pera_tax_credit: 0 }),
+            ...((data as EmployeeTaxYear | null) ?? { has_previous_employer: false, substituted_filing: 'auto', employer_type: 'main', pera_tax_credit: 0 }),
             loadedFor: year,
           })
       })
@@ -1499,6 +1515,7 @@ function BirTab({ employee }: { employee: Employee }) {
         prev_separation_reason: row.prev_separation_reason || null,
         pera_tax_credit: Number(row.pera_tax_credit ?? 0),
         substituted_filing: row.substituted_filing ?? 'auto',
+        employer_type: row.employer_type ?? 'main',
         notes: row.notes ?? '',
       }
       for (const f of TAX_FIELDS) payload[f.key] = Number(row[f.key] ?? 0)
@@ -1574,6 +1591,12 @@ function BirTab({ employee }: { employee: Employee }) {
               <option value="auto">Automatic</option>
               <option value="yes">Yes</option>
               <option value="no">No</option>
+            </Select>
+          </Field>
+          <Field label="Type of employer (2316 item 15)" hint="Secondary when the employee also works for another employer at the same time">
+            <Select value={row.employer_type ?? 'main'} onChange={(e) => set('employer_type', e.target.value)}>
+              <option value="main">Main employer</option>
+              <option value="secondary">Secondary employer</option>
             </Select>
           </Field>
           <Field label="PERA 5% tax credit (RA 9505)">

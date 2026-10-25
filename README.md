@@ -155,11 +155,12 @@ The app captures everything the annual information return needs:
 
 - Client: TIN + branch code, RDO, registered name and address, ZIP,
   withholding-agent category, top withholding agent, contact details
-- Employee: TIN, name, birth date, nationality, address + ZIP, employment
+- Employee: TIN, RDO code, name, birth date, nationality, registered
+  address + ZIP, local home address + ZIP, foreign address, employment
   status (regular / casual / contractual / probationary / seasonal…),
   inclusive dates of employment, reason of separation, previous employer
   (TIN, name, compensation and tax withheld), PERA tax credit, substituted
-  filing
+  filing, main or secondary employer
 - Every earning carries its BIR classification (basic, holiday, overtime,
   night differential, hazard, 13th month & other benefits, de minimis,
   representation, transportation, COLA, housing, other regular /
@@ -176,10 +177,15 @@ The app captures everything the annual information return needs:
   with that month's 1601-C and recorded as a paused advance to the employee
   (deducted from pay only after the employee signs an authorization). An
   employee who leaves gets their 2316 figures from the finalized run
-  ("BIR 2316 (final pay)"). The 2316 figures follow the form's parts: a
+  ("BIR 2316 (final pay)"). The 2316 figures follow BIR Form 2316
+  September 2021 (ENCS) item by item (items 1–56, numbers printed): a
   minimum wage earner's exempt pay (SMW, holiday, overtime, night
   differential, hazard pay) apart from taxable compensation, and the
-  previous employer's TIN, name, address and ZIP
+  previous employer's TIN, name, address and ZIP. An employee whose taxable
+  pay for the year (with any previous employer's) is ₱250,000 or less is
+  reported as non-taxable: basic salary in item 29 and the rest in item 37,
+  and in the alphalist's "Salaries (P250,000 & below)" column (tax due 0,
+  the 1601-C unchanged)
 - Due dates (BIR & Reports → Due dates): each month's 1601-C by the
   client's filing mode (manual or eBIRForms: the 10th, January 15 for
   December; eFPS: the group's day, A 15th to E 11th), the year-end dates

@@ -148,6 +148,11 @@ export interface Employee {
   phone: string | null
   address: string | null
   zip_code: string | null
+  /** BIR Form 2316 items 5 and 6B–6D: the employee's RDO code, local home address and ZIP, foreign address */
+  rdo_code?: string
+  local_address?: string | null
+  local_zip_code?: string | null
+  foreign_address?: string | null
   birth_date: string | null
   gender: string | null
   civil_status: string | null
@@ -551,6 +556,8 @@ export interface EmployeeTaxYear {
   prev_tax_withheld: number
   pera_tax_credit: number
   substituted_filing: 'auto' | 'yes' | 'no'
+  /** BIR Form 2316 item 15: this employer is the employee's main or secondary employer */
+  employer_type: 'main' | 'secondary'
   notes: string
 }
 

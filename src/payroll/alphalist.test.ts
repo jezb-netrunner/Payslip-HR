@@ -185,3 +185,44 @@ describe('T10 MWE hazard pay in the alphalist', () => {
     expect(rows.find((r) => r.employee.id === 'haz')?.issues).toEqual([])
   })
 })
+
+// Owner 2026-10-25: taxable pay of ₱250,000 or less for the year (this and
+// any previous employer) goes in the non-taxable column "Salaries (P250,000
+// & below) & Other Forms of Compensation"; tax due 0 (alphalist Schedule 1,
+// revised format: RMC 160-2022).
+describe('owner 2026-10-25: ₱250,000 and below in the alphalist', () => {
+  const month = (m: number, amount: number, bir: 'basic' | 'overtime' = 'basic'): AnnualPayslipFact => ({
+    ...fact(m, false, 0), earnings: [{ amount, bir, taxable: true }],
+  })
+  const rows = buildAlphalist({
+    year: 2026,
+    entity,
+    employees: [emp('low', { pay_type: 'monthly', monthly_rate: 10000, daily_rate: 0 }), emp('high', { pay_type: 'monthly', monthly_rate: 30000, daily_rate: 0 })],
+    payslips: [
+      ...Array.from({ length: 12 }, (_, i) => ({ employee_id: 'low', fact: month(i + 1, 10000) })),
+      { employee_id: 'low', fact: month(12, 5000, 'overtime') },
+      ...Array.from({ length: 12 }, (_, i) => ({ employee_id: 'high', fact: month(i + 1, 30000) })),
+    ],
+    taxYears: [],
+    annual: BIR_ANNUAL_2023,
+  })
+  const csv = alphalistCsv(rows, 1)
+  const col = (name: string) => {
+    const i = csv[0].indexOf(name)
+    if (i < 0) throw new Error(`no column ${name}`)
+    return i
+  }
+  const line = (first: string) => csv.find((r) => r[3] === first)!
+
+  it('all of it in the non-taxable salaries column, nothing taxable, tax due 0', () => {
+    const low = line('LOW')
+    expect(low[col('NT: Salaries (P250,000 & below) & Other Forms of Compensation')]).toBe(125000)
+    expect([low[col('TX: Basic Salary')], low[col('TX: Overtime Pay')], low[col('Total Taxable (present)')]]).toEqual([0, 0, 0])
+    expect([low[col('Total Non-Taxable')], low[col('Gross Compensation (present)')], low[col('Tax Due')]]).toEqual([125000, 125000, 0])
+  })
+
+  it('above it: as computed', () => {
+    const high = line('HIGH')
+    expect([high[col('TX: Basic Salary')], high[col('NT: Salaries (P250,000 & below) & Other Forms of Compensation')]]).toEqual([360000, 0])
+  })
+})
