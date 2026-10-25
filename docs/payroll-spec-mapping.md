@@ -157,8 +157,9 @@ below was made and is easy to change.
   differential as S (finalized ones are unchanged).
 - P4 needed an alternative to today's rule; the one built is "no PhilHealth
   or Pag-IBIG (employee and employer) on a payroll whose scheduled days are
-  all maternity leave". *Question: is that the alternative you want, or
-  another (for example the employer paying the employee share)?*
+  all maternity leave". Owner's answer (2026-10-25): keep the default
+  "deduct and remit as usual" and leave the alternative off. PENDING: the
+  PhilHealth and Pag-IBIG rules for members on leave (not read yet).
 - The spec's "show the error" is a new kind of message: it blocks
   finalizing (the database refuses too) until the differential is added or
   the client's DOLE exemption for the payroll year is recorded. A

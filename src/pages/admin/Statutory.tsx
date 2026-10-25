@@ -251,7 +251,10 @@ export default function Statutory() {
               <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-center">
                 <div>
                   <p className="font-semibold text-slate-700">PhilHealth and Pag-IBIG during maternity leave</p>
-                  <p className="text-xs text-slate-500">Agency rules not yet confirmed. Default: as usual.</p>
+                  <p className="text-xs text-slate-500">
+                    The PhilHealth and Pag-IBIG rules for members on leave are not yet read. Default: deduct and remit as usual
+                    (keep it unless they say otherwise).
+                  </p>
                   <div className="mt-1"><PendingBadge /></div>
                 </div>
                 <Select

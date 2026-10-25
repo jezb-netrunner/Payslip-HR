@@ -421,6 +421,8 @@ LIQUIDATED_ALLOWANCE relabelled to business expenses only; BOARD_LODGING
 `employees.job_level = 'managerial_supervisory'`, an `fbt` line (not
 withheld on, skipped by `summarizeYear`, payslip warning "For FBT
 review"); migration `20261025200000_board_and_lodging`, SQL suite 28.
+T4 — P4 stays "as usual" (no change; the pending reason is on Statutory
+Tables).
 
 ### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
 
