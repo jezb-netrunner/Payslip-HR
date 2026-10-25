@@ -272,3 +272,32 @@ below was made and is easy to change.
 - The app has no voluntary Pag-IBIG contribution, so only the computed
   compulsory share is ever excluded from taxable pay; a voluntary amount
   recorded as an ordinary deduction stays taxable.
+
+**T12 (minimum wage, MWE status, holiday pay)**
+- The minimum wage table ships empty: no rate is typed in from memory.
+  Until company admins enter a region's wage orders, payroll uses the
+  client's own daily minimum wage (as today) and says so on the payslips
+  whose status depends on it.
+- A client's sector is free text matching the table's sector; with no rate
+  for its sector, the region's general rate applies.
+- MWE status uses the rate in force on the period's last day, and the
+  employee's basic daily rate (monthly rate × 12 ÷ the days-per-year
+  factor). An apprentice at 75% of the minimum is an MWE; the "Below
+  minimum wage" warning for an apprentice starts below 75%.
+- The old employee checkbox is no longer used (its column stays until the
+  new screens are live, then can be dropped). Employees whose checkbox
+  disagreed with their rate change status on their next payroll.
+  *Question: confirm, since it changes their tax (an employee paid above
+  the minimum loses the exemption; one at it gains it).*
+- "The YEA corrects the year": the year-end adjustment re-tests each
+  finalized payslip of the year against the table (its period end, the
+  rate on its snapshot) and treats it as MWE pay or not accordingly; the
+  2316 and alphalist do the same. A finalized non-MWE payslip re-tested as
+  MWE exempts its basic, holiday, overtime and night differential lines in
+  full (its rest-day premium wasn't split into the exempt day and the
+  taxable add-on).
+- WAGE_ORDER_TOPUP is a one-time code (the difference for days already
+  paid); a recurring top-up would need a new allowance bucket, so raise the
+  employee's rate instead.
+- Holiday pay after an unpaid absence: "apply the rule" (default) or "pay
+  anyway", per client.

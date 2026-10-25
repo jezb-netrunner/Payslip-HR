@@ -10,6 +10,7 @@ import {
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
 import { DEFAULT_PAYROLL_RULES } from '../payroll/defaults'
+import type { MinimumWageRow } from '../payroll/minimumWage'
 import type { PayCode, PayrollRules, StatutoryTables } from '../payroll/types'
 import { pickStatutoryTables } from '../payroll/versions'
 
@@ -41,6 +42,14 @@ export async function getPayCodes(): Promise<PayCode[]> {
 }
 
 /** The PENDING rules company admins set for every client (one row; the defaults when it can't be read). */
+/** The statutory minimum wages on file for a region, every sector (spec T12); none for an unset region. */
+export async function getMinimumWages(region: string): Promise<MinimumWageRow[]> {
+  if (!region) return []
+  const { data, error } = await supabase.from('minimum_wages').select('*').eq('region', region)
+  if (error) throw error
+  return ((data ?? []) as MinimumWageRow[]).map((r) => ({ ...r, daily_rate: Number(r.daily_rate) }))
+}
+
 export async function getPayrollRules(): Promise<PayrollRules> {
   const { data, error } = await supabase.from('payroll_rules').select('*').maybeSingle()
   if (error) throw error

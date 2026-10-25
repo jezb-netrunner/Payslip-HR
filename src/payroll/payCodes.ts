@@ -56,6 +56,8 @@ const code = (sort_order: number, c: string, label: string, x: CodeSpec): PayCod
 export const PAY_CODES: readonly PayCode[] = [
   code(10, 'BASIC_ADJ', 'Basic pay adjustment', { use: 'O', bir_bucket: 'basic', income_class: 'regular', tax_treatment: 'mwe_exempt', sss: true, thirteenth: true,
     description: 'A correction of basic pay of an earlier payroll. Counts toward the 13th month.' }),
+  code(12, 'WAGE_ORDER_TOPUP', 'Wage order top-up', { use: 'O', bir_bucket: 'basic', income_class: 'regular', tax_treatment: 'mwe_exempt', sss: true, thirteenth: true,
+    description: 'The difference a new wage order adds to basic pay, for days already paid at the old rate. For a minimum wage earner it is statutory minimum wage (exempt); for others, regular compensation.' }),
   code(20, 'HOLIDAY_ADJ', 'Holiday, rest day or special day pay adjustment', { use: 'O', bir_bucket: 'holiday', income_class: 'supplementary', tax_treatment: 'mwe_exempt', sss: true,
     description: 'Holiday, rest-day or special-day pay of an earlier payroll.' }),
   code(30, 'OVERTIME_ADJ', 'Overtime pay adjustment', { use: 'O', bir_bucket: 'overtime', income_class: 'supplementary', tax_treatment: 'mwe_exempt', sss: true,

@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Badge, Card, LoadFailed, NoClient, PageHeader, Spinner, StatCard, StatGroup } from '../../components/ui'
-import { getEmployees, getHolidaysBetween, isActiveOn } from '../../lib/api'
+import { getEmployees, getHolidaysBetween, getMinimumWages, isActiveOn } from '../../lib/api'
 import { fetchAll } from '../../lib/fetchAll'
 import { useAuth } from '../../lib/auth'
 import type { Employee, Entity, Holiday, PayrollRun, Payslip, TimeEntry } from '../../lib/db'
@@ -24,10 +24,12 @@ import { fmtDate, money, moneyWhole, plural } from '../../lib/format'
 import { FREQUENCY_LABELS } from '../../lib/labels'
 import { addDays, eachDate, todayManila } from '../../lib/manila'
 import { probationEnds } from '../../lib/insights'
+import { minimumWageFor, mweToday } from '../../lib/useMinimumWages'
 import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { dueCalendar, type DueDateOverride, type DueItem, type ObligationKey } from '../../payroll/dueDates'
+import type { MinimumWageRow } from '../../payroll/minimumWage'
 import type { ScheduleResolver } from '../../payroll/types'
 
 // Categorical palette — validated (dataviz six checks, light surface):
@@ -138,6 +140,8 @@ interface DashData {
   statutoryVerified?: string | null
   /** due dates the user set in place of the computed ones (spec T9) */
   dueOverrides: DueDateOverride[]
+  /** the client's region's minimum wages (spec T12) */
+  minimumWages: MinimumWageRow[]
 }
 
 function ClientDashboard({ entity }: { entity: Entity }) {
@@ -152,7 +156,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
       const twoWeeksAgo = addDays(today, -13)
       // six payroll months for the cost chart, plus the current one
       const sinceMonth = `${addMonths(today.slice(0, 7), -6)}-01`
-      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances, scheduleRows, statutory, overrides] = await Promise.all([
+      const [emps, recentEnt, runsRes, slips, hols, recentLeaves, corr, leaves, advances, scheduleRows, statutory, overrides, wages] = await Promise.all([
         getEmployees(entity.id),
         fetchAll<TimeEntry>((from, to) =>
           supabase
@@ -196,6 +200,7 @@ function ClientDashboard({ entity }: { entity: Entity }) {
           ? supabase.from('statutory_versions').select('kind, verified_on').lte('effective_from', today).order('effective_from', { ascending: false })
           : Promise.resolve(null),
         supabase.from('due_date_overrides').select('obligation, period, due_date, note').eq('entity_id', entity.id).gte('period', sinceMonth),
+        getMinimumWages(entity.minimum_wage_region),
       ])
       const failed = runsRes.error ?? corr.error ?? leaves.error ?? advances.error ?? statutory?.error ?? overrides.error
       if (failed) throw failed
@@ -212,11 +217,12 @@ function ClientDashboard({ entity }: { entity: Entity }) {
         pendingAdvances: advances.count ?? 0,
         statutoryVerified: statutory ? oldestCheck((statutory.data ?? []) as { kind: string; verified_on: string | null }[]) : undefined,
         dueOverrides: (overrides.data ?? []) as DueDateOverride[],
+        minimumWages: wages,
       })
     } catch (err) {
       setLoadError(errorMessage(err, 'Could not load the dashboard'))
     }
-  }, [entity.id, today, isCompanyAdmin])
+  }, [entity.id, entity.minimum_wage_region, today, isCompanyAdmin])
 
   useEffect(() => {
     load()
@@ -518,16 +524,16 @@ function derive(data: DashData, entity: Entity, today: string) {
       icon: <Users className="size-4" />,
     })
 
-  const minWage = Number(entity.minimum_wage_daily)
+  // the minimum wage in force today: the table kept by company admins, else the client's own setting (spec T12)
+  const minWage = minimumWageFor(entity, today, data.minimumWages)
   const belowMin = active.filter((e) => {
-    const factor = Number(e.days_per_year ?? entity.working_days_divisor)
-    const daily = e.pay_type === 'daily' ? Number(e.daily_rate) : (Number(e.monthly_rate) * 12) / factor
-    return daily > 0 && daily + 0.01 < minWage
+    const s = mweToday(e, entity, data.minimumWages, today)
+    return s.daily > 0 && s.below
   })
   if (belowMin.length > 0)
     actions.push({
       title: `${plural(belowMin.length, 'employee')} paid below minimum wage`,
-      sub: `Configured floor is ${money(minWage)}/day (${entity.minimum_wage_region || 'region not set'})`,
+      sub: `The minimum wage is ${money(minWage.daily ?? 0)}/day (${minWage.source})`,
       to: '/admin/employees',
       tone: 'warn',
       icon: <Landmark className="size-4" />,

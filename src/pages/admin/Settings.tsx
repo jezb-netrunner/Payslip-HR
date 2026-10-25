@@ -8,7 +8,9 @@ import { useEntity } from '../../lib/entity'
 import { CONTRIBUTION_TIMING_LABELS, EFPS_GROUP_LABELS, FILING_MODE_LABELS, FREQUENCY_LABELS, MATERNITY_EXEMPTION_LABELS, PH_REGIONS, ROUNDING_LABELS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
-import { splitClientTin } from '../../lib/format'
+import { money, splitClientTin } from '../../lib/format'
+import { todayManila } from '../../lib/manila'
+import { minimumWageFor, useMinimumWages } from '../../lib/useMinimumWages'
 
 export default function Settings() {
   const { entity, reload } = useEntity()
@@ -54,6 +56,8 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
   useEffect(() => setS(initial), [initial])
 
   const set = <K extends keyof Entity>(k: K, v: Entity[K]) => setS({ ...s, [k]: v })
+  const wages = useMinimumWages()
+  const inForce = minimumWageFor(s, todayManila(), wages)
 
   async function save() {
     const tin = splitClientTin(s.tin, s.tin_branch_code)
@@ -95,6 +99,8 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           night_diff_rate: Number(s.night_diff_rate),
           contribution_deduction_timing: s.contribution_deduction_timing,
           leave_policy: s.leave_policy,
+          holiday_pay_after_absence: s.holiday_pay_after_absence,
+          minimum_wage_sector: (s.minimum_wage_sector ?? '').trim(),
           net_pay_rounding: s.net_pay_rounding,
           rounding_scope: s.rounding_scope,
           pay_date_lag_days: Number(s.pay_date_lag_days),
@@ -202,7 +208,30 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                   ))}
                 </Select>
               </Field>
-              <Field label="Daily minimum wage (PHP)" hint="Update when a new wage order takes effect">
+              <Field label="Sector" hint="As the wage order names it; blank = the region's general rate">
+                <Input
+                  value={s.minimum_wage_sector ?? ''}
+                  maxLength={100}
+                  list="minimum-wage-sectors"
+                  onChange={(e) => set('minimum_wage_sector', e.target.value)}
+                />
+                <datalist id="minimum-wage-sectors">
+                  {[...new Set((wages ?? []).filter((w) => w.region === s.minimum_wage_region && w.sector).map((w) => w.sector))].map((x) => (
+                    <option key={x} value={x} />
+                  ))}
+                </datalist>
+              </Field>
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2">
+                {inForce.daily ? (
+                  <>
+                    Payroll uses <b>{money(inForce.daily)}</b> a day today ({inForce.source}).
+                  </>
+                ) : (
+                  'No minimum wage today: set the region, or the daily rate below.'
+                )}{' '}
+                Company admins keep the rates by region under Statutory Tables → Minimum wages.
+              </p>
+              <Field label="Own daily minimum wage (PHP)" hint="Used only while no rate for the region is on file">
                 <Input
                   type="number"
                   step="0.01"
@@ -210,7 +239,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                   onChange={(e) => set('minimum_wage_daily', e.target.value as unknown as number)}
                 />
               </Field>
-              <Field label="Wage order reference" className="sm:col-span-2">
+              <Field label="Wage order reference">
                 <Input value={s.minimum_wage_reference} onChange={(e) => set('minimum_wage_reference', e.target.value)} />
               </Field>
             </div>
@@ -315,6 +344,15 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
               <Select value={s.leave_policy} onChange={(e) => set('leave_policy', e.target.value as Entity['leave_policy'])}>
                 <option value="vl_in_place_of_sil">Paid vacation leave of 5 days or more, in place of SIL</option>
                 <option value="sil_only">Service incentive leave (SIL) only</option>
+              </Select>
+            </Field>
+            <Field
+              label="Regular holiday after an unpaid absence"
+              hint="Labor Code IRR Book III, Rule IV, Sec. 6: no holiday pay without work or paid leave on the workday before it"
+            >
+              <Select value={s.holiday_pay_after_absence} onChange={(e) => set('holiday_pay_after_absence', e.target.value as Entity['holiday_pay_after_absence'])}>
+                <option value="apply_rule">Apply the rule (not paid)</option>
+                <option value="pay_anyway">Pay it anyway</option>
               </Select>
             </Field>
             <Field label="Days from period end to pay date" hint="Used to suggest the pay date of new runs">

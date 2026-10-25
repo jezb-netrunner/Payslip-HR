@@ -412,7 +412,12 @@ export interface PayrollSettingsInput {
   nightDiffRate: number
   contributionTiming: ContributionTiming
   payFrequency: PayFrequency
+  /** The statutory minimum wage in force for the period (spec T12: the minimum wage table, else the client's setting). */
   minimumWageDaily: number
+  /** Where that rate comes from, for messages: "NCR, NCR-26" or "the client's own setting". */
+  minimumWageSource?: string
+  /** An unworked regular holiday after an unpaid absence: the workday-before rule, or pay it anyway (client setting, spec T12). */
+  holidayPayAfterAbsence?: 'apply_rule' | 'pay_anyway'
 }
 
 export interface PeriodInput {

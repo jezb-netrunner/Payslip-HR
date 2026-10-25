@@ -664,6 +664,19 @@ describe('regular holiday pay needs the workday before (IRR Book III, Rule IV, S
     expect(slip.earnings.find((l) => l.code === 'holiday_unpaid')?.amount).toBe(-1379.31) // Aug 31
   })
 
+  // spec T12: the rule is a client setting, "apply the rule" (default) or "pay anyway"
+  it('a client that pays anyway pays the holiday after an unpaid absence', () => {
+    const anyway = { ...settings, holidayPayAfterAbsence: 'pay_anyway' as const }
+    const daily = computePayslip({ employee: dailyEmployee, settings: anyway, period, tables: DEFAULT_TABLES, days: attendance(absentFriday, heroes), runType: 'regular' })
+    expect(daily.earnings.find((l) => l.code === 'holiday')?.amount).toBe(700)
+    expect(daily.trace.warnings.some((w) => w.startsWith('Regular holiday not paid'))).toBe(false)
+    const monthly = computePayslip({ employee: monthlyEmployee, settings: anyway, period, tables: DEFAULT_TABLES, days: attendance(absentFriday, heroes), runType: 'regular' })
+    expect(monthly.earnings.find((l) => l.code === 'absence')?.amount).toBe(-1379.31)
+    expect(monthly.earnings.find((l) => l.code === 'holiday_unpaid')).toBeUndefined()
+    // the default applies the rule
+    expect(pay(dailyEmployee, attendance(absentFriday, heroes)).earnings.find((l) => l.code === 'holiday')).toBeUndefined()
+  })
+
   it('pays it when a leave without pay starts on the holiday', () => {
     const lwop = (employee: PayrollEmployeeInput) =>
       computeAttendance({

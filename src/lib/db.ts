@@ -52,8 +52,13 @@ export interface Entity {
   pagibig_employer_no: string
   default_pay_frequency: PayFrequency
   minimum_wage_region: string
+  /** the wage order's sector that applies to the client; '' = the region's general rate (spec T12) */
+  minimum_wage_sector: string
+  /** the client's own daily minimum wage: used only when the minimum wage table has no rate for the region and date */
   minimum_wage_daily: number
   minimum_wage_reference: string
+  /** an unworked regular holiday after an unpaid absence: the workday-before rule, or pay it anyway (spec T12) */
+  holiday_pay_after_absence: 'apply_rule' | 'pay_anyway'
   /** how cash conversion of unused leave is taxed (spec T7) */
   leave_policy: LeavePolicy
   /** DOLE exemption from the maternity salary differential (RA 11210 Sec. 5(c)): kind, approval reference and the year it covers */
@@ -78,6 +83,18 @@ export interface Entity {
   payslip_footer_note: string
   is_active: boolean
   created_at: string
+}
+
+/** A statutory minimum wage of a region (and sector) from a wage order, kept by company admins (spec T12). */
+export interface MinimumWage {
+  id: string
+  region: string
+  sector: string
+  daily_rate: number
+  effective_from: string
+  effective_to: string | null
+  wage_order_ref: string
+  created_at?: string
 }
 
 /** A due date the user set in place of the computed one, with the reason (spec T9). */

@@ -2,12 +2,12 @@
 // client's employees, the finalized payslips paid in the tax year, the
 // previous-employer records and the minimum wage rates paid at year end.
 
-import { getEmployees, getStatutoryTables } from '../lib/api'
+import { getEmployees, getMinimumWages, getStatutoryTables } from '../lib/api'
 import type { Entity } from '../lib/db'
 import { fetchAll } from '../lib/fetchAll'
 import { supabase } from '../lib/supabase'
 import { buildAlphalist, type AlphalistRow, type YearEndRate } from './alphalist'
-import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact } from './service'
+import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, retestedFact } from './service'
 
 /**
  * The alphalist rows of a tax year (compensation paid in the year), or one
@@ -15,7 +15,7 @@ import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact } from '.
  * leaves: spec T8).
  */
 export async function loadAlphalist(entity: Entity, year: number, employeeId?: string): Promise<AlphalistRow[]> {
-  const [employees, payslips, taxYears, tables, mweRates] = await Promise.all([
+  const [employees, payslips, taxYears, tables, mweRates, wageRows] = await Promise.all([
     getEmployees(entity.id),
     // tax year = compensation PAID in the year (pay date)
     fetchFinalizedPayslipsForTaxYear(entity.id, year),
@@ -38,6 +38,7 @@ export async function loadAlphalist(entity: Entity, year: number, employeeId?: s
         .order('id')
         .range(from, to),
     ),
+    getMinimumWages(entity.minimum_wage_region),
   ])
   const yearEndRates = new Map<string, YearEndRate>()
   for (const r of mweRates) {
@@ -48,11 +49,24 @@ export async function loadAlphalist(entity: Entity, year: number, employeeId?: s
     })
   }
   const slips = employeeId ? payslips.filter((p) => p.employee_id === employeeId) : payslips
+  const byId = new Map(employees.map((e) => [e.id, e]))
+  // each payslip's MWE status re-tested against the minimum wage now on
+  // file, as the year-end adjustment did (spec T12)
+  const factOf = (p: (typeof slips)[number]) => {
+    const e = byId.get(p.employee_id)
+    return retestedFact(p, {
+      rows: wageRows,
+      region: entity.minimum_wage_region ?? '',
+      sector: entity.minimum_wage_sector ?? '',
+      factor: Number(e?.days_per_year ?? entity.working_days_divisor),
+      hazardExempt: !!e?.hazard_criteria_met && !!e?.hazard_dole_cert_ref?.trim(),
+    }).fact
+  }
   return buildAlphalist({
     year,
     entity,
     employees: employeeId ? employees.filter((e) => e.id === employeeId) : employees,
-    payslips: slips.map((p) => ({ employee_id: p.employee_id, fact: toAnnualFact(p) })),
+    payslips: slips.map((p) => ({ employee_id: p.employee_id, fact: factOf(p) })),
     taxYears,
     annual: tables.bir_annual,
     yearEndRates,

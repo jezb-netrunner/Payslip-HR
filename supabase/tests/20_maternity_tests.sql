@@ -35,7 +35,7 @@ select pg_temp.check((select tax_treatment = 'taxable' and bir_bucket = 'other_t
   from pay_codes where code = 'MAT_DIFFERENTIAL'), 'MAT_DIFFERENTIAL: taxable S, SSS, 13th month, P1 and P9 pending');
 select pg_temp.check((select tax_treatment = 'exempt' and not sss_include and sss_include_pending and not include_in_13th_month_base
   from pay_codes where code = 'MAT_SSS_BENEFIT'), 'MAT_SSS_BENEFIT: exempt, SSS a setting (P3)');
-select pg_temp.check((select string_agg(code, ',' order by code) from pay_codes where include_in_13th_month_base) = 'BASIC_ADJ,MAT_DIFFERENTIAL',
+select pg_temp.check((select string_agg(code, ',' order by code) from pay_codes where include_in_13th_month_base) = 'BASIC_ADJ,MAT_DIFFERENTIAL,WAGE_ORDER_TOPUP',
   'what counts toward the 13th month besides basic pay');
 
 \echo '--- 20.2 company admins set P1 and P9; nothing else is a setting'

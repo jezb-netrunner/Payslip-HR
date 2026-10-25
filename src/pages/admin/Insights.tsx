@@ -47,6 +47,7 @@ import {
 import { fetchAdvances, fetchAttendance, fetchLeave, fetchPeople, fetchSlipFacts } from '../../lib/insightsData'
 import type { LeaveType } from '../../lib/db'
 import { addMonths, todayManila } from '../../lib/manila'
+import { minimumWageFor, useMinimumWages } from '../../lib/useMinimumWages'
 import { generateInsightsPdf } from '../../pdf/insightsPdf'
 
 type ReportKey = 'cost' | 'overtime' | 'attendance' | 'headcount' | 'leave' | 'advances' | 'custom'
@@ -109,6 +110,7 @@ interface Data {
 
 export default function Insights({ entity }: { entity: Entity }) {
   const today = todayManila()
+  const wages = useMinimumWages()
   const thisMonth = today.slice(0, 7)
   const [params, setParams] = useSearchParams()
   const set = useCallback(
@@ -208,9 +210,11 @@ export default function Insights({ entity }: { entity: Entity }) {
   const built = useMemo((): Report | null => {
     if (!data || data.key !== dataKey) return null
     const inDept = <T extends { department: string }>(xs: T[]) => (department ? xs.filter((x) => noDepartment(x.department) === department) : xs)
+    // the minimum wage in force today (spec T12: the table, else the client's own setting)
+    const smw = minimumWageFor(entity, today, wages)
     const pay = {
       workingDaysPerYear: Number(entity.working_days_divisor) || 261,
-      minimumWageDaily: Number(entity.minimum_wage_daily) || 0,
+      minimumWageDaily: smw.daily ?? 0,
       minimumWageRegion: entity.minimum_wage_region,
     }
     switch (report) {
@@ -235,7 +239,7 @@ export default function Insights({ entity }: { entity: Entity }) {
       case 'advances':
         return data.advances ? advancesReport(data.advances.deductions, data.advances.repayments, data.slips, data.people, range, today, pay, department) : null
     }
-  }, [data, dataKey, report, range, by, department, measureKeys, entity, today])
+  }, [data, dataKey, report, range, by, department, measureKeys, entity, today, wages])
 
   // a refetch keeps the last report on screen, dimmed
   const [last, setLast] = useState<Report | null>(null)

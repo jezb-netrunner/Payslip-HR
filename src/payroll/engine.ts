@@ -523,15 +523,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
   const wageFloor = settings.minimumWageDaily * (employee.apprentice ? 0.75 : 1)
-  if (daily + 0.005 < wageFloor) {
+  if (round2(daily) < round2(wageFloor)) {
     warnings.push(
-      `Derived daily rate ₱${daily.toFixed(2)} is below ${employee.apprentice ? '75% of ' : ''}the configured minimum wage ₱${settings.minimumWageDaily.toFixed(2)}.`,
-    )
-  }
-  // only an employee paid the statutory minimum wage is a minimum wage earner (RR 11-2018)
-  if (isMwe && settings.minimumWageDaily > 0 && daily > settings.minimumWageDaily + 0.005) {
-    warnings.push(
-      `Marked as a minimum wage earner, but the daily rate ₱${daily.toFixed(2)} is above the configured minimum wage ₱${settings.minimumWageDaily.toFixed(2)}: only an employee paid the statutory minimum wage is tax-exempt as one. Update the client's minimum wage if a new wage order took effect, or clear the employee's minimum wage earner setting.`,
+      `Below minimum wage: the daily rate ₱${daily.toFixed(2)} is less than ${employee.apprentice ? '75% of ' : ''}the minimum wage ₱${settings.minimumWageDaily.toFixed(2)}${settings.minimumWageSource ? ` (${settings.minimumWageSource})` : ''}. Pay the difference (pay code "Wage order top-up") and update the rate.`,
     )
   }
 
@@ -550,7 +544,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     )
   }
 
-  const holidayPaid = unworkedHolidaysPaid([...(params.daysBefore ?? []), ...days], employed)
+  // the workday-before rule is a client setting (spec T12): "pay anyway" pays every unworked regular holiday
+  const holidayPaid =
+    settings.holidayPayAfterAbsence === 'pay_anyway' ? new Map<string, boolean>() : unworkedHolidaysPaid([...(params.daysBefore ?? []), ...days], employed)
   const unpaidHolidays = days.filter((d) => holidayPaid.get(d.date) === false)
   if (unpaidHolidays.length > 0) {
     warnings.push(

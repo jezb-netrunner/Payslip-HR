@@ -20,6 +20,7 @@ import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { reloadPayCodes, usePayCodes } from '../../lib/usePayCodes'
 import { lineIncomeClass } from '../../payroll/payCodes'
+import MinimumWagesCard from './MinimumWagesCard'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
 import type {
   BirAnnualData,
@@ -317,6 +318,8 @@ export default function Statutory() {
             </p>
           </div>
         </Card>
+
+        <MinimumWagesCard isCompanyAdmin={isCompanyAdmin} />
 
         <Card title="Quick check — contributions for a sample salary" icon={<Calculator />}>
           <div className="flex flex-wrap items-end gap-4">

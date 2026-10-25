@@ -19,13 +19,13 @@ import {
   TableShell,
   Td,
   Th,
-  Toggle,
 } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { getEmployees, isActiveOn } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import type { Employee, EmploymentStatus, Entity, PaymentMethod } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
+import { mweToday, useMinimumWages } from '../../lib/useMinimumWages'
 import { fmtDate, fullName, money, personInitials } from '../../lib/format'
 import {
   EMPLOYMENT_STATUS_LABELS,
@@ -69,6 +69,8 @@ function readView(): View {
 
 function EmployeeList({ entity }: { entity: Entity }) {
   const [employees, setEmployees] = useState<Employee[]>([])
+  // MWE badges: status at today's rate and minimum wage (spec T12)
+  const wages = useMinimumWages()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [query, setQuery] = useState('')
@@ -200,7 +202,7 @@ function EmployeeList({ entity }: { entity: Entity }) {
       ) : view === 'grid' ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {filtered.map((e) => (
-            <EmployeeCard key={e.id} e={e} today={today} onOpen={() => navigate(`/admin/employees/${e.id}`)} />
+            <EmployeeCard key={e.id} e={e} today={today} mwe={mweToday(e, entity, wages).isMwe} onOpen={() => navigate(`/admin/employees/${e.id}`)} />
           ))}
         </div>
       ) : (
@@ -245,7 +247,7 @@ function EmployeeList({ entity }: { entity: Entity }) {
                       <Badge tone={statusTones[e.employment_status] ?? 'slate'}>
                         {EMPLOYMENT_STATUS_LABELS[e.employment_status]}
                       </Badge>
-                      {e.is_minimum_wage_earner && <Badge tone="orange">MWE</Badge>}
+                      {mweToday(e, entity, wages).isMwe && <Badge tone="orange">MWE</Badge>}
                       {separated && <Badge tone="red">separated</Badge>}
                     </div>
                   </Td>
@@ -299,7 +301,7 @@ function rateLabel(e: Employee) {
   return e.pay_type === 'monthly' ? `${money(Number(e.monthly_rate))}/mo` : `${money(Number(e.daily_rate))}/day`
 }
 
-function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen: () => void }) {
+function EmployeeCard({ e, today, mwe, onOpen }: { e: Employee; today: string; mwe: boolean; onOpen: () => void }) {
   const separated = !isActiveOn(e, today)
   const leaving = !separated && !!e.separation_date
   return (
@@ -315,7 +317,7 @@ function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen
         ) : (
           <Badge tone="solid">Active</Badge>
         )}
-        {e.is_minimum_wage_earner && <Badge tone="orange" dot={false}>MWE</Badge>}
+        {mwe && <Badge tone="orange" dot={false}>MWE</Badge>}
       </div>
       <div className="mt-3 flex flex-col items-center text-center">
         <Avatar name={fullName(e)} initials={personInitials(e)} size="xl" />
@@ -396,7 +398,6 @@ function AddEmployeeModal({
     rate: '',
     pay_frequency: entity.default_pay_frequency as PayFrequency,
     payment_method: 'cash' as PaymentMethod,
-    is_mwe: false,
   })
   const [f, setF] = useState(blank)
 
@@ -405,10 +406,9 @@ function AddEmployeeModal({
   }, [open, nextNumber])
 
   const rate = Number(f.rate) || 0
-  const dailyEquivalent =
-    f.pay_type === 'daily' ? rate : (rate * 12) / Number(entity.working_days_divisor || 261)
-  const minWage = Number(entity.minimum_wage_daily)
-  const atMinimum = rate > 0 && minWage > 0 && dailyEquivalent <= minWage + 0.005
+  // payroll decides MWE status for each pay period from the minimum wage in force (spec T12)
+  const wages = useMinimumWages()
+  const status = mweToday({ pay_type: f.pay_type, daily_rate: rate, monthly_rate: rate, days_per_year: null, employment_status: f.employment_status }, entity, wages)
 
   async function save() {
     if (!f.first_name.trim() || !f.last_name.trim() || !f.employee_no.trim()) {
@@ -434,7 +434,6 @@ function AddEmployeeModal({
           daily_rate: f.pay_type === 'daily' ? rate : 0,
           pay_frequency: f.pay_frequency,
           payment_method: f.payment_method,
-          is_minimum_wage_earner: f.is_mwe,
         })
         .select('id')
         .single()
@@ -521,24 +520,21 @@ function AddEmployeeModal({
             </Select>
           </Field>
         </div>
-        <div className="rounded-lg bg-slate-50 p-3">
-          <Toggle
-            checked={f.is_mwe}
-            onChange={(v) => setF({ ...f, is_mwe: v })}
-            label="Minimum wage earner (statutory minimum wage, holiday, OT, night differential and hazard pay are tax-exempt)"
-          />
-          {atMinimum && !f.is_mwe && (
-            <p className="mt-2 text-xs text-amber-700">
-              This rate is at or below the client's minimum wage ({money(minWage)}/day) — mark as MWE if it is the
-              statutory minimum wage.
+        {rate > 0 && (
+          <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+            <p>
+              {status.isMwe ? (
+                <b>A minimum wage earner</b>
+              ) : (
+                'Not a minimum wage earner'
+              )}{' '}
+              at {money(status.daily)} a day: the minimum wage is {status.smw ? money(status.smw) : 'not set'} ({status.source}).
+              Payroll decides it for each pay period; a minimum wage earner's SMW, holiday, overtime, night differential and
+              hazard pay are tax-exempt.
             </p>
-          )}
-          {rate > 0 && minWage > 0 && dailyEquivalent + 0.005 < minWage && (
-            <p className="mt-1 text-xs text-rose-600">
-              Below the configured minimum wage of {money(minWage)}/day.
-            </p>
-          )}
-        </div>
+            {status.below && <p className="mt-1 font-semibold text-rose-600">Below minimum wage.</p>}
+          </div>
+        )}
         <Button className="w-full" disabled={busy} onClick={save}>
           {busy ? 'Saving…' : 'Add employee'}
         </Button>

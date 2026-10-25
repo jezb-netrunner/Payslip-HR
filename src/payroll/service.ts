@@ -2,7 +2,7 @@
 // Supabase for one client, computes every employee's payslip, and stores
 // the drafts. RLS limits all of this to admins of the run's client.
 
-import { getEntity, getHolidaysBetween, getPayCodes, getPayrollRules, getStatutoryTables } from '../lib/api'
+import { getEntity, getHolidaysBetween, getMinimumWages, getPayCodes, getPayrollRules, getStatutoryTables } from '../lib/api'
 import { fetchAll } from '../lib/fetchAll'
 import { fmtDate } from '../lib/format'
 import { addDays } from '../lib/manila'
@@ -25,6 +25,7 @@ import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
 import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet } from './engine'
 import { round2 } from './types'
+import { dailyRateOf, minimumWageOn, mweStatusOf, retestMweFact, type MinimumWageRow } from './minimumWage'
 import { philhealthWaiverFor, philhealthWaiverWarnings, type PhilhealthWaiverRecord } from './philhealthWaiver'
 import type { RemittanceSlip } from './remittance'
 import { withholdingFactOf, type PriorWithholding } from './withholding'
@@ -55,6 +56,7 @@ export type YearPayslip = Pick<
   | 'period_month'
   | 'pay_date'
   | 'is_minimum_wage_earner'
+  | 'employee_snapshot'
   | 'earnings'
   | 'basic_pay'
   | 'gross_pay'
@@ -74,7 +76,7 @@ export type YearPayslip = Pick<
 > & { payroll_runs?: { annualize?: boolean } | null }
 
 const YEAR_PAYSLIP_COLUMNS =
-  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, taxable_income, taxable_regular, taxable_supplementary, wht_method, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, tax_paid_by_employer, net_pay, payroll_runs!inner(status, annualize)'
+  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, employee_snapshot, earnings, basic_pay, gross_pay, taxable_income, taxable_regular, taxable_supplementary, wht_method, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, tax_paid_by_employer, net_pay, payroll_runs!inner(status, annualize)'
 
 /**
  * Finalized payslips of one client whose payroll month falls in `year` —
@@ -141,6 +143,26 @@ export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
     withholdingTax: Number(p.withholding_tax),
     taxPaidByEmployer: Number(p.tax_paid_by_employer ?? 0),
   }
+}
+
+/**
+ * A finalized payslip's year fact with its MWE status re-tested against the
+ * minimum wage on file for its period's last day (spec T12): a past-dated
+ * wage order changes the status of payslips already closed, and the
+ * year-end adjustment corrects the year. Without a rate on file for that
+ * day, or for a 13th month payslip, the fact stays as computed.
+ */
+export function retestedFact(
+  p: YearPayslip,
+  ctx: { rows: readonly MinimumWageRow[]; region: string; sector: string; factor: number; hazardExempt: boolean },
+): { fact: AnnualPayslipFact; changed: boolean } {
+  const fact = toAnnualFact(p)
+  const snap = (p.employee_snapshot ?? {}) as { pay_type?: string; daily_rate?: number | string; monthly_rate?: number | string }
+  const smw = p.run_type === 'thirteenth_month' || !p.period_end ? null : minimumWageOn(ctx.rows, ctx.region, ctx.sector, p.period_end)
+  if (!smw || !snap.pay_type) return { fact, changed: false }
+  const daily = dailyRateOf({ pay_type: snap.pay_type, daily_rate: snap.daily_rate ?? 0, monthly_rate: snap.monthly_rate ?? 0 }, ctx.factor)
+  const out = retestMweFact(fact, mweStatusOf(daily, Number(smw.daily_rate)).isMwe, ctx.hazardExempt)
+  return { fact: out, changed: out !== fact }
 }
 
 /** Previous employers this tax year, as the withholding method needs them (spec T2, trigger c). */
@@ -455,7 +477,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   // maternity salary differentials paid in the last year: one paid earlier
   // in a leave covers the leave (spec T4)
   const onMaternity = leaves.some((l) => l.leave_types?.code === MATERNITY_LEAVE_CODE)
-  const [yearSlips, taxSlips, taxYears, monthSlips, payCodes, rules, differentialSlips] = await Promise.all([
+  const [yearSlips, taxSlips, taxYears, monthSlips, payCodes, rules, differentialSlips, wageRows] = await Promise.all([
     isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
     fetchFinalizedPayslipsForTaxYear(entity.id, taxYear),
     fetchTaxYears(entity.id, taxYear),
@@ -489,6 +511,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             .range(from, to),
         )
       : Promise.resolve([] as Pick<Payslip, 'employee_id' | 'pay_date' | 'earnings'>[]),
+    // the statutory minimum wages of the client's region (spec T12)
+    getMinimumWages(entity.minimum_wage_region),
   ])
 
   const groupBy = <T extends { employee_id: string }>(rows: T[]) => {
@@ -544,7 +568,22 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   // the client's DOLE exemption from the differential covers the payroll year (RA 11210 Sec. 5(c))
   const differentialExempt = !!entity.maternity_exemption_category && entity.maternity_exemption_year === payrollYear
 
-  const results: { employee: Employee; slip: PayslipComputation }[] = []
+  // The statutory minimum wage in force on the period's last day (spec T12):
+  // the table kept by company admins, else the client's own setting (said
+  // on the payslips it decides). An employee paid at or below it is a
+  // minimum wage earner for this payroll.
+  const region = entity.minimum_wage_region ?? ''
+  const sector = entity.minimum_wage_sector ?? ''
+  const smwRow = minimumWageOn(wageRows, region, sector, run.period_end)
+  const smwDaily = smwRow ? Number(smwRow.daily_rate) : Number(entity.minimum_wage_daily) || null
+  const smwSource = smwRow ? `${region}, ${smwRow.wage_order_ref}` : "the client's own setting"
+  const smwWarning = smwRow
+    ? null
+    : !region
+      ? "The client's wage region is not set, so the minimum wage comes from the client's own setting. Set the region in Client Settings."
+      : `No minimum wage on file for ${region} on ${fmtDate(run.period_end)}: using the client's own setting ${smwDaily ? `₱${smwDaily.toFixed(2)}` : '(none)'}. A company admin adds the wage order under Statutory Tables → Minimum wages.`
+
+  const results: { employee: Employee; slip: PayslipComputation; isMwe: boolean }[] = []
 
   for (const emp of employees) {
     const engineSettings: PayrollSettingsInput = {
@@ -554,8 +593,12 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       nightDiffRate: Number(entity.night_diff_rate),
       contributionTiming: entity.contribution_deduction_timing,
       payFrequency: run.pay_frequency ?? emp.pay_frequency,
-      minimumWageDaily: Number(entity.minimum_wage_daily),
+      minimumWageDaily: smwDaily ?? 0,
+      minimumWageSource: smwSource,
+      holidayPayAfterAbsence: entity.holiday_pay_after_absence ?? 'apply_rule',
     }
+    const mwe = mweStatusOf(dailyRateOf(emp, engineSettings.workingDaysDivisor), smwDaily)
+    const hazardExempt = !!emp.hazard_criteria_met && !!emp.hazard_dole_cert_ref?.trim()
 
     const leaveList: LeaveLite[] = (leavesBy.get(emp.id) ?? []).map((l) => ({
       start_date: l.start_date,
@@ -627,6 +670,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       0,
     )
 
+    // the year's closed payslips, their MWE status re-tested (a past-dated wage order, spec T12)
+    const retested = empTax.map((p) => retestedFact(p, { rows: wageRows, region, sector, factor: engineSettings.workingDaysDivisor, hazardExempt }))
+
     const slip = computePayslip({
       employee: {
         id: emp.id,
@@ -634,8 +680,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         payType: emp.pay_type,
         monthlyRate: Number(emp.monthly_rate),
         dailyRate: Number(emp.daily_rate),
-        isMinimumWageEarner: emp.is_minimum_wage_earner,
-        hazardExempt: !!emp.hazard_criteria_met && !!emp.hazard_dole_cert_ref?.trim(),
+        isMinimumWageEarner: mwe.isMwe,
+        hazardExempt,
         apprentice: emp.employment_status === 'apprentice',
         // the NG share by payroll month (contributions follow the payroll month)
         philhealthEeWaiver: philhealthWaiverFor(waiverOf(emp), run.period_month),
@@ -724,7 +770,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         annualizes(emp) || (isThirteenth && taxYearAnnualized)
           ? {
               payMonth: `${run.pay_date.slice(0, 7)}-01`,
-              ytd: empTax.map(toAnnualFact),
+              ytd: retested.map((r) => r.fact),
               prior,
               peraCredit,
             }
@@ -803,7 +849,21 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       )
     }
 
-    results.push({ employee: emp, slip })
+    if (slip.whtMethod === 'annualized') {
+      const flipped = retested.filter((r) => r.changed)
+      for (const toMwe of [true, false]) {
+        const n = flipped.filter((r) => r.fact.isMwe === toMwe).length
+        if (n > 0) {
+          slip.trace.notes.push(
+            `The year-end adjustment treats ${n} earlier payslip${n === 1 ? '' : 's'} of the year as ${toMwe ? 'minimum wage pay' : 'pay above the minimum wage'} under the minimum wage now on file for their periods (the finalized payrolls themselves are not changed).`,
+          )
+        }
+      }
+    }
+    // the status depends on the client's own setting: say so
+    if (smwWarning && (mwe.isMwe || mwe.below)) slip.trace.warnings.push(smwWarning)
+
+    results.push({ employee: emp, slip, isMwe: mwe.isMwe })
   }
 
   // Regular runs of one frequency must agree on how many pay periods the
@@ -832,12 +892,13 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   const { error: delErr } = await supabase.from('payslips').delete().eq('payroll_run_id', run.id)
   if (delErr) throw delErr
 
-  const rows = results.map(({ employee: e, slip }) => ({
+  const rows = results.map(({ employee: e, slip, isMwe }) => ({
     payroll_run_id: run.id,
     employee_id: e.id,
     employee_payroll_seq: e.payroll_seq,
     payment_method: e.payment_method,
-    is_minimum_wage_earner: e.is_minimum_wage_earner,
+    // computed for this payroll from the minimum wage (spec T12)
+    is_minimum_wage_earner: isMwe,
     employee_snapshot: {
       name: `${e.first_name} ${e.middle_name ? e.middle_name + ' ' : ''}${e.last_name}${e.suffix ? ' ' + e.suffix : ''}`,
       employee_no: e.employee_no,

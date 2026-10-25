@@ -214,7 +214,7 @@ eBIRForms / eFPS.
 | Hours of work & schedules | Art. 83 (8 hours), Art. 85 + IRR Book III Rule I §7 (meal ≥ 60 min unpaid; shorter meals and rests ≤ 20 min are hours worked), Art. 91 (weekly rest day), DOLE DA 02-04 (compressed workweek) | Each date measured against its own shift; compressed days regular up to the shift (max 12 h; ≤ 5 days and 48 h a week) |
 | Leaves | Art. 95 (SIL after 12 months), RA 11861 (solo parent, 6 months), RA 9710 (women, 6 months), RA 11210 (maternity 105 calendar days), RA 8187, RA 9262 | Service requirements enforced; maternity paid as the SSS benefit + salary differential (tax-exempt, RMC 105-2019), not as salary |
 | Deductions | Art. 113, IRR Book III Rule VIII §10 (DO 195-18) | Company loans, HMO and other deductions need the employee's written authorization date |
-| Minimum wage | RA 6727 regional wage orders (e.g. NCR-28, ₱755 from Sep 26, 2026); MWE exemption RA 9504; apprentices/learners 75% (Arts. 61, 73) | Per-client wage region and rate; MWE exempt package; payslip warnings when a rate is below the floor or an MWE is paid above the minimum |
+| Minimum wage | RA 6727 regional wage orders; MWE exemption RA 9504, RR 2-98 Sec. 2.78.1(B)(13) (the SMW is the rate the regional board fixes); apprentices/learners 75% (Arts. 61, 73) | A minimum wage table by region and sector with each wage order's dates, kept by company admins (Statutory Tables → Minimum wages); each client picks its region and sector (its own daily rate is used only while no rate is on file). MWE status is computed for each pay period: at or below the rate in force on the period's last day; below it the payslip warns "Below minimum wage" |
 | Holidays | 2026: Proclamations 1006 / 1189 / 1264; 2027: Proclamation 1427 | National list + per-client local holidays |
 
 Statutory tables live in `statutory_versions`, **versioned by effective
@@ -380,7 +380,19 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
   the ₱90,000 bucket. Unused leave paid in cash follows the client's leave
   policy: de minimis up to 12 days a year when vacation leave replaces SIL,
   otherwise taxable SIL conversion. The meal allowance's ceiling uses the
-  client's minimum wage.
+  minimum wage in force for the period.
+- Minimum wage earner status is no longer a checkbox: payroll compares the
+  employee's basic daily rate (monthly rate × 12 ÷ the days-per-year
+  factor) with the minimum wage in force on the period's last day. A rate
+  added with a past date marks the region's draft payrolls from that date
+  for recomputing and lists the employees whose status changes; finalized
+  payrolls stay as they were, and the year-end adjustment (and the 2316 and
+  alphalist) re-test them. The difference a wage order adds for days already
+  paid goes on the payroll with the "Wage order top-up" pay code (exempt
+  minimum wage for an MWE, regular compensation for others).
+- An unworked regular holiday after an unpaid absence on the workday before
+  it is not paid by default (Labor Code IRR Book III, Rule IV, Sec. 6); a
+  client can choose to pay it anyway (Client Settings).
 - The cumulative average method follows the payroll tax rules spec; where
   it is silent the app reads it this way: a payroll with no pay at all is
   not "S at least R"; a 13th-month payslip (no regular pay of its own) does

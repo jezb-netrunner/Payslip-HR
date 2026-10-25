@@ -62,6 +62,7 @@ import type {
   TimeEntry,
 } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
+import { mweToday, useMinimumWages } from '../../lib/useMinimumWages'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtHours, fullName, money, personInitials, plural } from '../../lib/format'
 import {
@@ -156,6 +157,8 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
   }, [entityId, id])
 
   useRecordClient(employee?.entity_id, '/admin/employees')
+  // the MWE badge: status at today's rate and minimum wage (spec T12)
+  const wages = useMinimumWages()
 
   if (loading) return <Spinner />
   if (!employee) return <p className="text-sm text-slate-500">Employee not found.</p>
@@ -163,6 +166,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
   if (!entity) return <p className="text-sm text-slate-500">This employee's client is not available to you.</p>
 
   const name = fullName(employee)
+  const mwe = mweToday(employee, entity, wages)
   const separated = !!employee.separation_date && employee.separation_date < todayManila()
   const pos = siblings.indexOf(employee.id)
   const prev = pos > 0 ? siblings[pos - 1] : null
@@ -186,7 +190,8 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
               ) : (
                 <Badge tone="solid">Active</Badge>
               )}
-              {employee.is_minimum_wage_earner && <Badge tone="orange" dot={false}>MWE</Badge>}
+              {mwe.isMwe && <Badge tone="orange" dot={false}>MWE</Badge>}
+              {mwe.below && <Badge tone="red" dot={false}>Below minimum wage</Badge>}
             </div>
           </div>
         </div>
@@ -569,6 +574,7 @@ function PayTab({
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
+  const wages = useMinimumWages()
   // cash advances have their own page (agreement, ledger, repayments)
   const advances = deductions.filter((d) => d.category === 'cash_advance')
   const owedOnAdvances = advances.reduce((s, d) => s + Number(d.balance ?? 0), 0)
@@ -580,7 +586,6 @@ function PayTab({
     daily_rate: String(employee.daily_rate),
     pay_frequency: employee.pay_frequency,
     days_per_year: employee.days_per_year === null ? '' : String(employee.days_per_year),
-    is_mwe: employee.is_minimum_wage_earner,
     hazard_met: employee.hazard_criteria_met,
     hazard_ref: employee.hazard_dole_cert_ref ?? '',
     payment_method: employee.payment_method,
@@ -622,7 +627,6 @@ function PayTab({
           daily_rate: Number(f.daily_rate) || 0,
           pay_frequency: f.pay_frequency,
           days_per_year: f.days_per_year ? Number(f.days_per_year) : null,
-          is_minimum_wage_earner: f.is_mwe,
           hazard_criteria_met: f.hazard_met,
           hazard_dole_cert_ref: f.hazard_ref.trim() || null,
           payment_method: f.payment_method,
@@ -720,8 +724,18 @@ function PayTab({
     if (done) setEditingDed(null)
   }
 
-  const factor = f.days_per_year ? Number(f.days_per_year) : Number(entity.working_days_divisor)
-  const daily = f.pay_type === 'daily' ? Number(f.daily_rate) : ((Number(f.monthly_rate) || 0) * 12) / factor
+  // MWE status at the rate being edited (payroll decides it per pay period, spec T12)
+  const status = mweToday(
+    {
+      pay_type: f.pay_type,
+      daily_rate: Number(f.daily_rate) || 0,
+      monthly_rate: Number(f.monthly_rate) || 0,
+      days_per_year: f.days_per_year ? Number(f.days_per_year) : null,
+      employment_status: employee.employment_status,
+    },
+    entity,
+    wages,
+  )
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -772,16 +786,16 @@ function PayTab({
           )}
         </div>
         <div className="mt-4 space-y-2 rounded-lg bg-slate-50 p-3">
-          <Toggle
-            checked={f.is_mwe}
-            onChange={(v) => setF({ ...f, is_mwe: v })}
-            label="Minimum wage earner (SMW, holiday, OT, night differential, hazard pay tax-exempt)"
-          />
-          <p className="text-xs text-slate-500">
-            Daily equivalent {money(daily)} vs client minimum {money(Number(entity.minimum_wage_daily))}
-            {entity.minimum_wage_region ? ` (${entity.minimum_wage_region})` : ''}.
+          <p className="text-sm font-semibold text-slate-700">
+            {status.isMwe ? 'Minimum wage earner' : 'Not a minimum wage earner'}
+            {status.below && <span className="ml-2 text-rose-600">· Below minimum wage</span>}
           </p>
-          {f.is_mwe && (
+          <p className="text-xs text-slate-500">
+            Daily rate {money(status.daily)} vs minimum wage {status.smw ? money(status.smw) : 'not set'} ({status.source}). Payroll
+            decides it for each pay period from the minimum wage in force on the period's last day: at or below it, the SMW,
+            holiday, overtime, night differential and hazard pay are tax-exempt.
+          </p>
+          {(status.isMwe || f.hazard_met || !!f.hazard_ref) && (
             <>
               <Toggle
                 checked={f.hazard_met}

@@ -407,6 +407,29 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
+
+**Did:** `minimum_wages` (region, sector '' = general, daily rate,
+effective from/to, wage order; company admins write, everyone reads,
+audit-logged; a change marks the region's drafts from its date stale) —
+shipped EMPTY (no rate seeded from memory); until a region has rates,
+payroll uses the client's own `minimum_wage_daily` and the payslips it
+decides say so. `src/payroll/minimumWage.ts`: `minimumWageOn` (sector rate
+first, else general, newest in force), `dailyRateOf`, `mweStatusOf` (≤ SMW
+MWE, < SMW "Below minimum wage"), `retestMweFact`, `retroactiveImpact`.
+The service computes MWE status per payroll (period end) and stores it on
+the payslip; `employees.is_minimum_wage_earner` is unused (comment says
+drop it once the T12 front end is live). Annualization and the alphalist
+re-test closed payslips against the table (`retestedFact`; a note on the
+YEA payslip). WAGE_ORDER_TOPUP (one-time, basic bucket). Client settings
+`minimum_wage_sector`, `holiday_pay_after_absence` (apply_rule default /
+pay_anyway). UI: Statutory Tables → Minimum wages (affected employees after
+a past-dated rate), Settings, computed MWE badges and pay-tab status,
+Dashboard/Insights use the rate in force (`src/lib/useMinimumWages.ts`).
+Migration `20261025190000_minimum_wages` (not live). Tests 506 → 520 plus
+SQL suite 27; suite 20's 13th-month code list now includes
+WAGE_ORDER_TOPUP.
+
 ### 2026-10-25 — Spec T11: Pag-IBIG settings, P5 (same branch)
 
 **Did:** `payroll_rules` gained `pagibig_base_basic`, `pagibig_base_cola`,
@@ -567,8 +590,8 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5),
 `20261025140000 philhealth_ng_share` (T6), `20261025150000
 de_minimis_items` (T7), `20261025160000 year_end_adjustment` (T8) and
-`20261025170000 due_dates` (T9) and `20261025180000 pagibig_rules` (T11)
-are in the branch, NOT live** (apply in order after T2's, before the front end;
+`20261025170000 due_dates` (T9), `20261025180000 pagibig_rules` (T11) and
+`20261025190000 minimum_wages` (T12) are in the branch, NOT live** (apply in order after T2's, before the front end;
 T4's drops and re-adds a constraint and T6's drops columns, so they need
 the SQL editor).
 
@@ -1353,6 +1376,17 @@ mattered: the old lookup on R + S over-withheld (W1: 11,875.05 instead of
 11,208.40), and an R in the 0% row withheld nothing on any S. The readings
 the spec leaves open are in `docs/payroll-spec-mapping.md` §5 — don't
 change them without the owner.
+
+### MWE status is computed per pay period, never ticked (confirmed approach, spec T12)
+
+> Payroll decides MWE status from the minimum wage in force on the period's last day (`minimum_wages`, else the client's own rate); the employee checkbox is gone and the payslip stores the computed flag.
+
+The year-end adjustment and the alphalist re-test finalized payslips
+against the table (`retestedFact`), so a past-dated wage order corrects
+the year without reopening payrolls. Rates are never seeded from memory:
+the table ships empty and company admins enter each wage order. Why it
+mattered: a checkbox let an employee paid above the minimum keep the
+exemption (and one at the minimum lose it) after a wage order.
 
 ### round2 must not return -0 (correction)
 
