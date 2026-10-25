@@ -198,3 +198,33 @@ below was made and is easy to change.
 - The item-less DE_MINIMIS code is retired: existing allowances keep it
   (unchecked, with a warning on each payroll) until an admin picks the item.
 
+
+**T8 (year-end adjustment)**
+- "Net pay available" is what the pay leaves after contributions and the
+  other deductions (loans, union dues, one-time deductions); cash advances
+  come after the tax, so they get nothing when the tax takes all of it.
+  *Question: should the tax come before loan installments instead?*
+- The employer-paid part counts as tax withheld for the year: in the 2316
+  and alphalist it is part of the December (or final-pay month) withholding,
+  with a separate "of which paid by the employer" line on the 2316 figures,
+  so the employee's year reconciles. It is remitted with that month's
+  1601-C.
+- The "employee advance" is a cash advance created when the run is
+  finalized, paused and without a signed authorization: payroll never
+  deducts it until an admin records the date the employee signed the
+  authorization to deduct and resumes it (Labor Code Art. 113). It can't
+  be deleted or have its amount changed (reopening the payroll removes it,
+  unless part of it was repaid). *Question: should forgiving it be
+  possible (it would then be extra compensation)?*
+- Refunds stay part of the annualizing payslip (paid with it, so always by
+  January 25). The 1601-C page shows per month the tax withheld, the
+  employer-paid tax, the refunds recovered and what is left to remit;
+  refunds a month can't absorb carry into later months, from December into
+  the next year. Recording a month prefills "taxes withheld" with withheld +
+  employer-paid and "adjustment" with the refunds recovered (negative).
+- Separations already annualized on the payroll that holds the last day;
+  their 2316 figures are now one click away on that finalized run ("BIR
+  2316 (final pay)"). T10 reworks the 2316 layout.
+- The previous-employer fields already existed (Employee → BIR data); a
+  payslip now warns when an employee hired during the tax year has no BIR
+  data row for it (saving the form with "no previous employer" clears it).

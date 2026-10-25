@@ -29,6 +29,8 @@ export interface AnnualPayslipFact {
   unionDues: number
   /** Negative for a refund made through annualization. */
   withholdingTax: number
+  /** Tax the employer paid at a year-end adjustment the pay couldn't cover (spec T8). */
+  taxPaidByEmployer?: number
 }
 
 /** Figures from the previous employer's BIR Form 2316 (same calendar year). */
@@ -98,6 +100,8 @@ export interface AnnualSummary {
   withheldJanNov: number
   /** Positive December withholding, including a year-end annualization. */
   withheldDec: number
+  /** Of the withholding above, tax the employer paid at a year-end adjustment the pay couldn't cover. */
+  paidByEmployer: number
   /** Over-withheld tax refunded to the employee through annualization. */
   refunded: number
   /** Present employer's withholding as adjusted: Jan–Nov + December − refunds. */
@@ -154,6 +158,7 @@ export function summarizeYear(
   let withheldJanNov = 0
   let withheldDec = 0
   let refunded = 0
+  let paidByEmployer = 0
 
   for (const f of facts) {
     for (const l of f.earnings) {
@@ -200,10 +205,13 @@ export function summarizeYear(
     if (f.isMwe) b.contribMwe += c
     else b.contribNon += c
 
+    // tax the employer paid for the employee is remitted with the month's withholding
+    const employerPaid = f.taxPaidByEmployer ?? 0
+    paidByEmployer += employerPaid
     const wht = f.withholdingTax
     if (wht < 0) refunded += -wht
-    else if (f.payMonth.slice(5, 7) === '12') withheldDec += wht
-    else withheldJanNov += wht
+    else if (f.payMonth.slice(5, 7) === '12') withheldDec += wht + employerPaid
+    else withheldJanNov += wht + employerPaid
   }
 
   // Contributions come out of basic pay first; any remainder (a year with
@@ -270,6 +278,7 @@ export function summarizeYear(
     taxDue,
     withheldJanNov: round2(withheldJanNov),
     withheldDec: round2(withheldDec),
+    paidByEmployer: round2(paidByEmployer),
     refunded: round2(refunded),
     withheldAsAdjusted: round2(withheldAsAdjusted),
     peraCredit: round2(peraCredit),
@@ -282,7 +291,8 @@ export function summarizeYear(
  * Withholding for an annualizing payroll (last payroll of the year, or the
  * final pay of a separated employee): annual tax due on everything paid so
  * far including this payroll, minus every peso already withheld (previous
- * employer, this employer's earlier payrolls) and the PERA tax credit.
+ * employer, this employer's earlier payrolls, tax this employer paid for the
+ * employee at a year-end adjustment) and the PERA tax credit.
  * Negative = refund of over-withheld tax.
  */
 export function annualizedWithholding(
@@ -293,7 +303,7 @@ export function annualizedWithholding(
   peraCredit = 0,
 ): { withholding: number; summary: AnnualSummary } {
   const summary = summarizeYear([...ytd, { ...current, withholdingTax: 0 }], annual, prior, peraCredit)
-  const alreadyWithheld = ytd.reduce((s, f) => s + f.withholdingTax, 0)
+  const alreadyWithheld = ytd.reduce((s, f) => s + f.withholdingTax + (f.taxPaidByEmployer ?? 0), 0)
   return {
     withholding: round2(summary.taxDue - prior.taxWithheld - alreadyWithheld - peraCredit),
     summary,

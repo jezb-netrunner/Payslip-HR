@@ -169,9 +169,16 @@ The app captures everything the annual information return needs:
   across the tax year (a bonus beyond what is left of it is taxed with the
   payroll that pays it), and an **annualizing run** (the last payroll paid
   in December, a payroll that includes an employee's separation, or final
-  pay) trues up the year's tax
+  pay) trues up the year's tax. It never takes net pay below zero: what the
+  pay can't cover is paid by the employer, shown on the payslip, remitted
+  with that month's 1601-C and recorded as a paused advance to the employee
+  (deducted from pay only after the employee signs an authorization). An
+  employee who leaves gets their 2316 figures from the finalized run
+  ("BIR 2316 (final pay)")
 - 1601-C remittances (date, bank/agency, TRA/eROR/eAR, amounts) for the
-  1604-C remittance schedule
+  1604-C remittance schedule; each month shows the tax withheld, tax paid
+  by the employer and year-end refunds recovered (a refund a month can't
+  absorb is recovered from the following months, into the next year)
 
 Reports export as CSV, one per schedule, and flag employees whose data is
 incomplete or whose tax is not yet reconciled (while the year is still in

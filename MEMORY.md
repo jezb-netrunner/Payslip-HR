@@ -407,6 +407,29 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T8: year-end adjustment additions (same branch)
+
+**Did:** an annualizing payroll (December flag, separation, 13th month after
+the year was annualized) withholds a shortfall only up to the net pay left
+after contributions and other deductions (`capYearEndWithholding`, cash
+advances come after); the rest is `payslips.tax_paid_by_employer` (a note on
+the payslip, screen and PDF). It counts as paid for the year in
+`summarizeYear` (in the month's withholding, `paidByEmployer`) and in later
+annualizations and CAM. Finalizing records it as a paused cash advance with
+no signed authorization (`recurring_deductions.source_run_id`, trigger
+`payroll_runs_tax_advances`); reopen removes it unless part was repaid; its
+amount and release can't be edited (`guard_tax_advance`). Cash Advances can
+now record the authorization date on an advance that lacks one. The 1601-C
+and 1604-C pages use `src/payroll/remittance.ts`: withheld + employer-paid −
+refunds recovered, unrecovered refunds carried into later months and into
+the next year; recording a month prefills taxes withheld and the
+adjustment. The alphalist loader moved to `src/payroll/alphalistData.ts` and
+the 2316 modal to `src/components/Form2316Modal.tsx`; a finalized run shows
+"BIR 2316 (final pay)" for employees who left. A new hire with no BIR-data
+row for the tax year gets a payslip warning. `round2` no longer returns -0.
+Migration `20261025160000_year_end_adjustment` (not live). Tests 466 → 487
+plus SQL suite 24.
+
 ### 2026-10-25 — Spec T7: de minimis ceilings per item (same branch)
 
 **Did:** pay codes per de minimis item (DM_* for c–k, LEAVE_CONVERSION for
@@ -495,11 +518,12 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 ## Current deployed state (update when it changes)
 
 **2026-10-25: `20261025110000 sss_pay_codes` (T3), `20261025120000
-maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5) and
-`20261025140000 philhealth_ng_share` (T6) and `20261025150000
-de_minimis_items` (T7) are in the branch, NOT live** (apply in order after
-T2's, before the front end; T4's drops and re-adds a constraint, so it
-needs the SQL editor).
+maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5),
+`20261025140000 philhealth_ng_share` (T6), `20261025150000
+de_minimis_items` (T7) and `20261025160000 year_end_adjustment` (T8) are in
+the branch, NOT live** (apply in order after T2's, before the front end;
+T4's drops and re-adds a constraint and T6's drops columns, so they need
+the SQL editor).
 
 **2026-10-25: `20261025100000 pay_codes` (spec T2) is in the branch, NOT
 live.** Apply it BEFORE deploying T2's front end: the new screens and the
@@ -984,6 +1008,15 @@ expects tax withheld = tax due per employee on the alphalist; the previous
 build left this manual, and final pay either double-paid days or skipped
 the employee.
 
+Since spec T8 the true-up never takes net pay below zero: what the pay
+can't cover is paid by the employer (RR 2-98 §2.79(B)(5)(b) Step 4), stored
+as `tax_paid_by_employer`, counted as tax paid for the year (2316 and
+alphalist reconcile), remitted with that month's 1601-C, and recorded at
+finalize as a paused advance that payroll deducts only after the employee's
+signed authorization (Labor Code Art. 113). Refunds are recovered from the
+1601-C of the month paid, then later months (`remittance.ts`). Why it
+mattered: the old build could push December net pay negative.
+
 ### Whole-peso cash pay: round up or carry forward, never down
 
 > Net-pay rounding for cash payroll is per client (`net_pay_rounding`, `rounding_scope`): `round_up` (employer adds the centavos) or `carry_forward` (centavos owed to the employee in `employees.rounding_balance`, added to the next payout and settled on final pay); there is no round-down.
@@ -1266,6 +1299,14 @@ mattered: the old lookup on R + S over-withheld (W1: 11,875.05 instead of
 11,208.40), and an R in the 0% row withheld nothing on any S. The readings
 the spec leaves open are in `docs/payroll-spec-mapping.md` §5 — don't
 change them without the owner.
+
+### round2 must not return -0 (correction)
+
+> `round2` adds `+ 0`: `Math.round(-0.004 * 100) / 100` is -0, and `(-0).toLocaleString()` prints "-0".
+
+Found by the T8 separation test (an alphalist variance of -0). Why it
+mattered: reconciled employees could show "-0.00" as their balance, and
+`Object.is`-based test assertions fail on it.
 
 ### CHECK constraints fire in alphabetical order by name
 

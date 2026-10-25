@@ -635,6 +635,8 @@ function AdvanceDetailModal({
   const [loadError, setLoadError] = useState('')
   const [busy, setBusy] = useState(false)
   const [editingPer, setEditingPer] = useState<string | null>(null)
+  // an advance recorded without the signed authorization (tax the employer paid at a year-end adjustment)
+  const [authorizing, setAuthorizing] = useState<string | null>(null)
   const [repay, setRepay] = useState<{ amount: string; date: string; notes: string } | null>(null)
 
   const load = useCallback(async () => {
@@ -735,7 +737,33 @@ function AdvanceDetailModal({
             </div>
             <div>
               <dt className="text-xs text-slate-500">Authorization signed</dt>
-              <dd className="font-semibold text-ink-900">{a.authorized_on ? fmtDate(a.authorized_on) : '—'}</dd>
+              <dd className="font-semibold text-ink-900">
+                {a.authorized_on ? (
+                  fmtDate(a.authorized_on)
+                ) : authorizing === null ? (
+                  <span className="flex items-center gap-1.5">
+                    —
+                    {balance > 0 && (
+                      <IconButton size="sm" label="Record the date the employee signed the authorization to deduct" onClick={() => setAuthorizing(today)}>
+                        <Pencil className="size-3.5" />
+                      </IconButton>
+                    )}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <Input type="date" aria-label="Date signed" value={authorizing} onChange={(e) => setAuthorizing(e.target.value)} className="w-40" />
+                    <Button
+                      size="sm"
+                      disabled={busy || !authorizing}
+                      onClick={async () => {
+                        if (await write(() => supabase.from('recurring_deductions').update({ authorized_on: authorizing }).eq('id', a.id), 'Authorization recorded: payroll may now deduct this advance once resumed.')) setAuthorizing(null)
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </span>
+                )}
+              </dd>
             </div>
           </dl>
           <div className="text-right">
@@ -788,7 +816,8 @@ function AdvanceDetailModal({
           >
             <Printer className="size-4" /> Agreement
           </Button>
-          {untouched && (
+          {/* tax the employer paid stays on record; reopening its payroll removes it */}
+          {untouched && !a.source_run_id && (
             <Button
               variant="ghost"
               disabled={busy}

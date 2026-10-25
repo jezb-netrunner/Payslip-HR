@@ -501,6 +501,11 @@ export interface PayslipComputation {
   pagibigEe: number
   pagibigEr: number
   withholdingTax: number
+  /**
+   * Year-end adjustment: the part of the year's tax shortfall the pay
+   * couldn't cover, paid by the employer (an advance to the employee).
+   */
+  taxPaidByEmployer: number
   unionDues: number
   otherDeductionsTotal: number
   totalDeductions: number
@@ -522,5 +527,6 @@ export interface PayslipComputation {
 }
 
 export function round2(v: number): number {
-  return Math.round((v + Number.EPSILON) * 100) / 100
+  // + 0: a tiny negative rounds to 0, not -0 (which prints as "-0")
+  return Math.round((v + Number.EPSILON) * 100) / 100 + 0
 }

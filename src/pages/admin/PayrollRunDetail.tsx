@@ -12,6 +12,7 @@ import {
   Download,
   Eye,
   FileDown,
+  FileText,
   Lock,
   PieChart,
   Plus,
@@ -19,6 +20,7 @@ import {
   Trash2,
   Unlock,
 } from 'lucide-react'
+import Form2316Modal from '../../components/Form2316Modal'
 import PayslipView, { runLabel, type PayslipCompany, type PayslipRunInfo } from '../../components/PayslipView'
 import {
   Avatar,
@@ -51,6 +53,8 @@ import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
 import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
 import { payCodeHint, payCodeLabel, usePayCodes } from '../../lib/usePayCodes'
+import type { AlphalistRow } from '../../payroll/alphalist'
+import { loadAlphalist } from '../../payroll/alphalistData'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
@@ -78,6 +82,8 @@ export default function PayrollRunDetail() {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<RunComputationResult | null>(null)
   const [viewing, setViewing] = useState<Payslip | null>(null)
+  // BIR Form 2316 of an employee who left, issued at final pay (spec T8)
+  const [form2316, setForm2316] = useState<{ row: AlphalistRow; year: number } | null>(null)
   const [addingAdj, setAddingAdj] = useState<{ employeeId?: string; kind: 'earning' | 'deduction' } | null>(null)
   const [showCash, setShowCash] = useState(false)
   // payslips picked for a bulk download, by employee: survives a recompute (new payslip rows)
@@ -125,6 +131,18 @@ export default function PayrollRunDetail() {
   if (loading) return <Spinner />
   if (loadError) return <LoadFailed message={loadError} onRetry={load} />
   if (!run || !entity) return <p className="text-sm text-slate-500">Run not found.</p>
+
+  async function open2316(employeeId: string) {
+    if (!run || !entity) return
+    const year = Number(run.pay_date.slice(0, 4))
+    try {
+      const [row] = await loadAlphalist(entity, year, employeeId)
+      if (row) setForm2316({ row, year })
+      else toast('error', `No finalized pay in ${year} for this employee.`)
+    } catch (err) {
+      toast('error', errorMessage(err, 'Could not load the 2316 figures'))
+    }
+  }
 
   async function compute() {
     if (!run || !entity) return
@@ -460,8 +478,14 @@ export default function PayrollRunDetail() {
                     const mine = adjustments.filter((a) => a.employee_id === s.employee_id)
                     const statEe = Number(s.sss_ee) + Number(s.sss_mpf_ee) + Number(s.philhealth_ee) + Number(s.pagibig_ee)
                     // CAM: the cumulative average method (see the payslip's computation notes)
-                    const tax = `${Number(s.withholding_tax) < 0 ? 'Tax refund' : 'W/tax'} ${money(Math.abs(Number(s.withholding_tax)))}${s.wht_method === 'cam' ? ' (CAM)' : ''}`
+                    const tax = `${Number(s.withholding_tax) < 0 ? 'Tax refund' : 'W/tax'} ${money(Math.abs(Number(s.withholding_tax)))}${s.wht_method === 'cam' ? ' (CAM)' : ''}${
+                      // the year-end shortfall this pay couldn't cover (spec T8)
+                      Number(s.tax_paid_by_employer) > 0 ? ` + ${money(Number(s.tax_paid_by_employer))} paid by employer` : ''
+                    }`
                     const shortcuts = canAdjust && coveredIds.has(s.employee_id)
+                    // left on or before the period's end: their 2316 is issued with the final pay
+                    const separation = employees.find((e) => e.id === s.employee_id)?.separation_date
+                    const issue2316 = run.status !== 'draft' && !!separation && separation <= run.period_end
                     const adjusts = (
                       <>
                         {mine.map((a) => (
@@ -511,6 +535,15 @@ export default function PayrollRunDetail() {
                               {snap.employee_no} · {s.payment_method ? PAYMENT_METHOD_LABELS[s.payment_method] : '—'}
                               {s.is_minimum_wage_earner && ' · MWE'}
                             </p>
+                            {issue2316 && (
+                              <button
+                                type="button"
+                                onClick={() => open2316(s.employee_id)}
+                                className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-700"
+                              >
+                                <FileText className="size-3.5" /> BIR 2316 (final pay)
+                              </button>
+                            )}
                             {/* narrow card: the figures of the wide columns, under the name */}
                             <div className="mt-1.5 space-y-0.5 text-xs text-slate-500 @3xl:hidden">
                               {!isThirteenth && (
@@ -749,6 +782,8 @@ export default function PayrollRunDetail() {
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>
         {viewing && <PayslipView slip={viewing} run={run} company={entity} showTrace />}
       </Modal>
+
+      {form2316 && <Form2316Modal row={form2316.row} entity={entity} year={form2316.year} onClose={() => setForm2316(null)} />}
 
       {exporting && (
         <PayslipExportModal

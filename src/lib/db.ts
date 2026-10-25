@@ -200,6 +200,8 @@ export interface RecurringDeduction {
   release_method?: PaymentMethod | null
   authorized_on?: string | null
   notes?: string
+  /** Tax the employer paid at this run's year-end adjustment (spec T8): created at finalize, removed at reopen. */
+  source_run_id?: string | null
   created_at?: string
 }
 
@@ -396,6 +398,8 @@ export interface Payslip {
   pagibig_ee: number
   pagibig_er: number
   withholding_tax: number
+  /** Year-end adjustment: tax the employer paid because the pay couldn't cover it (an advance to the employee, spec T8). */
+  tax_paid_by_employer: number
   union_dues: number
   other_deductions_total: number
   total_deductions: number

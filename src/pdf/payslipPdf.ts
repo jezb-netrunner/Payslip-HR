@@ -200,6 +200,16 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
   doc.text(php(slip.net_pay), pageW - margin - 5, y + 7.8, { align: 'right' })
   y += 19
 
+  // ---- year-end shortfall the employer paid (spec T8) ----
+  if (Number(slip.tax_paid_by_employer ?? 0) > 0) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...SLATE)
+    doc.text(`Tax paid by the employer (year-end adjustment): ${php(slip.tax_paid_by_employer)}`, margin, y - 2)
+    doc.text('An advance to the employee, settled between employee and employer. It is not withheld as tax from later pay.', margin, y + 2)
+    y += 8
+  }
+
   // ---- attendance + employer share ----
   if (slip.days_worked > 0 || slip.overtime_hours > 0) {
     autoTable(doc, {

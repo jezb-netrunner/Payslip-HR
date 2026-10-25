@@ -200,6 +200,8 @@ export interface WithholdingPayslipRow {
   taxable_supplementary?: number | string | null
   wht_method?: WhtMethod | null
   withholding_tax: number | string
+  /** Tax the employer paid at a year-end adjustment the pay couldn't cover (spec T8). */
+  tax_paid_by_employer?: number | string | null
   gross_pay: number | string
   sss_ee: number | string
   sss_mpf_ee: number | string
@@ -221,7 +223,8 @@ const REGULAR_ALLOWANCE_BUCKETS: readonly BirBucket[] = ['representation', 'tran
 export function withholdingFactOf(p: WithholdingPayslipRow): WithholdingYtdFact {
   const common = {
     payDate: p.pay_date,
-    withheld: Number(p.withholding_tax),
+    // tax the employer paid for the employee is paid for the year too
+    withheld: round2(Number(p.withholding_tax) + Number(p.tax_paid_by_employer ?? 0)),
     gross: Number(p.gross_pay),
     ...(p.run_type === 'thirteenth_month' ? { supplementaryOnly: true } : {}),
   }
@@ -246,4 +249,17 @@ export function withholdingFactOf(p: WithholdingPayslipRow): WithholdingYtdFact 
   const carve = p.is_minimum_wage_earner ? Math.max(0, exclusions - Math.max(0, basicLines)) : exclusions
   const regular = round2(Math.max(0, regularLines - carve))
   return { ...common, regular, supplementary: round2(Math.max(0, Number(p.taxable_income) - regular)) }
+}
+
+// Basis: RR 2-98 §2.79(B)(5)(b) Steps 1–4, as amended by RR 11-2018 §7. Step 4: the employer "shall be liable to pay the amount of tax which cannot be withheld"; the advance is "a matter of settlement between the employee and employer".
+/**
+ * The year-end adjustment's withholding against the pay that carries it: a
+ * shortfall is withheld only up to the net pay available (net pay never
+ * goes below 0) and the employer pays the rest; a refund is paid in full.
+ */
+export function capYearEndWithholding(withholding: number, available: number): { withheld: number; paidByEmployer: number } {
+  const due = round2(withholding)
+  if (due <= 0) return { withheld: due, paidByEmployer: 0 }
+  const withheld = Math.min(due, round2(Math.max(0, available)))
+  return { withheld, paidByEmployer: round2(due - withheld) }
 }

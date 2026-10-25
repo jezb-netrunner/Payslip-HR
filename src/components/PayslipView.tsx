@@ -144,6 +144,19 @@ export default function PayslipView({
         <span className="text-2xl font-bold tracking-tight">{money(Number(slip.net_pay))}</span>
       </div>
 
+      {Number(slip.tax_paid_by_employer ?? 0) > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-800">
+          <p className="flex justify-between gap-3">
+            <span className="font-semibold">Tax paid by the employer (year-end adjustment)</span>
+            <span className="font-semibold">{money(Number(slip.tax_paid_by_employer))}</span>
+          </p>
+          <p className="mt-1">
+            This pay couldn't cover all of the year's remaining tax, so the employer paid the rest to the BIR for you. It is an advance
+            to you, settled between you and the employer; it is not withheld as tax from later pay.
+          </p>
+        </div>
+      )}
+
       {employerTotal > 0 && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">

@@ -48,7 +48,7 @@ import {
   type WhtMethod,
 } from './types'
 import { DEFAULT_PAYROLL_RULES } from './defaults'
-import { periodWithholding, type PeriodWithholding, type PriorWithholding, type WithholdingYtdFact } from './withholding'
+import { capYearEndWithholding, periodWithholding, type PeriodWithholding, type PriorWithholding, type WithholdingYtdFact } from './withholding'
 
 export const DAY_MULT: Record<DayType, number> = {
   regular: 1,
@@ -227,6 +227,12 @@ export interface ComputePayslipParams {
    * or year (pesos; days for item a), from the employee's finalized payslips.
    */
   deMinimisUsed?: Partial<Record<DeMinimisItem, number>>
+  /**
+   * Hired in the tax year with nothing recorded yet on whether they had
+   * another employer earlier in the year (their BIR Form 2316): said on the
+   * payslip, since withholding and the year-end adjustment use it (spec T8).
+   */
+  newHireWithoutTaxYear?: { hireDate: string; year: number }
   /** Cash net-pay rounding for this employee (omitted = exact centavos). */
   rounding?: RoundingInput
   /** Annualize withholding in this payroll (last payroll of the year / separation). */
@@ -481,6 +487,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   const notes: string[] = []
   const warnings: string[] = []
+  if (params.newHireWithoutTaxYear) warnings.push(newHireWarning(params.newHireWithoutTaxYear))
   const errors: string[] = []
   const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
   const perMinute = hourly / 60
@@ -1081,6 +1088,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const taxableIncome = round2(taxableRegular + taxableSupplementary)
 
   let withholdingTax: number
+  let taxPaidByEmployer = 0
   let whtMethod: WhtMethod
   let whtLabel = 'Withholding Tax'
   if (params.annualization) {
@@ -1099,12 +1107,18 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       params.annualization.prior,
       params.annualization.peraCredit ?? 0,
     )
-    withholdingTax = withholding
+    // what the pay can give after contributions and the other deductions
+    // (cash advances come after tax)
+    const available = grossPay - deductions.reduce((s, l) => s + l.amount, 0) - otherLines.reduce((s, l) => s + l.amount, 0)
+    const capped = capYearEndWithholding(withholding, available)
+    withholdingTax = capped.withheld
+    taxPaidByEmployer = capped.paidByEmployer
     whtMethod = 'annualized'
     whtLabel = withholding < 0 ? 'Tax Refund (year-end adjustment)' : 'Withholding Tax (annualized)'
     notes.push(
       `Annualized: taxable compensation for the year ₱${summary.totalTaxable.toLocaleString()} → tax due ₱${summary.taxDue.toLocaleString()}; this payroll withholds the difference from tax already withheld.`,
     )
+    if (taxPaidByEmployer > 0) notes.push(yearEndShortfallNote(withholding, withholdingTax, taxPaidByEmployer))
   } else {
     const w = withholdingFor(taxableRegular, taxableSupplementary, params)
     withholdingTax = w.tax
@@ -1195,6 +1209,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     pagibigEe,
     pagibigEr,
     withholdingTax,
+    taxPaidByEmployer,
     unionDues,
     otherDeductionsTotal,
     totalDeductions,
@@ -1226,6 +1241,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   const { employee, settings, tables, days, runType } = params
   const notes: string[] = []
   const warnings: string[] = []
+  if (params.newHireWithoutTaxYear) warnings.push(newHireWarning(params.newHireWithoutTaxYear))
   const errors: string[] = []
   const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
 
@@ -1253,6 +1269,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     : []
 
   let withholdingTax = 0
+  let taxPaidByEmployer = 0
   let whtMethod: WhtMethod = 'regular'
   let whtLabel = 'Withholding Tax (13th month excess)'
   if (params.annualization) {
@@ -1272,12 +1289,15 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       params.annualization.prior,
       params.annualization.peraCredit ?? 0,
     )
-    withholdingTax = withholding
+    const capped = capYearEndWithholding(withholding, gross13)
+    withholdingTax = capped.withheld
+    taxPaidByEmployer = capped.paidByEmployer
     whtMethod = 'annualized'
     whtLabel = withholding < 0 ? 'Tax Refund (year-end adjustment)' : 'Withholding Tax (annualized)'
     notes.push(
       `Paid after this tax year was annualized: tax due for the year ₱${summary.taxDue.toLocaleString()} less tax already withheld.`,
     )
+    if (taxPaidByEmployer > 0) notes.push(yearEndShortfallNote(withholding, withholdingTax, taxPaidByEmployer))
   } else {
     // The excess is supplementary compensation, for a minimum wage earner
     // too (Soriano v. Secretary of Finance, G.R. 184450); a 13th month run
@@ -1333,6 +1353,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     pagibigEe: 0,
     pagibigEr: 0,
     withholdingTax,
+    taxPaidByEmployer,
     unionDues: 0,
     otherDeductionsTotal: 0,
     totalDeductions,
@@ -1350,6 +1371,16 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       days,
     },
   }
+}
+
+/** A new hire's missing previous-employer record (spec T8). */
+function newHireWarning(h: { hireDate: string; year: number }): string {
+  return `Hired ${shortDate(h.hireDate)}: record under BIR data whether they had another employer earlier in ${h.year} (the figures on their BIR Form 2316). Until then, withholding and the year-end adjustment treat this as their only employer this year.`
+}
+
+/** The payslip note when the pay can't cover the year-end shortfall (spec T8). */
+function yearEndShortfallNote(shortfall: number, withheld: number, paidByEmployer: number): string {
+  return `This pay can cover only ₱${withheld.toLocaleString()} of the year's ₱${round2(shortfall).toLocaleString()} tax shortfall (net pay can't go below zero): the employer pays the remaining ₱${paidByEmployer.toLocaleString()} with the month's 1601-C. It is recorded as an advance to the employee when this payroll is finalized, to settle between employee and employer, and is never withheld as tax from later pay.`
 }
 
 /** 1234.5 -> "1,234.50": payslip lines print in PDFs, whose fonts have no peso sign. */

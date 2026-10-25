@@ -26,6 +26,7 @@ import { computeAttendance } from './attendance'
 import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet } from './engine'
 import { round2 } from './types'
 import { philhealthWaiverFor, philhealthWaiverWarnings, type PhilhealthWaiverRecord } from './philhealthWaiver'
+import type { RemittanceSlip } from './remittance'
 import { withholdingFactOf, type PriorWithholding } from './withholding'
 import type {
   BirBucket,
@@ -67,12 +68,13 @@ export type YearPayslip = Pick<
   | 'pagibig_ee'
   | 'union_dues'
   | 'withholding_tax'
+  | 'tax_paid_by_employer'
   | 'net_pay'
   | 'period_end'
 > & { payroll_runs?: { annualize?: boolean } | null }
 
 const YEAR_PAYSLIP_COLUMNS =
-  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, taxable_income, taxable_regular, taxable_supplementary, wht_method, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, net_pay, payroll_runs!inner(status, annualize)'
+  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, taxable_income, taxable_regular, taxable_supplementary, wht_method, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, tax_paid_by_employer, net_pay, payroll_runs!inner(status, annualize)'
 
 /**
  * Finalized payslips of one client whose payroll month falls in `year` —
@@ -111,6 +113,24 @@ export async function fetchFinalizedPayslipsForTaxYear(entityId: string, year: n
   )
 }
 
+/**
+ * The tax figures of one client's finalized payslips paid from `from`
+ * through `through`, for the 1601-C schedule (spec T8).
+ */
+export async function fetchRemittanceSlips(entityId: string, from: string, through: string): Promise<RemittanceSlip[]> {
+  return fetchAll<RemittanceSlip>((f, t) =>
+    supabase
+      .from('payslips')
+      .select('pay_date, withholding_tax, tax_paid_by_employer, payroll_runs!inner(status)')
+      .eq('entity_id', entityId)
+      .in('payroll_runs.status', ['finalized', 'paid'])
+      .gte('pay_date', from)
+      .lte('pay_date', through)
+      .order('id')
+      .range(f, t),
+  )
+}
+
 export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
   return {
     payMonth: p.pay_date ? `${p.pay_date.slice(0, 7)}-01` : (p.period_month ?? ''),
@@ -119,6 +139,7 @@ export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
     contributionsEe: Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee),
     unionDues: Number(p.union_dues),
     withholdingTax: Number(p.withholding_tax),
+    taxPaidByEmployer: Number(p.tax_paid_by_employer ?? 0),
   }
 }
 
@@ -679,6 +700,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       maternityDifferentialPaid: (differentialBy.get(emp.id) ?? []).map((p) => p.pay_date ?? ''),
       leavePolicy: entity.leave_policy,
       deMinimisUsed: deMinimisUsedIn(empTax),
+      // hired this tax year: had they another employer earlier in it? (their 2316)
+      newHireWithoutTaxYear:
+        !taxYearRow && emp.hire_date > `${taxYear}-01-01` && emp.hire_date <= run.period_end
+          ? { hireDate: emp.hire_date, year: taxYear }
+          : undefined,
       withholding: {
         payDate: run.pay_date,
         ytd: empTax.map((p) => withholdingFactOf({ ...p, pay_date: p.pay_date ?? run.pay_date, run_type: p.run_type ?? 'regular' })),
@@ -858,6 +884,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     pagibig_ee: slip.pagibigEe,
     pagibig_er: slip.pagibigEr,
     withholding_tax: slip.withholdingTax,
+    tax_paid_by_employer: slip.taxPaidByEmployer,
     union_dues: slip.unionDues,
     other_deductions_total: slip.otherDeductionsTotal,
     total_deductions: slip.totalDeductions,
@@ -880,6 +907,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     gross: sum((r) => r.gross_pay),
     net: sum((r) => r.net_pay),
     withholding_tax: sum((r) => r.withholding_tax),
+    tax_paid_by_employer: sum((r) => r.tax_paid_by_employer),
     sss_ee: sum((r) => r.sss_ee + r.sss_mpf_ee),
     sss_er: sum((r) => r.sss_er + r.sss_mpf_er + r.sss_ec_er),
     philhealth_ee: sum((r) => r.philhealth_ee),

@@ -2,7 +2,8 @@
 // for computeRun / getEntity / getStatutoryTables / getHolidaysBetween.
 // Mirrors the DB triggers that matter for payroll math (payslips copy their
 // run's period facts) and the finalize RPC (status flip, rounding carry,
-// payroll_seq, loan balances, overlap + staleness checks).
+// payroll_seq, loan balances, overlap + staleness checks, the advance for
+// tax the employer paid at a year-end adjustment).
 
 import { DE_MINIMIS_2026_EFFECTIVE, DEFAULT_TABLES } from '../defaults'
 import { PAY_CODES } from '../payCodes'
@@ -397,6 +398,17 @@ export function finalize(runId: string) {
         d.active = d.active && d.balance > 0
       }
     }
+  }
+  // payroll_runs_tax_advances: tax the employer paid at a year-end
+  // adjustment is a paused advance to the employee (spec T8)
+  for (const p of slips) {
+    const paid = Number(p.tax_paid_by_employer ?? 0)
+    if (paid <= 0) continue
+    db.t.recurring_deductions.push({
+      id: newId(), employee_id: p.employee_id, label: `Tax paid by employer (${String(p.pay_date).slice(0, 4)} year-end adjustment)`,
+      category: 'cash_advance', amount_per_period: 0, total_amount: paid, balance: paid, start_date: null, end_date: null,
+      active: false, released_on: p.pay_date, authorized_on: null, source_run_id: runId,
+    })
   }
 }
 
