@@ -48,7 +48,10 @@ depend on them.
 | T11 Pag-IBIG | Base = basic + allowances except other benefits; ceiling from the table. | Settings for the base components and the ceiling (defaults = today), P5 badge. Exclude only the compulsory share from taxable pay. |
 | T12 SMW and MWE | One minimum wage per client; MWE is a manual checkbox. | Dated minimum-wage table per region and sector with wage-order references. MWE status computed per period (rate ≤ SMW), "Below minimum wage" warning, recompute of open periods after a retroactive wage order, WAGE_ORDER_TOPUP code, client setting for the holiday-pay rule. |
 
-## 3. Conflicts the spec does not cover: owner's decision needed
+## 3. Conflicts the spec does not cover, and the owner's decisions
+
+**Decided 2026-10-25 (owner):** proposals 1–5 and 7 as written below; item 6
+skipped (no 1601-C lines 15–19, no quarterly MWE hazard-pay list).
 
 1. **There are no pay codes** (blocks T2–T7 and T12). The spec keys most rules
    to pay-code fields (`sss_include`, `is_christmas_bonus`,
@@ -77,7 +80,7 @@ depend on them.
    start month; a solo parent's end date becomes the SPIC expiry; an existing
    PWD waiver becomes `confirmed`, so today's results don't change.
 6. **1601-C lines 15–19 and the quarterly MWE hazard list** (T10) apply "if
-   the app outputs them", and it doesn't. Build them, or skip?
+   the app outputs them", and it doesn't. **Skipped** (owner, 2026-10-25).
 7. **Who maintains the SMW table** (T12). Tax and contribution tables are
    read-only and ship with the software, but the spec has the user adding SMW
    rows (today the minimum wage is a client setting admins edit). Proposal:
