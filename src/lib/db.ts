@@ -16,6 +16,9 @@ import type {
 
 export type Role = 'company_admin' | 'entity_admin' | 'employee'
 
+/** Who may be exempted from the maternity salary differential (RA 11210 Sec. 5(c), with DOLE approval each year). */
+export type MaternityExemptionCategory = 'distressed' | 'small_retail_service' | 'micro_business' | 'equal_or_better'
+
 export interface Profile {
   id: string
   employee_id: string | null
@@ -48,6 +51,10 @@ export interface Entity {
   minimum_wage_region: string
   minimum_wage_daily: number
   minimum_wage_reference: string
+  /** DOLE exemption from the maternity salary differential (RA 11210 Sec. 5(c)): kind, approval reference and the year it covers */
+  maternity_exemption_category: MaternityExemptionCategory | null
+  maternity_exemption_dole_ref: string | null
+  maternity_exemption_year: number | null
   standard_hours_per_day: number
   working_days_divisor: number
   grace_period_minutes: number
@@ -325,6 +332,10 @@ export interface PayslipLine {
   meta?: string
   /** allowances and one-time earnings */
   payCode?: string
+  /** in the SSS base (spec T3) */
+  sss?: boolean
+  /** counts toward the 13th month besides basic pay */
+  thirteenthBasis?: boolean
 }
 
 export interface Payslip {
@@ -385,6 +396,8 @@ export interface Payslip {
     statutoryMonthlyBase?: number
     notes?: string[]
     warnings?: string[]
+    /** problems that block finalizing (spec T4) */
+    errors?: string[]
     days?: unknown[]
   }
   remarks: string | null

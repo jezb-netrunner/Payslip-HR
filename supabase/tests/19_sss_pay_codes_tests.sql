@@ -32,7 +32,7 @@ select pg_temp.check(
   (select string_agg(code || ':' || (case when sss_include then 'in' else 'out' end) || (case when sss_include_pending then '?' else '' end),
      ' ' order by code) from pay_codes) =
   'BASIC_ADJ:in BONUS:in CHRISTMAS_BONUS:out COLA:in COMMISSION:in DE_MINIMIS:out? FIXED_ALLOWANCE:in HAZARD:in '
-  'HOLIDAY_ADJ:in HOUSING:in LIQUIDATED_ALLOWANCE:out MAT_DIFFERENTIAL:out MAT_SSS_BENEFIT:out? NIGHT_DIFF_ADJ:in '
+  'HOLIDAY_ADJ:in HOUSING:in LIQUIDATED_ALLOWANCE:out MAT_DIFFERENTIAL:in MAT_SSS_BENEFIT:out? NIGHT_DIFF_ADJ:in '
   'NON_TAXABLE:out? OTHER_TAXABLE:in OVERTIME_ADJ:in REPRESENTATION:in THIRTEENTH_MONTH:out? TRANSPORTATION:in',
   'sss_include per code matches src/payroll/payCodes.ts');
 select pg_temp.check((select is_christmas_bonus and bir_bucket = 'other_benefits' and for_one_time and not for_allowances

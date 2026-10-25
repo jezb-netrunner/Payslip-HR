@@ -7,10 +7,10 @@
 // pay codes (how each allowance and one-time earning is taxed) ship the same way.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Calculator, ExternalLink, ShieldCheck, Tags } from 'lucide-react'
-import { Badge, Card, Field, Input, LoadFailed, PageHeader, PendingBadge, Spinner, TableShell, Td, Th } from '../../components/ui'
+import { Calculator, ExternalLink, Scale, ShieldCheck, Tags } from 'lucide-react'
+import { Badge, Card, Field, Input, LoadFailed, PageHeader, PendingBadge, Select, Spinner, TableShell, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
-import { setPayCodeSssInclude } from '../../lib/api'
+import { getPayrollRules, setPayCodeRule, setPayCodeSssInclude, setPayrollRule } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import type { StatutoryVersion } from '../../lib/db'
 import { errorMessage } from '../../lib/errors'
@@ -28,6 +28,7 @@ import type {
   DeMinimisData,
   PagibigData,
   PayCode,
+  PayrollRules,
   PhilHealthData,
   SssTableData,
   TaxBracket,
@@ -102,6 +103,23 @@ export default function Statutory() {
   const { isCompanyAdmin } = useAuth()
   const toast = useToast()
   const [savingCode, setSavingCode] = useState('')
+  const [rules, setRules] = useState<PayrollRules | null>(null)
+  const differential = payCodes.find((c) => c.code === 'MAT_DIFFERENTIAL')
+
+  /** One PENDING setting: save, reload what it changed, and say drafts need recomputing. */
+  async function saveRule(key: string, what: string, save: () => Promise<void>) {
+    setSavingCode(key)
+    try {
+      await save()
+      await reloadPayCodes()
+      setRules(await getPayrollRules())
+      toast('success', `${what} saved. Recompute draft payrolls.`)
+    } catch (err) {
+      toast('error', errorMessage(err, 'Could not save the setting'))
+    } finally {
+      setSavingCode('')
+    }
+  }
 
   async function toggleSss(c: PayCode) {
     setSavingCode(c.code)
@@ -125,6 +143,11 @@ export default function Statutory() {
       .order('effective_from', { ascending: false })
     if (error) setLoadError(errorMessage(error, 'Could not load the statutory tables'))
     else setVersions((data ?? []) as StatutoryVersion[])
+    try {
+      setRules(await getPayrollRules())
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Could not load the payroll rules'))
+    }
   }, [])
 
   useEffect(() => {
@@ -177,6 +200,74 @@ export default function Statutory() {
             {lastVerified ? `The tables in force were last verified on ${fmtDate(lastVerified)}.` : 'The tables in force have no verification date.'}
             {reviewDue && ' This year’s check is due.'}
           </p>
+        </Card>
+
+        <Card title="Rules pending legal confirmation" icon={<Scale />}>
+          <p className="mb-3 text-sm text-slate-600">
+            Where the law isn't confirmed yet, payroll uses the default until {isCompanyAdmin ? 'you change' : 'a company admin changes'} it,
+            for every client. Each change is audit-logged and marks draft payrolls for recomputing.
+          </p>
+          <div className="divide-y divide-slate-100 text-sm">
+            {differential && (
+              <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-center">
+                <div>
+                  <p className="font-semibold text-slate-700">Maternity salary differential: income tax</p>
+                  <p className="text-xs text-slate-500">RMC 105-2019 (BIR copy not yet confirmed). Default: taxable.</p>
+                  <div className="mt-1"><PendingBadge /></div>
+                </div>
+                <Select
+                  value={differential.tax_treatment === 'exempt' ? 'exempt' : 'taxable'}
+                  disabled={!isCompanyAdmin || savingCode !== ''}
+                  onChange={(e) =>
+                    saveRule('P1', 'The differential tax setting', () => setPayCodeRule('MAT_DIFFERENTIAL', 'taxable', e.target.value === 'taxable'))
+                  }
+                >
+                  <option value="taxable">Taxable, as supplementary compensation</option>
+                  <option value="exempt">Tax-exempt</option>
+                </Select>
+              </div>
+            )}
+            {differential && (
+              <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-center">
+                <div>
+                  <p className="font-semibold text-slate-700">Maternity salary differential: in the 13th month base</p>
+                  <p className="text-xs text-slate-500">DOLE DA 01-19 (not yet confirmed). Default: included.</p>
+                  <div className="mt-1"><PendingBadge /></div>
+                </div>
+                <Select
+                  value={differential.include_in_13th_month_base ? 'yes' : 'no'}
+                  disabled={!isCompanyAdmin || savingCode !== ''}
+                  onChange={(e) =>
+                    saveRule('P9', 'The 13th month setting', () => setPayCodeRule('MAT_DIFFERENTIAL', 'include_in_13th_month_base', e.target.value === 'yes'))
+                  }
+                >
+                  <option value="yes">Counts toward the 13th month</option>
+                  <option value="no">Doesn't count</option>
+                </Select>
+              </div>
+            )}
+            {rules && (
+              <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-center">
+                <div>
+                  <p className="font-semibold text-slate-700">PhilHealth and Pag-IBIG during maternity leave</p>
+                  <p className="text-xs text-slate-500">Agency rules not yet confirmed. Default: as usual.</p>
+                  <div className="mt-1"><PendingBadge /></div>
+                </div>
+                <Select
+                  value={rules.maternityContributions}
+                  disabled={!isCompanyAdmin || savingCode !== ''}
+                  onChange={(e) => saveRule('P4', 'The maternity contributions setting', () => setPayrollRule('maternity_contributions', e.target.value))}
+                >
+                  <option value="as_usual">As usual</option>
+                  <option value="pause_full_leave">None on a payroll that is all maternity leave</option>
+                </Select>
+              </div>
+            )}
+            <p className="py-3 text-xs text-slate-500">
+              SSS on 13th month pay, de minimis benefits, other non-taxable pay and the advanced SSS maternity benefit:
+              the SSS column of <b>Pay codes</b> below.
+            </p>
+          </div>
         </Card>
 
         <Card title="Quick check — contributions for a sample salary" icon={<Calculator />}>

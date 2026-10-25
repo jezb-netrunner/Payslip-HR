@@ -1,6 +1,6 @@
 // Display labels and BIR codes shared across pages.
 
-import type { EmploymentStatus, PaymentMethod, SeparationReason } from './db'
+import type { EmploymentStatus, MaternityExemptionCategory, PaymentMethod, SeparationReason } from './db'
 import type {
   AllowanceBasis,
   ContributionTiming,
@@ -81,6 +81,14 @@ export const ALLOWANCE_BASIS_LABELS: Record<AllowanceBasis, string> = {
   monthly: 'per month (split across payrolls)',
   per_period: 'per payroll',
   per_day: 'per paid day',
+}
+
+/** RA 11210 Sec. 5(c): who may be exempted, with DOLE approval each year, from the maternity salary differential. */
+export const MATERNITY_EXEMPTION_LABELS: Record<MaternityExemptionCategory, string> = {
+  distressed: 'Distressed establishment',
+  small_retail_service: 'Retail or service establishment, or other enterprise, with 10 or fewer workers',
+  micro_business: 'Micro-business enterprise in the listed sectors, total assets ₱3,000,000 or less',
+  equal_or_better: 'Employer already giving equal or better maternity benefits',
 }
 
 /** How a pay code's line is taxed (spec T2). */

@@ -27,7 +27,7 @@ end $$;
 grant execute on function pg_temp.check(boolean, text) to authenticated, anon, service_role;
 
 \echo '--- 18.1 the pay codes on file'
--- (the 17 codes of T2; later tasks add more)
+-- (the 17 codes of T2, MAT_DIFFERENTIAL taxable since T4; later tasks add more)
 select pg_temp.check(
   (select string_agg(code || ':' || bir_bucket || ':' || coalesce(income_class, '-') || ':' || tax_treatment
      || ':' || (case when for_allowances then 'A' else '' end) || (case when for_one_time then 'O' else '' end)
@@ -39,7 +39,7 @@ select pg_temp.check(
   'COLA:cola:regular:mwe_exempt:AO COMMISSION:other_taxable:supplementary:taxable:O '
   'DE_MINIMIS:de_minimis:supplementary:de_minimis:AO FIXED_ALLOWANCE:other_taxable:regular:taxable:A '
   'HAZARD:hazard:supplementary:mwe_exempt:AO HOLIDAY_ADJ:holiday:supplementary:mwe_exempt:O '
-  'HOUSING:housing:regular:taxable:AO MAT_DIFFERENTIAL:other_non_taxable:-:exempt:O:maternity_differential '
+  'HOUSING:housing:regular:taxable:AO MAT_DIFFERENTIAL:other_taxable:supplementary:taxable:O:maternity_differential '
   'MAT_SSS_BENEFIT:other_non_taxable:-:exempt:O:sss_maternity NIGHT_DIFF_ADJ:night_diff:supplementary:mwe_exempt:O '
   'NON_TAXABLE:other_non_taxable:-:exempt:AO OTHER_TAXABLE:other_taxable:supplementary:taxable:O '
   'OVERTIME_ADJ:overtime:supplementary:mwe_exempt:O REPRESENTATION:representation:regular:taxable:AO '

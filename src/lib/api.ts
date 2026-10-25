@@ -9,7 +9,8 @@ import {
 } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
-import type { PayCode, StatutoryTables } from '../payroll/types'
+import { DEFAULT_PAYROLL_RULES } from '../payroll/defaults'
+import type { PayCode, PayrollRules, StatutoryTables } from '../payroll/types'
 import { pickStatutoryTables } from '../payroll/versions'
 
 export async function getEntity(id: string): Promise<Entity> {
@@ -37,6 +38,28 @@ export async function getPayCodes(): Promise<PayCode[]> {
   const { data, error } = await supabase.from('pay_codes').select('*').order('sort_order')
   if (error) throw error
   return (data ?? []) as PayCode[]
+}
+
+/** The PENDING rules company admins set for every client (one row; the defaults when it can't be read). */
+export async function getPayrollRules(): Promise<PayrollRules> {
+  const { data, error } = await supabase.from('payroll_rules').select('*').maybeSingle()
+  if (error) throw error
+  const row = (data ?? {}) as Record<string, unknown>
+  return {
+    maternityContributions: (row.maternity_contributions as PayrollRules['maternityContributions']) ?? DEFAULT_PAYROLL_RULES.maternityContributions,
+  }
+}
+
+/** Company admins: set one PENDING rule (spec P4, P5). */
+export async function setPayrollRule(rule: string, value: string): Promise<void> {
+  const { error } = await supabase.rpc('set_payroll_rule', { p_rule: rule, p_value: value })
+  if (error) throw error
+}
+
+/** Company admins: whether a pay code is taxable (P1) or counts toward the 13th month (P9). */
+export async function setPayCodeRule(code: string, rule: 'taxable' | 'include_in_13th_month_base', value: boolean): Promise<void> {
+  const { error } = await supabase.rpc('set_pay_code_rule', { p_code: code, p_rule: rule, p_value: value })
+  if (error) throw error
 }
 
 /** Company admins: whether a pay code whose SSS treatment the law hasn't settled is in the SSS base (spec P2, P3). */

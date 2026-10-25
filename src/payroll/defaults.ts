@@ -23,6 +23,7 @@ import type {
   BirWhtData,
   DeMinimisData,
   PagibigData,
+  PayrollRules,
   PhilHealthData,
   SssTableData,
   StatutoryTables,
@@ -133,4 +134,9 @@ export const DEFAULT_TABLES: StatutoryTables = {
   bir_wht: BIR_WHT_2023,
   bir_annual: BIR_ANNUAL_2023,
   de_minimis: DE_MINIMIS_2026,
+}
+
+/** The PENDING rules' defaults: today's behavior (spec P4). */
+export const DEFAULT_PAYROLL_RULES: PayrollRules = {
+  maternityContributions: 'as_usual',
 }

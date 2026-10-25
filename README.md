@@ -345,7 +345,11 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
   eBIRForms; the app does not generate the DAT file or file returns.
 - The SSS maternity benefit and the salary differential are entered as
   adjustments (the SSS figure comes from the SSS portal); payroll only stops
-  paying the leave days as salary and reminds you.
+  paying the leave days as salary and reminds you. Until the BIR's copy of
+  RMC 105-2019 is confirmed, the differential is taxed as supplementary
+  compensation by default (a company-admin setting on the Statutory Tables
+  page can make it exempt); a client without a DOLE exemption for the year
+  can't finalize a payroll that covers maternity leave without it.
 - Whether a minimum wage earner's rest-day and special-day premiums are
   tax-exempt like holiday pay is not settled in the sources checked; the app
   treats them as exempt — confirm with your accountant.

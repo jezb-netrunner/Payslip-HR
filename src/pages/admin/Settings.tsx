@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Banknote, Building2, Coins, FileText, Hash, SlidersHorizontal } from 'lucide-react'
+import { Baby, Banknote, Building2, Coins, FileText, Hash, SlidersHorizontal } from 'lucide-react'
 import { Button, Card, Field, Input, NoClient, PageHeader, Select, Textarea, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
-import type { Entity } from '../../lib/db'
+import type { Entity, MaternityExemptionCategory } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
-import { CONTRIBUTION_TIMING_LABELS, FREQUENCY_LABELS, PH_REGIONS, ROUNDING_LABELS } from '../../lib/labels'
+import { CONTRIBUTION_TIMING_LABELS, FREQUENCY_LABELS, MATERNITY_EXEMPTION_LABELS, PH_REGIONS, ROUNDING_LABELS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { splitClientTin } from '../../lib/format'
@@ -31,6 +31,8 @@ function settingsRangeProblem(s: Entity): string | null {
     return 'Night differential rate must be at least 0.10 (Labor Code Art. 86) and at most 1.'
   if (!int(s.pay_date_lag_days) || n(s.pay_date_lag_days) < 0 || n(s.pay_date_lag_days) > 31)
     return 'Days from period end to pay date must be a whole number, 0–31.'
+  if (s.maternity_exemption_category && (!s.maternity_exemption_dole_ref?.trim() || !int(s.maternity_exemption_year) || n(s.maternity_exemption_year) < 2019))
+    return 'Maternity differential exemption: enter the DOLE approval reference and the year it covers.'
   return null
 }
 
@@ -85,6 +87,9 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           rounding_scope: s.rounding_scope,
           pay_date_lag_days: Number(s.pay_date_lag_days),
           payslip_footer_note: s.payslip_footer_note,
+          maternity_exemption_category: s.maternity_exemption_category || null,
+          maternity_exemption_dole_ref: s.maternity_exemption_category ? s.maternity_exemption_dole_ref?.trim() : null,
+          maternity_exemption_year: s.maternity_exemption_category ? Number(s.maternity_exemption_year) : null,
         })
         .eq('id', s.id)
       if (error) throw error
@@ -255,6 +260,36 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 Statutory contributions and tax keep their exact centavos; only the cash handed over is rounded.
                 Rounding down is not offered: keeping an employee's centavos would be an unauthorized wage
                 deduction. Carried centavos are always paid out on the final pay.
+              </p>
+            </div>
+          </Card>
+          <Card title="Maternity leave (RA 11210)" icon={<Baby />}>
+            <div className="space-y-3">
+              <Field label="DOLE exemption from the salary differential">
+                <Select
+                  value={s.maternity_exemption_category ?? ''}
+                  onChange={(e) => set('maternity_exemption_category', (e.target.value || null) as MaternityExemptionCategory | null)}
+                >
+                  <option value="">None — the differential is paid</option>
+                  {Object.entries(MATERNITY_EXEMPTION_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </Select>
+              </Field>
+              {s.maternity_exemption_category && (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field label="DOLE approval reference" className="sm:col-span-2">
+                    <Input value={s.maternity_exemption_dole_ref ?? ''} onChange={(e) => set('maternity_exemption_dole_ref', e.target.value)} />
+                  </Field>
+                  <Field label="Year it covers">
+                    <Input type="number" value={s.maternity_exemption_year ?? ''} onChange={(e) => set('maternity_exemption_year', e.target.value as unknown as number)} />
+                  </Field>
+                </div>
+              )}
+              <p className="text-xs text-slate-400">
+                Each exemption needs DOLE approval every year (RA 11210 Sec. 5(c)). Without one for the payroll's year,
+                a payroll that covers maternity leave won't finalize until the salary differential is on it (or was paid
+                earlier in the leave).
               </p>
             </div>
           </Card>

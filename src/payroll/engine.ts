@@ -41,9 +41,11 @@ import {
   type RunType,
   type SssComputation,
   type StatutoryComputation,
+  type PayrollRules,
   type StatutoryTables,
   type WhtMethod,
 } from './types'
+import { DEFAULT_PAYROLL_RULES } from './defaults'
 import { periodWithholding, type PeriodWithholding, type PriorWithholding, type WithholdingYtdFact } from './withholding'
 
 export const DAY_MULT: Record<DayType, number> = {
@@ -197,6 +199,12 @@ export interface ComputePayslipParams {
   payCodes?: readonly PayCode[]
   /** Omitted: the period end is the pay date and nothing was paid earlier this year. */
   withholding?: WithholdingInput
+  /** The PENDING rules company admins set (omitted: the defaults, today's rules). */
+  rules?: PayrollRules
+  /** The client has a DOLE exemption from the maternity salary differential for the payroll year (RA 11210 Sec. 5(c)). */
+  maternityDifferentialExempt?: boolean
+  /** Pay dates of the employee's finalized payslips that paid a maternity salary differential. */
+  maternityDifferentialPaid?: string[]
   /** Cash net-pay rounding for this employee (omitted = exact centavos). */
   rounding?: RoundingInput
   /** Annualize withholding in this payroll (last payroll of the year / separation). */
@@ -451,8 +459,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   const notes: string[] = []
   const warnings: string[] = []
+  const errors: string[] = []
   const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
   const perMinute = hourly / 60
+  const rules = params.rules ?? DEFAULT_PAYROLL_RULES
   const isMwe = employee.isMinimumWageEarner
   const codes = params.payCodes ?? PAY_CODES
 
@@ -636,16 +646,28 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
   }
 
+  // maternity pay: the SSS benefit and the salary differential, by pay code
+  const oneTimeCodes = (employee.oneTimeEarnings ?? []).map((e) => payCodeOf(e.payCode ?? payCodeForEarningCategory(e.category, e.benefit), codes))
+  const differentialCode = payCodeOf('MAT_DIFFERENTIAL', codes)
   if (maternityDates.length > 0) {
     notes.push(
-      `Maternity leave, ${maternityDates.length} day/s (RA 11210): paid as the maternity benefit, not as salary — the SSS maternity benefit the company advances and any salary differential, both tax-exempt (RMC 105-2019).`,
+      `Maternity leave, ${maternityDates.length} day/s (RA 11210): paid as the maternity benefit, not as salary — the SSS maternity benefit the company advances (tax-exempt) and any salary differential (${differentialCode.tax_treatment === 'exempt' ? 'tax-exempt by setting' : 'taxable as supplementary compensation until its exemption is confirmed'}).`,
     )
-    // the leave starts in this payroll and no maternity pay is on it yet
     const leaveStart = days.find((d) => d.leaveCode === MATERNITY_LEAVE_CODE)?.leaveStart ?? maternityDates[0]
-    if (leaveStart >= period.start && !(employee.oneTimeEarnings ?? []).some((e) => e.benefit)) {
+    // the leave starts in this payroll and no maternity pay is on it yet
+    if (leaveStart >= period.start && !oneTimeCodes.some((c) => c.benefit)) {
       warnings.push(
-        `Maternity leave from ${shortDate(leaveStart)}: add the SSS maternity benefit (advanced in full within 30 days of the leave application) and any salary differential up to full pay as adjustments — "SSS maternity benefit" and "Maternity salary differential". Retail and service businesses with 10 workers or fewer, micro-businesses and distressed establishments may be exempt from the differential.`,
+        `Maternity leave from ${shortDate(leaveStart)}: add the SSS maternity benefit (advanced in full within 30 days of the leave application) and any salary differential up to full pay as adjustments — "SSS maternity benefit" and "Maternity salary differential".`,
       )
+    }
+    // Basis: RA 11210 §5(c) (approved Feb 20, 2019; each exemption needs annual DOLE approval).
+    // The differential is due unless the client's DOLE exemption covers the
+    // payroll year; one paid earlier in this leave is enough.
+    const differentialPaid =
+      oneTimeCodes.some((c) => c.benefit === 'maternity_differential') ||
+      (params.maternityDifferentialPaid ?? []).some((d) => d >= leaveStart)
+    if (!differentialPaid && !params.maternityDifferentialExempt) {
+      errors.push('Differential required: no DOLE exemption approval for this year')
     }
   }
 
@@ -762,13 +784,13 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     const amt = round2(e.amount)
     if (amt === 0) continue
     const pc = payCodeOf(e.payCode ?? payCodeForEarningCategory(e.category, e.benefit), codes)
-    // maternity pay is tax-exempt (RMC 105-2019); the salary differential
-    // counts toward the 13th month, the SSS benefit does not
+    // pay besides basic pay that counts toward the 13th month (the maternity
+    // salary differential, a setting: spec P9)
     earn('adjustment', e.label, amt, pc.bir_bucket, {
       meta: e.id,
       payCode: pc.code,
       sss: pc.sss_include,
-      ...(pc.benefit === 'maternity_differential' ? { thirteenthBasis: true } : {}),
+      ...(pc.include_in_13th_month_base && pc.bir_bucket !== 'basic' ? { thirteenthBasis: true } : {}),
     }, lineIncomeClass(pc, 'one_time'))
   }
 
@@ -830,10 +852,21 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const sssEr = sssPart(sssMonth.er, mc?.already.sssEr, stat.sss.er)
   const sssMpfEr = sssPart(sssMonth.mpfEr, mc?.already.sssMpfEr, stat.sss.mpfEr)
   const sssEcEr = sssPart(sssMonth.ecEr, mc?.already.sssEcEr, stat.sss.ecEr)
-  const philhealthEe = share(philhealthEeDue, mc?.already.philhealthEe)
-  const pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
-  const philhealthEr = share(stat.philhealthEr, mc?.already.philhealthEr)
-  const pagibigEr = share(stat.pagibigEr, mc?.already.pagibigEr)
+  // PhilHealth and Pag-IBIG during maternity leave are not settled (spec P4):
+  // as usual unless the setting pauses them on a payroll that is all leave
+  const scheduledDays = days.filter((d) => d.scheduled)
+  const pausedForMaternity =
+    rules.maternityContributions === 'pause_full_leave' &&
+    scheduledDays.length > 0 &&
+    scheduledDays.every((d) => d.leaveCode === MATERNITY_LEAVE_CODE)
+  const paused = (v: number) => (pausedForMaternity ? 0 : v)
+  const philhealthEe = paused(share(philhealthEeDue, mc?.already.philhealthEe))
+  const pagibigEe = paused(share(stat.pagibigEe, mc?.already.pagibigEe))
+  const philhealthEr = paused(share(stat.philhealthEr, mc?.already.philhealthEr))
+  const pagibigEr = paused(share(stat.pagibigEr, mc?.already.pagibigEr))
+  if (pausedForMaternity) {
+    notes.push('No PhilHealth or Pag-IBIG: every scheduled day of this payroll is maternity leave (setting pending legal confirmation).')
+  }
 
   if (extrasOnly) {
     notes.push('No statutory contributions: no compensation for work in this payroll.')
@@ -1077,6 +1110,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       statutoryMonthlyBase,
       notes,
       warnings,
+      errors,
       days,
     },
   }
@@ -1094,6 +1128,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   const { employee, settings, tables, days, runType } = params
   const notes: string[] = []
   const warnings: string[] = []
+  const errors: string[] = []
   const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
 
   const ytdBasic = params.ytdBasicPay ?? 0
@@ -1213,6 +1248,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       statutoryMonthlyBase,
       notes,
       warnings,
+      errors,
       days,
     },
   }

@@ -233,6 +233,13 @@ export default function PayrollRunDetail() {
       warning: w,
     })),
   )
+  // problems that block finalizing (the database refuses too)
+  const errors = slips.flatMap((s) =>
+    (s.computation_trace?.errors ?? []).map((e) => ({
+      name: (s.employee_snapshot as Record<string, string>).name ?? '',
+      error: e,
+    })),
+  )
   const isDraft = run.status === 'draft'
   // the database clears totals whenever attendance, adjustments, leave or
   // pay settings change after computing; finalize refuses such a draft
@@ -296,8 +303,18 @@ export default function PayrollRunDetail() {
       return next
     })
   const notices =
-    stale || hasWarnings ? (
+    stale || hasWarnings || errors.length > 0 ? (
       <>
+        {errors.length > 0 && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+            <p className="mb-1.5 flex items-center gap-1.5 text-sm font-bold text-rose-800">
+              <AlertTriangle className="size-4" /> Fix before finalizing
+            </p>
+            {errors.map((e, i) => (
+              <p key={i} className="text-xs text-rose-700">• {e.name}: {e.error}</p>
+            ))}
+          </div>
+        )}
         {stale && (
           <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
             Attendance, schedules, adjustments, deduction amounts, leave or pay settings changed since this draft
@@ -717,7 +734,7 @@ export default function PayrollRunDetail() {
                 <Calculator className="size-4" />
                 {computing ? 'Computing…' : computed ? 'Recompute draft' : 'Compute draft'}
               </Button>
-              <Button onClick={doFinalize} disabled={busy || computing || !upToDate} variant={computed && upToDate ? 'primary' : 'secondary'}>
+              <Button onClick={doFinalize} disabled={busy || computing || !upToDate || errors.length > 0} variant={computed && upToDate ? 'primary' : 'secondary'}>
                 <Lock className="size-4" /> Finalize <ArrowRight className="size-4" />
               </Button>
             </>

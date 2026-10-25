@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest'
 import { computeAttendance } from './attendance'
 import { DEFAULT_TABLES } from './defaults'
 import { computePayslip } from './engine'
-import type { LeaveLite, PayrollEmployeeInput, PayrollSettingsInput, PeriodInput } from './types'
+import { PAY_CODES } from './payCodes'
+import type { LeaveLite, PayCode, PayrollEmployeeInput, PayrollSettingsInput, PeriodInput } from './types'
 
 const settings: PayrollSettingsInput = {
   standardHoursPerDay: 8,
@@ -77,35 +78,46 @@ describe('maternity leave is paid as the maternity benefit, not as salary (RA 11
     expect(slip.earnings.find((l) => l.code === 'basic')?.amount).toBe(4000) // the five days worked
   })
 
-  it('pays the SSS benefit and the salary differential tax-exempt; the differential counts for the 13th month', () => {
-    const slip = computePayslip({
-      employee: {
-        ...monthly,
-        oneTimeEarnings: [
-          { id: 'a1', label: 'SSS maternity benefit', amount: 70000, category: 'other_non_taxable', benefit: 'sss_maternity' },
-          { id: 'a2', label: 'Maternity salary differential', amount: 5000, category: 'other_non_taxable', benefit: 'maternity_differential' },
-        ],
-      },
-      settings,
-      period,
-      tables: DEFAULT_TABLES,
-      days: computeAttendance({
-        periodStart: period.start,
-        periodEnd: period.end,
-        schedule: monthly.schedule,
-        standardHoursPerDay: 8,
-        gracePeriodMinutes: 0,
-        entries: [],
-        holidays: [],
-        approvedLeaves: [maternity('2026-08-10')],
-      }),
-      runType: 'regular',
-    })
-    expect(slip.earnings.filter((l) => l.code === 'adjustment').every((l) => l.taxable === false && l.bir === 'other_non_taxable')).toBe(true)
+  it('pays the SSS benefit tax-exempt; the differential is taxable S until its exemption is confirmed (spec P1) and counts for the 13th month', () => {
+    const run = (payCodes?: PayCode[]) =>
+      computePayslip({
+        employee: {
+          ...monthly,
+          oneTimeEarnings: [
+            { id: 'a1', label: 'SSS maternity benefit', amount: 70000, category: 'other_non_taxable', benefit: 'sss_maternity' },
+            { id: 'a2', label: 'Maternity salary differential', amount: 5000, category: 'other_non_taxable', benefit: 'maternity_differential' },
+          ],
+        },
+        settings,
+        period,
+        tables: DEFAULT_TABLES,
+        days: computeAttendance({
+          periodStart: period.start,
+          periodEnd: period.end,
+          schedule: monthly.schedule,
+          standardHoursPerDay: 8,
+          gracePeriodMinutes: 0,
+          entries: [],
+          holidays: [],
+          approvedLeaves: [maternity('2026-08-10')],
+        }),
+        runType: 'regular',
+        payCodes,
+      })
+    const slip = run()
+    const [benefit, differential] = slip.earnings.filter((l) => l.code === 'adjustment')
+    expect(benefit).toMatchObject({ taxable: false, bir: 'other_non_taxable', payCode: 'MAT_SSS_BENEFIT' })
+    expect(differential).toMatchObject({ taxable: true, bir: 'other_taxable', payCode: 'MAT_DIFFERENTIAL' })
     expect(slip.basicPay).toBe(5000) // the differential only
-    expect(slip.taxableIncome).toBe(0)
-    expect(slip.withholdingTax).toBe(0)
+    expect(slip.taxableRegular).toBe(0)
+    expect(slip.taxableSupplementary).toBeGreaterThan(0)
     expect(slip.trace.warnings.some((w) => w.startsWith('Maternity leave from'))).toBe(false)
+    // the P1 setting at "exempt": both are tax-exempt, as before the spec
+    const exempt = run(PAY_CODES.map((c) => (c.code === 'MAT_DIFFERENTIAL' ? { ...c, tax_treatment: 'exempt' as const, bir_bucket: 'other_non_taxable' as const, income_class: null } : c)))
+    expect(exempt.earnings.filter((l) => l.code === 'adjustment').every((l) => l.taxable === false && l.bir === 'other_non_taxable')).toBe(true)
+    expect(exempt.basicPay).toBe(5000)
+    expect(exempt.taxableIncome).toBe(0)
+    expect(exempt.withholdingTax).toBe(0)
   })
 })
 

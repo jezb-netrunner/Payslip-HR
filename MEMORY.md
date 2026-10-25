@@ -407,6 +407,24 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T4: maternity leave rules (same branch)
+
+**Did:** MAT_DIFFERENTIAL is now taxable S by default (P1 setting:
+taxable/exempt), in the SSS base, and in the 13th month base (P9 setting);
+pay codes gained `tax_pending`, `include_in_13th_month_base`,
+`thirteenth_pending`; `set_pay_code_rule` RPC. Clients record a DOLE
+exemption (category, approval reference, year): without one for the
+payroll year, a payslip with maternity-leave days and no differential (on
+it, or paid earlier in the leave) gets the error "Differential required: no
+DOLE exemption approval for this year". Payslip traces now have `errors`;
+the run page lists them and the DB (`payroll_runs_payslip_errors`) refuses
+to finalize. P4 lives in the new one-row `payroll_rules` table
+(`set_payroll_rule`): as usual, or no PhilHealth/Pag-IBIG on a payroll that
+is all maternity leave. `supabase/tests/run.sh` now runs `NN_*tests.sql`
+from 10 up (it only ran `1*`). Migration `20261025120000_maternity_rules`
+(not live). Tests 415 → 427 plus SQL suite 20; legal.test's maternity case
+updated to the P1 default (taxable) and the exempt setting.
+
 ### 2026-10-25 — Spec T3: SSS base by pay code (same branch)
 
 **Asked:** the owner OK'd T2 and asked for T3–T12 without stopping between
@@ -427,8 +445,10 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 
 ## Current deployed state (update when it changes)
 
-**2026-10-25: `20261025110000 sss_pay_codes` (spec T3) is in the branch,
-NOT live** (apply after T2's, before T3's front end).
+**2026-10-25: `20261025110000 sss_pay_codes` (T3) and `20261025120000
+maternity_rules` (T4) are in the branch, NOT live** (apply in order after
+T2's, before the front end; T4's drops and re-adds a constraint, so it
+needs the SQL editor).
 
 **2026-10-25: `20261025100000 pay_codes` (spec T2) is in the branch, NOT
 live.** Apply it BEFORE deploying T2's front end: the new screens and the
@@ -1222,11 +1242,13 @@ RA 11210's 105 days of full pay are the SSS maternity benefit (advanced
 in full within 30 days of the application, reimbursed by SSS) plus the
 salary differential (unless the employer is exempt). Payroll docks leave
 days with code `ML` from salary (monthly) or pays nothing for them (daily);
-the admin adds the two amounts as adjustments marked `benefit`
-(`sss_maternity` / `maternity_differential`, category other non-taxable,
-RMC 105-2019); the differential counts toward 13th month
-(`thirteenthBasis`); the review warning appears only in the payroll the
-leave starts in (`leaveStart`). Why it mattered: paying full salary for the leave
+the admin adds the two amounts as adjustments (pay codes MAT_SSS_BENEFIT,
+tax-exempt, and MAT_DIFFERENTIAL); the differential counts toward 13th
+month (`thirteenthBasis`, P9 setting) and, since spec T4, is taxable S by
+default (P1 setting — RMC 105-2019's exemption isn't confirmed) and in the
+SSS base; the review warning appears only in the payroll the leave starts
+in (`leaveStart`), and without the client's DOLE exemption for the year a
+missing differential is an error that blocks finalizing. Why it mattered: paying full salary for the leave
 days taxed exempt pay, overpaid exempt small employers who owe only the
 reimbursed SSS benefit, and missed the 30-day advance.
 

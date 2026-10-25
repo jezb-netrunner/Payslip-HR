@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Replays every migration in supabase/migrations onto a scratch database with
 # a minimal Supabase stub (00_supabase_stub.sql), then runs each
-# 1*_tests.sql file. Needs a local Postgres (15+) reachable as a superuser
+# NN_*tests.sql file (10 and up). Needs a local Postgres (15+) reachable as a superuser
 # through the usual libpq variables, e.g.
 #   PGHOST=/tmp PGPORT=54329 PGUSER=postgres supabase/tests/run.sh
 # Extra migration files given as arguments are applied after the repo's.
@@ -32,7 +32,7 @@ done
 echo "migrations applied"
 
 status=0
-for t in "$HERE"/1*_tests.sql; do
+for t in "$HERE"/[1-9][0-9]_*tests.sql; do
   echo "== $(basename "$t")"
   out="$($P -d "$DB" -f "$t" 2>&1)" || status=1
   echo "$out" | grep -E "^---|ERROR|CONTEXT|PASSED|CHECK FAILED"

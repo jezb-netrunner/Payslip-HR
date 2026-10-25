@@ -18,6 +18,10 @@ interface CodeSpec {
   /** in the SSS base; '?' = a setting, excluded until the law is confirmed (P2, P3) */
   sss: boolean | '?'
   description: string
+  /** whether it is taxable is a setting (P1) */
+  taxPending?: boolean
+  /** counts toward the 13th month besides basic pay; '?' = a setting, included until confirmed (P9) */
+  thirteenth?: boolean | '?'
   benefit?: MaternityBenefit
   is_christmas_bonus?: boolean
   subject_to_liquidation?: boolean
@@ -32,6 +36,9 @@ const code = (sort_order: number, c: string, label: string, x: CodeSpec): PayCod
   bir_bucket: x.bir_bucket,
   income_class: x.income_class,
   tax_treatment: x.tax_treatment,
+  tax_pending: x.taxPending ?? false,
+  include_in_13th_month_base: x.thirteenth === true || x.thirteenth === '?',
+  thirteenth_pending: x.thirteenth === '?',
   benefit: x.benefit ?? null,
   sss_include: x.sss === true,
   sss_include_pending: x.sss === '?',
@@ -42,7 +49,7 @@ const code = (sort_order: number, c: string, label: string, x: CodeSpec): PayCod
 })
 
 export const PAY_CODES: readonly PayCode[] = [
-  code(10, 'BASIC_ADJ', 'Basic pay adjustment', { use: 'O', bir_bucket: 'basic', income_class: 'regular', tax_treatment: 'mwe_exempt', sss: true,
+  code(10, 'BASIC_ADJ', 'Basic pay adjustment', { use: 'O', bir_bucket: 'basic', income_class: 'regular', tax_treatment: 'mwe_exempt', sss: true, thirteenth: true,
     description: 'A correction of basic pay of an earlier payroll. Counts toward the 13th month.' }),
   code(20, 'HOLIDAY_ADJ', 'Holiday, rest day or special day pay adjustment', { use: 'O', bir_bucket: 'holiday', income_class: 'supplementary', tax_treatment: 'mwe_exempt', sss: true,
     description: 'Holiday, rest-day or special-day pay of an earlier payroll.' }),
@@ -81,9 +88,9 @@ export const PAY_CODES: readonly PayCode[] = [
   code(160, 'MAT_SSS_BENEFIT', 'SSS maternity benefit', { use: 'O', bir_bucket: 'other_non_taxable', income_class: null, tax_treatment: 'exempt', sss: '?',
     benefit: 'sss_maternity',
     description: 'The SSS maternity benefit the employer advances (RA 11210). Tax-exempt.' }),
-  code(170, 'MAT_DIFFERENTIAL', 'Maternity salary differential', { use: 'O', bir_bucket: 'other_non_taxable', income_class: null, tax_treatment: 'exempt', sss: false,
-    benefit: 'maternity_differential',
-    description: 'The salary differential up to full pay during maternity leave (RA 11210). Tax-exempt (RMC 105-2019), counts toward the 13th month.' }),
+  code(170, 'MAT_DIFFERENTIAL', 'Maternity salary differential', { use: 'O', bir_bucket: 'other_taxable', income_class: 'supplementary', tax_treatment: 'taxable', sss: true,
+    benefit: 'maternity_differential', taxPending: true, thirteenth: '?',
+    description: 'The salary differential up to full pay during maternity leave (RA 11210). Taxable as supplementary compensation until the tax exemption is confirmed (a setting). In the SSS base. Counts toward the 13th month (a setting).' }),
   code(900, 'THIRTEENTH_MONTH', '13th month pay', { use: '', bir_bucket: 'thirteenth', income_class: 'supplementary', tax_treatment: 'benefits', sss: '?',
     description: '13th month pay (PD 851), paid by a 13th month run. Exempt together with other benefits up to ₱90,000 a year.' }),
 ]

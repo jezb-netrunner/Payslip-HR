@@ -2,7 +2,7 @@
 // Supabase for one client, computes every employee's payslip, and stores
 // the drafts. RLS limits all of this to admins of the run's client.
 
-import { getEntity, getHolidaysBetween, getPayCodes, getStatutoryTables } from '../lib/api'
+import { getEntity, getHolidaysBetween, getPayCodes, getPayrollRules, getStatutoryTables } from '../lib/api'
 import { fetchAll } from '../lib/fetchAll'
 import { fmtDate } from '../lib/format'
 import { addDays } from '../lib/manila'
@@ -17,12 +17,13 @@ import type {
   PayrollDeductionOverride,
   PayrollRun,
   Payslip,
+  PayslipLine,
   RecurringDeduction,
 } from '../lib/db'
 import type { AnnualPayslipFact } from './annual'
 import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
-import { computePayslip, sssCompensation, type ContributionSet } from './engine'
+import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet } from './engine'
 import { round2 } from './types'
 import { withholdingFactOf, type PriorWithholding } from './withholding'
 import type {
@@ -426,7 +427,10 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   // after the year was annualized re-annualizes).
   const annualizes = (e: Employee) => !isThirteenth && (run.annualize || separatedBy(e, run))
   const isBenefit = (bucket: string) => bucket === 'thirteenth' || bucket === 'other_benefits'
-  const [yearSlips, taxSlips, taxYears, monthSlips, payCodes] = await Promise.all([
+  // maternity salary differentials paid in the last year: one paid earlier
+  // in a leave covers the leave (spec T4)
+  const onMaternity = leaves.some((l) => l.leave_types?.code === MATERNITY_LEAVE_CODE)
+  const [yearSlips, taxSlips, taxYears, monthSlips, payCodes, rules, differentialSlips] = await Promise.all([
     isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
     fetchFinalizedPayslipsForTaxYear(entity.id, taxYear),
     fetchTaxYears(entity.id, taxYear),
@@ -446,6 +450,20 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         .range(from, to),
     ),
     getPayCodes(),
+    getPayrollRules(),
+    onMaternity
+      ? fetchAll<Pick<Payslip, 'employee_id' | 'pay_date' | 'earnings'>>((from, to) =>
+          supabase
+            .from('payslips')
+            .select('employee_id, pay_date, earnings, payroll_runs!inner(status)')
+            .eq('entity_id', entity.id)
+            .neq('payroll_run_id', run.id)
+            .in('payroll_runs.status', ['finalized', 'paid'])
+            .gte('pay_date', addDays(run.period_start, -366))
+            .order('id')
+            .range(from, to),
+        )
+      : Promise.resolve([] as Pick<Payslip, 'employee_id' | 'pay_date' | 'earnings'>[]),
   ])
 
   const groupBy = <T extends { employee_id: string }>(rows: T[]) => {
@@ -470,6 +488,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   const yearBy = groupBy(yearSlips.filter((p) => p.payroll_run_id !== run.id))
   const taxBy = groupBy(taxSlips.filter((p) => p.payroll_run_id !== run.id))
   const monthBy = groupBy(monthSlips)
+  // a differential line: its pay code, or (before pay codes) the one adjustment counted toward the 13th month
+  const isDifferential = (l: PayslipLine) => l.payCode === 'MAT_DIFFERENTIAL' || (!l.payCode && l.code === 'adjustment' && !!l.thirteenthBasis)
+  const differentialBy = groupBy(differentialSlips.filter((p) => (p.earnings ?? []).some(isDifferential)))
+  // the client's DOLE exemption from the differential covers the payroll year (RA 11210 Sec. 5(c))
+  const differentialExempt = !!entity.maternity_exemption_category && entity.maternity_exemption_year === payrollYear
 
   const results: { employee: Employee; slip: PayslipComputation }[] = []
 
@@ -619,6 +642,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       },
       settings: engineSettings,
       payCodes,
+      rules,
+      maternityDifferentialExempt: differentialExempt,
+      maternityDifferentialPaid: (differentialBy.get(emp.id) ?? []).map((p) => p.pay_date ?? ''),
       withholding: {
         payDate: run.pay_date,
         ytd: empTax.map((p) => withholdingFactOf({ ...p, pay_date: p.pay_date ?? run.pay_date, run_type: p.run_type ?? 'regular' })),

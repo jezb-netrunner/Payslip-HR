@@ -16,7 +16,7 @@ const TABLES = [
   'entities', 'employees', 'payroll_runs', 'payslips', 'time_entries', 'leave_requests', 'leave_types',
   'employee_allowances', 'recurring_deductions', 'payroll_adjustments', 'employee_tax_years',
   'statutory_versions', 'holidays', 'employee_schedules', 'schedule_overrides', 'payroll_deduction_overrides',
-  'pay_codes',
+  'pay_codes', 'payroll_rules',
 ]
 
 export const db: { t: Record<string, Row[]>; seq: number } = { t: {}, seq: 0 }
@@ -30,6 +30,7 @@ export function resetDb() {
     db.t.statutory_versions.push({ id: newId(), kind, effective_from: effective, data })
   }
   db.t.pay_codes = PAY_CODES.map((c) => ({ ...c }))
+  db.t.payroll_rules = [{ id: true, maternity_contributions: 'as_usual' }]
 }
 
 export function newId(): string {
@@ -358,6 +359,10 @@ export function finalize(runId: string) {
   const slips = db.t.payslips.filter((p) => p.payroll_run_id === runId)
   if (run.totals?.employees !== slips.length) throw new Error('draft out of date')
   if (slips.length === 0) throw new Error('Nothing to finalize')
+  // payroll_runs_payslip_errors
+  if (slips.some((p) => (p.computation_trace?.errors ?? []).length > 0)) {
+    throw new Error("Fix the errors on this run's payslips before finalizing.")
+  }
   const orphan = db.t.payroll_adjustments.find(
     (a) => a.payroll_run_id === runId && !slips.some((p) => p.employee_id === a.employee_id),
   )

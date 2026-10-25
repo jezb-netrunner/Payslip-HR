@@ -160,11 +160,14 @@ export default function PayslipView({
         </div>
       )}
 
-      {showTrace && (trace?.notes?.length || trace?.warnings?.length) ? (
+      {showTrace && (trace?.notes?.length || trace?.warnings?.length || trace?.errors?.length) ? (
         <div className="rounded-xl border border-slate-200 p-4">
           <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
             Computation notes
           </p>
+          {trace.errors?.map((e, i) => (
+            <p key={`e${i}`} className="text-xs font-semibold text-rose-700">✖ {e}</p>
+          ))}
           {trace.warnings?.map((w, i) => (
             <p key={`w${i}`} className="text-xs text-rose-600">⚠ {w}</p>
           ))}

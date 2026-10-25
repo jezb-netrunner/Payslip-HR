@@ -277,6 +277,12 @@ export interface PayCode {
   /** R or S of the taxable part when paid as an allowance each period (null: never taxable) */
   income_class: IncomeClass | null
   tax_treatment: PayCodeTaxTreatment
+  /** whether it is taxable is a setting until the law is confirmed (spec P1) */
+  tax_pending: boolean
+  /** counts toward the 13th month besides basic pay (PD 851) */
+  include_in_13th_month_base: boolean
+  /** include_in_13th_month_base is a setting until the law is confirmed (spec P9) */
+  thirteenth_pending: boolean
   /** the maternity benefit the code pays */
   benefit: MaternityBenefit | null
   /** in the SSS compensation base (RA 11199 Sec. 8(f), SSS IRR Rule 12 Sec. 6) */
@@ -293,6 +299,18 @@ export interface PayCode {
 
 /** How a payslip's withholding tax was computed. */
 export type WhtMethod = 'regular' | 'cam' | 'annualized'
+
+/**
+ * Rules the law hasn't settled, set by company admins for every client
+ * (payroll tax rules spec, PENDING items). The defaults keep today's rules.
+ */
+export interface PayrollRules {
+  /**
+   * P4: PhilHealth and Pag-IBIG during maternity leave — as usual, or none
+   * on a payroll whose scheduled days are all maternity leave.
+   */
+  maternityContributions: 'as_usual' | 'pause_full_leave'
+}
 
 export interface PayrollEmployeeInput {
   id: string
@@ -475,6 +493,8 @@ export interface PayslipComputation {
     statutoryMonthlyBase: number
     notes: string[]
     warnings: string[]
+    /** Problems that block finalizing the run until fixed. */
+    errors: string[]
     days: DayComputation[]
   }
 }
