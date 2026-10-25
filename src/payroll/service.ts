@@ -173,6 +173,7 @@ function priorWithholdingOf(t: EmployeeTaxYear | undefined): PriorWithholding | 
     taxable: round2(p.taxableBasic + p.taxable13thOtherBenefits + p.taxableOther),
     withheld: p.taxWithheld,
     employedFrom: t.prev_employment_from,
+    employedTo: t.prev_employment_to,
   }
 }
 

@@ -29,8 +29,13 @@ export interface PriorWithholding {
   /** Taxable compensation they paid. */
   taxable: number
   withheld: number
-  /** First day of that employment (counting starts on January 1 at the earliest). */
+  /**
+   * First and last day of that employment: its pay periods count toward n,
+   * the gap until this employer's first pay doesn't. Without both, n counts
+   * straight through (from January 1 when the start is missing).
+   */
   employedFrom?: string | null
+  employedTo?: string | null
 }
 
 /**
@@ -57,9 +62,11 @@ export interface PeriodWithholding {
   tax: number
   method: 'regular' | 'cam'
   trigger?: CamTrigger
-  /** CAM: pay periods counted, from `from` to this payroll. */
+  /** CAM: pay periods with employment counted, from `from` to this payroll. */
   n?: number
   from?: string
+  /** CAM: periods between the jobs were left out of n. */
+  gapSkipped?: boolean
   /** CAM: taxable compensation this year, previous employers included. */
   cum?: number
   totalDue?: number
@@ -121,6 +128,39 @@ export function periodsBetween(frequency: PayFrequency, from: string, to: string
   }
 }
 
+const DAY_MS = 86_400_000
+const utc = (d: string) => {
+  const [y, m, dd] = ymd(d)
+  return Date.UTC(y, m - 1, dd)
+}
+
+/** The pay period of this frequency a date falls in, as a key (weekly: whole weeks back from `anchor`). */
+function periodKey(frequency: PayFrequency, date: string, anchor: string): string {
+  switch (frequency) {
+    case 'monthly':
+      return date.slice(0, 7)
+    case 'semi_monthly':
+      return `${date.slice(0, 7)}${Number(date.slice(8, 10)) > 15 ? 'b' : 'a'}`
+    case 'weekly':
+      return String(Math.floor((utc(anchor) - utc(date)) / (7 * DAY_MS)))
+  }
+}
+
+// Basis: RR 2-98 §2.79(B)(5)(a) Step 2, "the number of payroll period to which the amount relates" (owner 2026-10-25: periods with employment only).
+/**
+ * n for CAM: the pay periods of this frequency in which the employee was
+ * employed — each span of employment (a previous employer's from–to, this
+ * employer's first pay to this payroll), a period falling in two of them
+ * counted once, the gap between jobs not counted.
+ */
+export function employmentPeriods(frequency: PayFrequency, spans: readonly (readonly [string, string])[], anchor: string): number {
+  const keys = new Set<string>()
+  for (const [from, to] of spans) {
+    for (let t = utc(from); t <= utc(to); t += DAY_MS) keys.add(periodKey(frequency, new Date(t).toISOString().slice(0, 10), anchor))
+  }
+  return keys.size
+}
+
 /**
  * Withholding for one payroll: the regular method, or CAM when a trigger
  * applies now or applied earlier this year.
@@ -164,12 +204,21 @@ export function periodWithholding(i: PeriodWithholdingInput): PeriodWithholding 
             : undefined
   if (!trigger) return { tax: regularMethodTax(R, S, i.brackets), method: 'regular' }
 
-  // n: from the first period of the year with compensation from any employer
+  // n: the periods with employment this year — this employer's from its
+  // first pay with compensation, a previous employer's from–to (without
+  // both dates: straight through from its start, or from January 1)
   const yearStart = `${i.payDate.slice(0, 4)}-01-01`
-  const starts = facts.filter((f) => f.gross > 0).map((f) => f.payDate)
-  if (prior) starts.push(prior.employedFrom && prior.employedFrom > yearStart ? prior.employedFrom : yearStart)
-  const from = starts.reduce((a, b) => (b < a ? b : a), i.payDate)
-  const n = periodsBetween(i.frequency, from, i.payDate)
+  const ownFrom = facts.filter((f) => f.gross > 0).map((f) => f.payDate).reduce((a, b) => (b < a ? b : a), i.payDate)
+  const spans: [string, string][] = [[ownFrom, i.payDate]]
+  if (prior) {
+    const start = prior.employedFrom && prior.employedFrom > yearStart ? prior.employedFrom : yearStart
+    if (prior.employedFrom && prior.employedTo) {
+      const end = prior.employedTo < i.payDate ? prior.employedTo : i.payDate
+      if (end >= start) spans.push([start, end])
+    } else spans.push([start, i.payDate])
+  }
+  const from = spans.reduce((a, [f]) => (f < a ? f : a), i.payDate)
+  const n = employmentPeriods(i.frequency, spans, i.payDate)
 
   const cumC =
     facts.reduce((s, f) => s + cents(f.regular) + cents(f.supplementary), 0n) + cents(R) + cents(S) + (prior ? cents(prior.taxable) : 0n)
@@ -182,6 +231,7 @@ export function periodWithholding(i: PeriodWithholdingInput): PeriodWithholding 
     trigger,
     n,
     from,
+    ...(n < periodsBetween(i.frequency, from, i.payDate) ? { gapSkipped: true } : {}),
     cum: pesos(cumC),
     totalDue,
     withheldBefore: pesos(withheldC),

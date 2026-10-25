@@ -495,11 +495,15 @@ function withholdingFor(
   const note =
     `Withholding tax, cumulative average method: ${CAM_REASON[r.trigger!]}${since}. ` +
     `Taxable compensation this year ${peso(r.cum!)}${prior ? `, ${peso(prior.taxable)} of it from the previous employer` : ''}, ` +
-    `over ${r.n} ${FREQUENCY_LABEL[settings.payFrequency]} pay period${r.n === 1 ? '' : 's'} from ${shortDate(r.from!)}: ` +
+    `over ${r.n} ${FREQUENCY_LABEL[settings.payFrequency]} pay period${r.n === 1 ? '' : 's'} of employment from ${shortDate(r.from!)}${r.gapSkipped ? ' (the time between jobs not counted)' : ''}: ` +
     `tax due ${peso(r.totalDue!)} on the ${table}, less ${peso(r.withheldBefore!)} already withheld${prior ? " (the previous employer's included)" : ''}.`
-  const warning = prior && !prior.employedFrom
-    ? "The previous employer's employment start date isn't on file, so the cumulative average method counts pay periods from January 1. Enter it with the previous employer's figures (BIR Form 2316) and recompute."
-    : null
+  const warning = !prior
+    ? null
+    : !prior.employedFrom
+      ? "The previous employer's employment start date isn't on file, so the cumulative average method counts pay periods from January 1. Enter it with the previous employer's figures (BIR Form 2316) and recompute."
+      : !prior.employedTo
+        ? "The previous employer's employment end date isn't on file, so the cumulative average method counts pay periods straight through from its start, the time between jobs included. Enter it with the previous employer's figures (BIR Form 2316) and recompute."
+        : null
   return { tax: r.tax, method: 'cam', note, warning }
 }
 

@@ -407,6 +407,16 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Owner's answers to the T2–T12 questions (same branch)
+
+**Asked:** the owner (CPA) answered the nine questions; each answer is a
+change, done in spec order, one commit each.
+**Did:** T2 — CAM's `n` counts only the pay periods with employment
+(`employmentPeriods`: a previous employer's from–to plus this employer's
+periods, a period both jobs fall in counted once, the gap between jobs
+not), `PriorWithholding.employedTo`; without both dates it still counts
+straight through (warning names the missing date).
+
 ### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
 
 **Did:** `minimum_wages` (region, sector '' = general, daily rate,

@@ -96,10 +96,10 @@ skipped (no 1601-C lines 15–19, no quarterly MWE hazard-pay list).
 - **The live database is not touched.** Migrations ship on the branch and are
   applied when the owner approves (README, *Updating the statutory tables*).
 
-## 5. Readings taken in T2 (for the owner to confirm)
+## 5. Readings taken in T2
 
-The spec is silent on these; T2 implements the reading named, and each is
-a small change if the owner reads it otherwise.
+The spec is silent on these; T2 implements the reading named. The owner
+accepted 1, 2, 3 and 5 and changed 4 (2026-10-25).
 
 1. **Trigger (b) needs S above 0.** "S for the period is equal to or more
    than R" would otherwise hold for a payroll with no pay at all (0 ≥ 0)
@@ -112,10 +112,14 @@ a small change if the owner reads it otherwise.
    derived from the stored lines (basic pay and allowances less the
    contributions = R, the rest of the taxable pay = S). Their tax is not
    changed (§0 step 7).
-4. **`n` is counted by pay date** (the tax year follows the pay date), in
-   periods of the current payroll frequency, from the first pay of the year
-   by any employer: the previous employer's start date (January 1 when it
-   isn't on file, with a warning), or this employer's first payroll.
+4. **`n` counts only the pay periods with employment** (changed by the
+   owner, 2026-10-25; basis RR 2-98 §2.79(B)(5)(a) Step 2, "the number of
+   payroll period to which the amount relates"): the previous employer's
+   from–to and this employer's periods from its first pay of the year, in
+   periods of the current payroll frequency, a period both jobs fall in
+   counted once, the gap between jobs not counted. Without the previous
+   employer's dates it counts straight through from its start (from
+   January 1 when the start is missing), with a warning.
 5. **Draft payrolls are marked for recomputing** when the T2 migration is
    applied, so no draft computed on the old method is finalized.
 

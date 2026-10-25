@@ -91,7 +91,7 @@ describe('T2 cumulative average method (CAM)', () => {
 
   it('W4 trigger (c): a new hire with a previous employer this year uses CAM from the first period', () => {
     // previous employer Jan–Apr: 4 × 30,000, withheld 4 × 1,375.05; joins in May at 30,000 a month
-    const prior = { taxable: 120000, withheld: 5500.2, employedFrom: '2026-01-01' }
+    const prior = { taxable: 120000, withheld: 5500.2, employedFrom: '2026-01-01', employedTo: '2026-04-30' }
     const r = periodWithholding({ regular: 30000, supplementary: 0, payDate: '2026-05-31', frequency: 'monthly', brackets: monthly, ytd: [], prior })
     expect(r.method).toBe('cam')
     expect(r.trigger).toBe('c')
@@ -124,6 +124,47 @@ describe('T2 cumulative average method (CAM)', () => {
     // first compensation in February; June is the 5th monthly period
     const r = periodWithholding({ regular: 18000, supplementary: 0, payDate: '2026-06-30', frequency: 'monthly', brackets: monthly, ytd })
     expect(r.n).toBe(5)
+  })
+
+  // owner 2026-10-25 (reading 4 changed): n counts only the periods with
+  // employment — the previous employer's from–to and this employer's
+  // periods — not the gap between jobs (RR 2-98 §2.79(B)(5)(a) Step 2)
+  it('n skips the gap between jobs: previous employer January–February, this employer from June', () => {
+    const prior = { taxable: 60000, withheld: 2750.1, employedFrom: '2026-01-01', employedTo: '2026-02-28' }
+    const r = periodWithholding({ regular: 30000, supplementary: 0, payDate: '2026-06-30', frequency: 'monthly', brackets: monthly, ytd: [], prior })
+    expect(r.n).toBe(3) // January, February, June
+    expect(r.from).toBe('2026-01-01')
+    // 0.15 × (90,000 − 3 × 20,833) = 4,125.15 due, less 2,750.10 withheld
+    expectPeso(r.tax, 1375.05)
+  })
+
+  it('a period both jobs fall in counts once', () => {
+    const prior = { taxable: 100000, withheld: 0, employedFrom: '2026-01-01', employedTo: '2026-04-10' }
+    const ytd: WithholdingYtdFact[] = [{ payDate: '2026-04-30', regular: 30000, supplementary: 0, withheld: 0, method: 'cam', gross: 30000 }]
+    const r = periodWithholding({ regular: 30000, supplementary: 0, payDate: '2026-05-31', frequency: 'monthly', brackets: monthly, ytd, prior })
+    expect(r.n).toBe(5) // January to May, April once
+  })
+
+  it('semi-monthly: the previous employer\'s January is two periods, the gap to July none', () => {
+    const prior = { taxable: 30000, withheld: 0, employedFrom: '2026-01-01', employedTo: '2026-01-31' }
+    const r = periodWithholding({ regular: 15000, supplementary: 0, payDate: '2026-07-15', frequency: 'semi_monthly', brackets: semiMonthly, ytd: [], prior })
+    expect(r.n).toBe(3)
+  })
+
+  it('weekly: whole weeks of each job, the gap between them not counted', () => {
+    // previous employer Jan 5–Jan 30 (4 weeks); this employer pays Mar 6 (its first week)
+    const prior = { taxable: 20000, withheld: 0, employedFrom: '2026-01-05', employedTo: '2026-01-30' }
+    const r = periodWithholding({ regular: 5000, supplementary: 0, payDate: '2026-03-06', frequency: 'weekly', brackets: BIR_WHT_2023.weekly, ytd: [], prior })
+    expect(r.n).toBe(5)
+  })
+
+  it('without the previous employer\'s dates: counted straight through, from January 1 when the start is missing', () => {
+    const noEnd = { taxable: 60000, withheld: 0, employedFrom: '2026-02-01' }
+    expect(periodWithholding({ regular: 30000, supplementary: 0, payDate: '2026-06-30', frequency: 'monthly', brackets: monthly, ytd: [], prior: noEnd }).n).toBe(5)
+    const noDates = { taxable: 60000, withheld: 0 }
+    const r = periodWithholding({ regular: 30000, supplementary: 0, payDate: '2026-06-30', frequency: 'monthly', brackets: monthly, ytd: [], prior: noDates })
+    expect(r.n).toBe(6)
+    expect(r.from).toBe('2026-01-01')
   })
 
   it('a payroll paid later in the year does not count for an earlier pay date (finalized out of order)', () => {

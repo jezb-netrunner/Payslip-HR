@@ -195,3 +195,18 @@ describe('T2: 13th month runs', () => {
     expect(slip.withholdingTax).toBe(0)
   })
 })
+
+// owner 2026-10-25: n counts the periods with employment only
+describe('T2 CAM: the time between jobs', () => {
+  it('the payslip says the time between jobs was not counted', () => {
+    const slip = pay({}, { withholding: { payDate: '2026-06-30', ytd: [], prior: { taxable: 60000, withheld: 2750.1, employedFrom: '2026-01-01', employedTo: '2026-02-28' } } })
+    expect(slip.whtMethod).toBe('cam')
+    expect(slip.trace.notes.join(' ')).toMatch(/over 3 monthly pay periods of employment from Jan 1 \(the time between jobs not counted\)/)
+    expect(slip.trace.warnings.join(' ')).not.toMatch(/isn't on file/)
+  })
+
+  it('without the previous employer\'s end date it counts straight through, and says so', () => {
+    const slip = pay({}, { withholding: { payDate: '2026-06-30', ytd: [], prior: { taxable: 60000, withheld: 0, employedFrom: '2026-01-01' } } })
+    expect(slip.trace.warnings.join(' ')).toMatch(/end date isn't on file, so the cumulative average method counts pay periods straight through/)
+  })
+})
