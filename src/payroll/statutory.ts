@@ -77,19 +77,45 @@ export function computePagibig(
   }
 }
 
-/** Progressive tax from a bracket table ({over, base, rate} rows, ascending). */
-export function taxFromBrackets(taxable: number, brackets: TaxBracket[]): number {
-  if (taxable <= 0) return 0
-  let b = brackets[0]
-  for (const bracket of brackets) {
-    if (taxable > bracket.over || bracket.over === 0) b = bracket
+// Basis: RR 11-2018 Annex E (BIR CDN), "Effective January 1, 2023 and onwards". RR 2-98 §2.79(B)(3) Step 2.
+/**
+ * The table row an amount falls in: the row with the highest lower bound
+ * that is less than or equal to the amount ({over, base, rate} rows,
+ * ascending; amounts below the first row use the first row).
+ */
+export function bracketFor(amount: number, brackets: TaxBracket[]): TaxBracket {
+  let row = brackets[0]
+  for (const b of brackets) {
+    if (b.over <= amount) row = b
     else break
   }
-  return round2(b.base + b.rate * (taxable - b.over))
+  return row
+}
+
+/** Pesos to whole centavos (amounts reach the engine already rounded to centavos). */
+const toCentavos = (pesos: number) => BigInt(Math.round(pesos * 100))
+
+/**
+ * `tax = base + rate × (amount − lower bound)` on one row, in exact
+ * decimal arithmetic (whole centavos, the rate to six decimals), rounded to
+ * the centavo — half up — only at the end.
+ */
+export function taxOnRow(amount: number, row: TaxBracket): number {
+  const rate = BigInt(Math.round(row.rate * 1_000_000))
+  const scaled = toCentavos(row.base) * 1_000_000n + rate * (toCentavos(amount) - toCentavos(row.over))
+  const centavos = scaled >= 0n ? (scaled + 500_000n) / 1_000_000n : -((-scaled + 500_000n) / 1_000_000n)
+  return Number(centavos) / 100
+}
+
+/** Progressive tax from a bracket table: the amount's own row (see `bracketFor`). */
+export function taxFromBrackets(taxable: number, brackets: TaxBracket[]): number {
+  if (taxable <= 0) return 0
+  return taxOnRow(taxable, bracketFor(taxable, brackets))
 }
 
 export type WhtPeriod = 'daily' | 'weekly' | 'semi_monthly' | 'monthly'
 
+// Basis: RR 11-2018 Annex E (BIR CDN), "Effective January 1, 2023 and onwards". RR 2-98 §2.79(B)(3) Step 2.
 /**
  * Withholding tax on compensation for one pay period (BIR revised withholding
  * tax tables, effective 01 Jan 2023 onward under the TRAIN law).

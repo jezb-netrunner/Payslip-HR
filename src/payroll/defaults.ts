@@ -15,10 +15,13 @@
 //  - BIR: TRAIN law (RA 10963) revised withholding tax tables effective
 //    01 Jan 2023 (RR 11-2018 as amended); ₱90,000 exemption cap for 13th
 //    month pay and other benefits (RA 10963, Sec. 32(B)(7)(e) NIRC).
+//    Checked row for row against the owner's payroll tax rules spec
+//    (2026-10-25, T1), which also gives the de minimis ceilings below.
 
 import type {
   BirAnnualData,
   BirWhtData,
+  DeMinimisData,
   PagibigData,
   PhilHealthData,
   SssTableData,
@@ -101,10 +104,33 @@ export const BIR_ANNUAL_2023: BirAnnualData = {
   other_benefits_exemption_cap: 90000,
 }
 
+// Basis: RR 2-98 §2.78.1(A)(3), as amended by RR 29-2025 §1 (dated Oct 27, 2025; BIR CDN).
+// RR 29-2025 §3: effective "after fifteen (15) days following its publication"; posted
+// 2025-12-22, so day 15 is 2026-01-06 and pay dated 2026-01-07 or later uses these
+// (the owner's safe date; secondary sources say 2026-01-06). Item (b) is for
+// government employees only. Ceilings for pay dated before 2026-01-07 are not on file.
+export const DE_MINIMIS_2026_EFFECTIVE = '2026-01-07'
+
+export const DE_MINIMIS_2026: DeMinimisData = {
+  items: [
+    { item: 'a', label: 'Cash conversion of unused vacation leave credits (private employees)', unit: 'days_per_year', limit: 12 },
+    { item: 'c', label: 'Medical cash allowance to dependents of employees', unit: 'per_semester', limit: 2000, per_month: 333 },
+    { item: 'd', label: 'Rice subsidy (or one 50-kg sack a month worth up to the ceiling)', unit: 'per_month', limit: 2500 },
+    { item: 'e', label: 'Uniform and clothing allowance', unit: 'per_year', limit: 8000 },
+    { item: 'f', label: 'Actual medical assistance', unit: 'per_year', limit: 12000 },
+    { item: 'g', label: 'Laundry allowance', unit: 'per_month', limit: 400 },
+    { item: 'h', label: 'Employee achievement awards under a written plan', unit: 'per_year', limit: 12000 },
+    { item: 'i', label: 'Christmas and major anniversary gifts', unit: 'per_year', limit: 6000 },
+    { item: 'j', label: 'Daily meal allowance for overtime work and night or graveyard shift', unit: 'share_of_regional_minimum_wage', limit: 0.3 },
+    { item: 'k', label: 'CBA benefits and productivity incentives, combined', unit: 'per_year', limit: 12000 },
+  ],
+}
+
 export const DEFAULT_TABLES: StatutoryTables = {
   sss: SSS_2025,
   philhealth: PHILHEALTH_2024,
   pagibig: PAGIBIG_2024,
   bir_wht: BIR_WHT_2023,
   bir_annual: BIR_ANNUAL_2023,
+  de_minimis: DE_MINIMIS_2026,
 }

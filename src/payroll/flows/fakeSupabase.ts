@@ -4,7 +4,7 @@
 // run's period facts) and the finalize RPC (status flip, rounding carry,
 // payroll_seq, loan balances, overlap + staleness checks).
 
-import { DEFAULT_TABLES } from '../defaults'
+import { DE_MINIMIS_2026_EFFECTIVE, DEFAULT_TABLES } from '../defaults'
 import { slotFor } from '../../lib/payPeriods'
 import { eachDate, isoWeekday } from '../../lib/manila'
 
@@ -23,7 +23,9 @@ export function resetDb() {
   db.seq = 0
   db.t = Object.fromEntries(TABLES.map((n) => [n, []]))
   for (const [kind, data] of Object.entries(DEFAULT_TABLES)) {
-    db.t.statutory_versions.push({ id: newId(), kind, effective_from: '2000-01-01', data })
+    // the de minimis ceilings on file start with RR 29-2025
+    const effective = kind === 'de_minimis' ? DE_MINIMIS_2026_EFFECTIVE : '2000-01-01'
+    db.t.statutory_versions.push({ id: newId(), kind, effective_from: effective, data })
   }
 }
 

@@ -362,9 +362,40 @@ repeating; provisional SSS on zero-pay payrolls) plus a pre-existing one
 all fixed with tests. Tests 247 → 282, SQL suite 16 added; browser QA of
 every new control at 1280 and 390 px.
 
+### 2026-10-25 — Payroll tax rules spec, T1 (branch `claude/upbeat-davinci-t7a3uq`)
+
+**Asked:** implement the owner's (CPA) *Payroll Tax and Contribution Rules:
+Change Spec* v2026-10-25 — tasks T1–T12 in order, tests written first and
+seen failing, one commit per task, a plain-language summary and the owner's
+OK after each task; PENDING items become settings with a "Pending legal
+confirmation" badge; finalized payrolls never change.
+
+**Did:** `docs/payroll-spec-mapping.md` (where each spec item lives, what each
+task changes, conflicts). Owner's decisions on the conflicts: a pay-code list
+built from the 14 categories plus the spec's codes; exact-centavo math for new
+or changed tax and contribution amounts (no engine-wide decimal conversion);
+existing "other benefits" lines become a general SSS-included bonus code;
+MWE status computed (checkbox removed); existing PhilHealth waivers migrate
+(start month, SPIC expiry, PWD = confirmed); 1601-C lines 15–19 and the
+quarterly MWE hazard list skipped; company admins maintain the SMW table.
+T1: every Annex E row, the annual table and the ₱90k cap already matched the
+spec (DB and `defaults.ts`); the row lookup is now "lower bound ≤ amount"
+(`bracketFor`, same results — T2 needs it) and `taxOnRow` computes in exact
+centavos (BigInt); de minimis ceilings ship as kind `de_minimis` effective
+2026-01-07 (migration `20261025090000_de_minimis_ceilings`, shown on the
+Statutory page, not yet used by payroll). Tests 282 → 340 plus SQL suite 17;
+suites 10 and 15 counted five versions — now six.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-10-25: `20261025090000 de_minimis_ceilings` is in the branch, NOT
+live.** It swaps two constraints with DROP CONSTRAINT, so the MCP's
+destructive-SQL prompt blocks it: the owner runs it in the SQL editor, then
+the session records it in the migration history and re-runs
+`fingerprint.sql` and the advisors. The front end works without it (the de
+minimis kind is optional).
 
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
@@ -532,11 +563,15 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   with <10. WO NCR-27 (the earlier "₱755 from Jul 25" and its ₱780 Jan 2027
   tranche) was enjoined by a Pasig RTC and never took effect, so NCR pay
   from Jul 25 to Sep 25 stayed ₱695. It's an admin setting, not hardcoded.
-- **De minimis** (RR 29-2025, eff. Jan 6, 2026): rice ₱2,500/mo, uniform
-  ₱8,000/yr, laundry ₱400/mo, medical assistance ₱12,000/yr, gifts ₱6,000/yr,
-  CBA+productivity ₱12,000/yr, OT meal 30% of regional minimum wage,
-  monetized VL 12 days. The app treats de minimis as admin-flagged
-  non-taxable allowances — ceilings are the admin's responsibility.
+- **De minimis** (RR 29-2025): rice ₱2,500/mo, uniform ₱8,000/yr, laundry
+  ₱400/mo, medical assistance ₱12,000/yr, dependents' medical cash ₱2,000 a
+  semester (₱333/mo), achievement awards ₱12,000/yr, gifts ₱6,000/yr,
+  CBA+productivity ₱12,000/yr, OT/night meal 30% of the regional minimum
+  wage, monetized VL 12 days. Stored since 2026-10-25 as statutory kind
+  `de_minimis` **effective 2026-01-07** — the owner's spec takes the day after
+  day 15 from the 2025-12-22 posting as the safe date (secondary sources say
+  Jan 6). Payroll doesn't apply them yet (spec T7); until then de minimis is
+  admin-flagged non-taxable pay and the ceilings are the admin's job.
 
 Re-verify on these triggers: every January (agency announcements, new BIR
 RRs); wage orders per region (NCR-28 has no second tranche; watch the
@@ -596,7 +631,9 @@ the MCP destructive-SQL prompt can't be answered from cloud sessions);
 columns `legal_basis`, `verified_on`; CHECKs `valid_statutory_data(kind, data)`
 (shape, rate ranges, MSC steps, tax brackets ascending and each base = the
 previous base + rate × step within ₱1 — a mistyped figure fails),
-first-of-month `effective_from`, documented (legal basis, description, https
+first-of-month `effective_from` for the SSS / PhilHealth / Pag-IBIG kinds
+only (since 2026-10-25: BIR kinds and `de_minimis` follow the pay date, and
+RR 29-2025 starts mid-month), documented (legal basis, description, https
 source); trigger `guard_statutory_version` freezes data/effective date of a
 version any finalized run with `greatest(period_end, pay_date) >=
 effective_from` may have used, unless the correcting migration sets

@@ -58,12 +58,44 @@ export interface BirAnnualData {
   other_benefits_exemption_cap: number
 }
 
+/** De minimis benefit items of RR 2-98 Sec. 2.78.1(A)(3); (b) is for government employees only. */
+export type DeMinimisItem = 'a' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k'
+
+export interface DeMinimisCeiling {
+  item: DeMinimisItem
+  label: string
+  /**
+   * What the ceiling measures: days of unused vacation leave a year, pesos a
+   * month / semester / year, or a share of the employee's regional basic
+   * minimum wage (the meal allowance for overtime and night shifts).
+   */
+  unit: 'days_per_year' | 'per_month' | 'per_semester' | 'per_year' | 'share_of_regional_minimum_wage'
+  limit: number
+  /** Item (c): the same ceiling stated per month. */
+  per_month?: number
+}
+
+export interface DeMinimisData {
+  items: DeMinimisCeiling[]
+}
+
 export interface StatutoryTables {
   sss: SssTableData
   philhealth: PhilHealthData
   pagibig: PagibigData
   bir_wht: BirWhtData
   bir_annual: BirAnnualData
+  /** De minimis ceilings in force on the pay date; none on file before 2026-01-07. */
+  de_minimis?: DeMinimisData
+}
+
+export type StatutoryKind = 'sss' | 'philhealth' | 'pagibig' | 'bir_wht' | 'bir_annual' | 'de_minimis'
+
+/** One `statutory_versions` row, as far as picking the tables in force needs it. */
+export interface StatutoryVersionRow {
+  kind: StatutoryKind
+  effective_from: string
+  data: unknown
 }
 
 // ---------- attendance ----------

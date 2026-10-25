@@ -9,6 +9,7 @@ import type {
   MaternityBenefit,
   PayFrequency,
   RoundingMode,
+  StatutoryKind,
   WorkSchedule,
 } from '../payroll/types'
 
@@ -267,7 +268,7 @@ export interface LeaveRequest {
 
 export interface StatutoryVersion {
   id: string
-  kind: 'sss' | 'philhealth' | 'pagibig' | 'bir_wht' | 'bir_annual'
+  kind: StatutoryKind
   effective_from: string
   effective_to: string | null
   description: string

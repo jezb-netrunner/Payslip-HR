@@ -211,7 +211,10 @@ every API role. A change in the law ships as a migration:
 
 1. Confirm the change in the agency's own issuance (BIR revenue regulation,
    SSS / PhilHealth / Pag-IBIG circular) and one more independent source;
-   note the effective date (versions start on the first of a month).
+   note the effective date. SSS, PhilHealth and Pag-IBIG versions start on
+   the first of a month (they follow the payroll month); BIR tables and the
+   de minimis ceilings (`kind = 'de_minimis'`) may start on any date (they
+   follow the pay date — RR 29-2025 applies from 2026-01-07).
 2. Add a migration inserting the new version with `kind`,
    `effective_from`, `description`, `legal_basis`, `source_url` (https) and
    `verified_on`. The database checks the figures (rates in range, MSC
@@ -338,7 +341,10 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
 - Whether a minimum wage earner's rest-day and special-day premiums are
   tax-exempt like holiday pay is not settled in the sources checked; the app
   treats them as exempt — confirm with your accountant.
-- De minimis ceilings are the admin's responsibility when classifying
-  allowances as de minimis (current caps per RR 29-2025 are shown in the UI).
+- De minimis ceilings are on file as a statutory table (RR 29-2025, pay
+  dated 2026-01-07 and later; Statutory Tables page), but payroll doesn't
+  apply them yet: classifying allowances as de minimis within the ceilings
+  stays the admin's responsibility until the per-item tracking (payroll tax
+  rules spec, T7) is built.
 - This software assists with compliance but is not legal advice — always
   reconcile remittances with each agency's official schedules and forms.

@@ -351,6 +351,7 @@ const FREQUENCY_LABEL: Record<PayrollSettingsInput['payFrequency'], string> = {
   monthly: 'monthly',
 }
 
+// Basis (₱90,000 ceiling, "benefitsExcess" below): NIRC §32(B)(7)(e), as amended by RA 10963 §9. RR 2-98 §2.78.1(B)(11).
 export function computePayslip(params: ComputePayslipParams): PayslipComputation {
   const { employee, settings, period, tables, runType } = params
   if (runType === 'thirteenth_month') return computeThirteenthMonth(params)
@@ -962,6 +963,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   }
 }
 
+// Basis (₱90,000 ceiling): NIRC §32(B)(7)(e), as amended by RA 10963 §9. RR 2-98 §2.78.1(B)(11).
 /**
  * 13th month pay run (PD 851): 1/12 of basic salary earned within the
  * calendar year, less any installment already paid. Tax-exempt together

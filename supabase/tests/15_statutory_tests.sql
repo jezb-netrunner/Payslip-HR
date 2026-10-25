@@ -32,7 +32,8 @@ insert into auth.users (id, email, raw_app_meta_data) values (:xa, 'xa@chi.test'
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :owner, true);
-select pg_temp.check((select count(*) from statutory_versions where verified_on is not null and legal_basis <> '') = 5, 'every version is documented and verified');
+select pg_temp.check((select count(*) from statutory_versions where verified_on is not null and legal_basis <> '') = (select count(*) from statutory_versions)
+  and (select count(*) from statutory_versions) = 6, 'every version is documented and verified');
 select pg_temp.expect_error($$insert into statutory_versions (kind, effective_from, description, legal_basis, source_url, data)
   values ('philhealth', '2027-01-01', 'x', 'x', 'https://x.test', '{"rate":0.05,"floor":10000,"ceiling":100000}')$$, '%permission denied%');
 select pg_temp.expect_error($$update statutory_versions set verified_on = current_date$$, '%permission denied%');

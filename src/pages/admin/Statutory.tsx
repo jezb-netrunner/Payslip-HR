@@ -14,7 +14,16 @@ import { fmtDate, money } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
-import type { BirAnnualData, BirWhtData, PagibigData, PhilHealthData, SssTableData, TaxBracket } from '../../payroll/types'
+import type {
+  BirAnnualData,
+  BirWhtData,
+  DeMinimisCeiling,
+  DeMinimisData,
+  PagibigData,
+  PhilHealthData,
+  SssTableData,
+  TaxBracket,
+} from '../../payroll/types'
 
 type Kind = StatutoryVersion['kind']
 
@@ -24,9 +33,13 @@ const kindLabels: Record<Kind, string> = {
   pagibig: 'Pag-IBIG Savings (RA 9679)',
   bir_wht: 'BIR Withholding Tax on Compensation',
   bir_annual: 'BIR Annual Income Tax Table',
+  de_minimis: 'De Minimis Benefit Ceilings',
 }
 
-const KINDS: Kind[] = ['sss', 'philhealth', 'pagibig', 'bir_wht', 'bir_annual']
+const KINDS: Kind[] = ['sss', 'philhealth', 'pagibig', 'bir_wht', 'bir_annual', 'de_minimis']
+
+/** Payroll needs every kind but the de minimis ceilings (none are on file before 2026-01-07). */
+const OPTIONAL_KINDS: Kind[] = ['de_minimis']
 
 /** The single figures of a table, for showing what a version changed. */
 const FIGURES: Partial<Record<Kind, { key: string; label: string; percent?: boolean }[]>> = {
@@ -66,6 +79,7 @@ function changesFrom(prev: Pick<StatutoryVersion, 'kind' | 'data'>, v: Pick<Stat
   const out = (FIGURES[v.kind] ?? [])
     .filter((f) => a[f.key] !== b[f.key])
     .map((f) => `${f.label} ${figure(a[f.key], f.percent)} → ${figure(b[f.key], f.percent)}`)
+  if (v.kind === 'de_minimis' && JSON.stringify(a.items) !== JSON.stringify(b.items)) out.push('new ceilings')
   const brackets = v.kind === 'bir_wht' ? ['daily', 'weekly', 'semi_monthly', 'monthly'] : v.kind === 'bir_annual' ? ['brackets'] : []
   const changedTables = brackets.filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]))
   if (changedTables.length) out.push(`new ${changedTables.map((k) => k.replace('_', '-')).join(', ')} brackets`)
@@ -103,7 +117,7 @@ export default function Statutory() {
   const wht = current('bir_wht')?.data as BirWhtData | undefined
   const salary = Number(sample) || 0
   // the oldest check among the tables in force
-  const lastVerified = KINDS.map((k) => current(k)?.verified_on ?? '').sort()[0] || null
+  const lastVerified = KINDS.filter((k) => current(k)).map((k) => current(k)?.verified_on ?? '').sort()[0] || null
   const reviewDue = !lastVerified || lastVerified < `${today.slice(0, 4)}-01-01`
 
   return (
@@ -180,7 +194,13 @@ export default function Statutory() {
                 </span>
               }
             >
-              {cur ? <VersionDetail version={cur} /> : <p className="text-sm text-rose-600">No version in force — payroll cannot run.</p>}
+              {cur ? (
+                <VersionDetail version={cur} />
+              ) : OPTIONAL_KINDS.includes(kind) ? (
+                <p className="text-sm text-slate-500">No version in force today.</p>
+              ) : (
+                <p className="text-sm text-rose-600">No version in force — payroll cannot run.</p>
+              )}
               {rows.length > 0 && (
                 <div className="mt-3 border-t border-slate-100 pt-2">
                   <p className="text-xs font-semibold text-slate-400">All versions</p>
@@ -273,6 +293,36 @@ function VersionDetail({ version }: { version: StatutoryVersion }) {
       </div>
     )
   }
+  if (version.kind === 'de_minimis') {
+    const t = d as DeMinimisData
+    return (
+      <div>
+        <div className="mb-2">{head}</div>
+        <TableShell>
+          <thead className="bg-slate-50">
+            <tr>
+              <Th>Item</Th>
+              <Th>Benefit</Th>
+              <Th className="text-right">Ceiling</Th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {t.items.map((c) => (
+              <tr key={c.item}>
+                <Td>({c.item})</Td>
+                <Td>{c.label}</Td>
+                <Td className="text-right">{ceilingText(c)}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </TableShell>
+        <p className="mt-2 text-xs text-slate-500">
+          Item (b) applies to government employees only. Amounts above a ceiling count toward the ₱90,000 exemption for
+          13th month pay and other benefits.
+        </p>
+      </div>
+    )
+  }
   const t = d as BirAnnualData
   return (
     <div>
@@ -283,6 +333,22 @@ function VersionDetail({ version }: { version: StatutoryVersion }) {
       </p>
     </div>
   )
+}
+
+function ceilingText(c: DeMinimisCeiling): string {
+  const peso = (v: number) => `₱${v.toLocaleString()}`
+  switch (c.unit) {
+    case 'days_per_year':
+      return `${c.limit} days a year`
+    case 'per_month':
+      return `${peso(c.limit)} a month`
+    case 'per_semester':
+      return `${peso(c.limit)} a semester${c.per_month ? ` (${peso(c.per_month)} a month)` : ''}`
+    case 'per_year':
+      return `${peso(c.limit)} a year`
+    case 'share_of_regional_minimum_wage':
+      return `${pct(c.limit)} of the regional basic minimum wage`
+  }
 }
 
 function BracketTable({ title, brackets }: { title: string; brackets: TaxBracket[] }) {

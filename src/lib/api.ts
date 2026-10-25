@@ -9,14 +9,8 @@ import {
 } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import type { Employee, Entity, Holiday, StatutoryVersion } from './db'
-import type {
-  BirAnnualData,
-  BirWhtData,
-  PagibigData,
-  PhilHealthData,
-  SssTableData,
-  StatutoryTables,
-} from '../payroll/types'
+import type { StatutoryTables } from '../payroll/types'
+import { pickStatutoryTables } from '../payroll/versions'
 
 export async function getEntity(id: string): Promise<Entity> {
   const { data, error } = await supabase.from('entities').select('*').eq('id', id).single()
@@ -35,19 +29,7 @@ export async function getStatutoryTables(asOf: string): Promise<StatutoryTables>
     .lte('effective_from', asOf)
     .order('effective_from', { ascending: false })
   if (error) throw error
-  const rows = (data ?? []) as StatutoryVersion[]
-  const pick = (kind: StatutoryVersion['kind']) => rows.find((r) => r.kind === kind)?.data
-  const sss = pick('sss') as SssTableData | undefined
-  const philhealth = pick('philhealth') as PhilHealthData | undefined
-  const pagibig = pick('pagibig') as PagibigData | undefined
-  const bir_wht = pick('bir_wht') as BirWhtData | undefined
-  const bir_annual = pick('bir_annual') as BirAnnualData | undefined
-  if (!sss || !philhealth || !pagibig || !bir_wht || !bir_annual) {
-    throw new Error(
-      'Statutory tables are incomplete for ' + asOf + '. The missing table version has to be published by the system maintainer (statutory tables ship with the software).',
-    )
-  }
-  return { sss, philhealth, pagibig, bir_wht, bir_annual }
+  return pickStatutoryTables((data ?? []) as StatutoryVersion[], asOf)
 }
 
 const HOLIDAY_STRENGTH: Record<Holiday['kind'], number> = {

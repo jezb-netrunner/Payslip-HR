@@ -134,6 +134,8 @@ export function isTaxableBucket(bucket: BirBucket, isMwe: boolean): boolean {
   }
 }
 
+// Basis: RR 2-98 §2.79(B)(5)(b) Step 3(b), as amended by RR 11-2018 §7 (annual tax table, taxable year 2023 and later).
+// Basis (₱90,000 ceiling): NIRC §32(B)(7)(e), as amended by RA 10963 §9. RR 2-98 §2.78.1(B)(11).
 export function summarizeYear(
   facts: AnnualPayslipFact[],
   annual: BirAnnualData,

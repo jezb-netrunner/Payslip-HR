@@ -221,7 +221,8 @@ commit;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :ea, true);
-select pg_temp.check((select count(*) from statutory_versions) = 5, 'entity admin reads statutory');
+-- five tables plus the de minimis ceilings (20261025090000)
+select pg_temp.check((select count(*) from statutory_versions) = 6, 'entity admin reads statutory');
 select pg_temp.expect_error($$insert into statutory_versions (kind, effective_from, data) values ('sss','2027-01-01','{}')$$, '%permission denied%');
 select pg_temp.expect_error($$update statutory_versions set description = 'hacked'$$, '%permission denied%');
 commit;
