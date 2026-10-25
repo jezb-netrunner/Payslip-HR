@@ -425,7 +425,10 @@ T4 — P4 stays "as usual" (no change; the pending reason is on Statutory
 Tables). T7 — `reclassifyLeaveConversions` (year facts now carry `payDate`
 and line `payCode`/`days`): annualizing payrolls and the alphalist
 classify the year's conversions under the client's current leave policy
-(engine `yearUnderLeavePolicy`, note on the YEA payslip).
+(engine `yearUnderLeavePolicy`, note on the YEA payslip). T8 — on an
+annualizing payslip the order is contributions and union dues, then the
+YEA tax (capped at what is left), then loans and other deductions from
+what remains (shortfall warning), then cash advances; no "forgive".
 
 ### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
 
@@ -1098,8 +1101,10 @@ expects tax withheld = tax due per employee on the alphalist; the previous
 build left this manual, and final pay either double-paid days or skipped
 the employee.
 
-Since spec T8 the true-up never takes net pay below zero: what the pay
-can't cover is paid by the employer (RR 2-98 §2.79(B)(5)(b) Step 4), stored
+Since spec T8 the true-up never takes net pay below zero, and (owner,
+2026-10-25) it comes right after the contributions and union dues, before
+loans and the other deductions: what the pay left after those can't cover
+is paid by the employer (RR 2-98 §2.79(B)(5)(b) Step 4), stored
 as `tax_paid_by_employer`, counted as tax paid for the year (2316 and
 alphalist reconcile), remitted with that month's 1601-C, and recorded at
 finalize as a paused advance that payroll deducts only after the employee's

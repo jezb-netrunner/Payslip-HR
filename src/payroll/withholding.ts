@@ -301,11 +301,13 @@ export function withholdingFactOf(p: WithholdingPayslipRow): WithholdingYtdFact 
   return { ...common, regular, supplementary: round2(Math.max(0, Number(p.taxable_income) - regular)) }
 }
 
-// Basis: RR 2-98 §2.79(B)(5)(b) Steps 1–4, as amended by RR 11-2018 §7. Step 4: the employer "shall be liable to pay the amount of tax which cannot be withheld"; the advance is "a matter of settlement between the employee and employer".
+// Basis: RR 2-98 §2.79(B)(5)(b) Steps 1–4, as amended by RR 11-2018 §7. Step 4: the employer "shall be liable to pay the amount of tax which cannot be withheld"; the advance is "a matter of settlement between the employee and employer". Owner 2026-10-25: the tax before loans.
 /**
  * The year-end adjustment's withholding against the pay that carries it: a
- * shortfall is withheld only up to the net pay available (net pay never
- * goes below 0) and the employer pays the rest; a refund is paid in full.
+ * shortfall is withheld up to the pay left after the compulsory
+ * contributions and union dues (`available`) — before loans, cash advances
+ * and other deductions — and the employer pays only what is more than
+ * that; a refund is paid in full.
  */
 export function capYearEndWithholding(withholding: number, available: number): { withheld: number; paidByEmployer: number } {
   const due = round2(withholding)

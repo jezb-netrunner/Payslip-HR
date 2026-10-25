@@ -1175,9 +1175,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       params.annualization.prior,
       params.annualization.peraCredit ?? 0,
     )
-    // what the pay can give after contributions and the other deductions
-    // (cash advances come after tax)
-    const available = grossPay - deductions.reduce((s, l) => s + l.amount, 0) - otherLines.reduce((s, l) => s + l.amount, 0)
+    // the year-end tax comes right after the compulsory contributions and
+    // union dues, before loans and the other deductions (owner 2026-10-25)
+    const available = grossPay - deductions.reduce((s, l) => s + l.amount, 0) - unionDues
     const capped = capYearEndWithholding(withholding, available)
     withholdingTax = capped.withheld
     taxPaidByEmployer = capped.paidByEmployer
@@ -1194,8 +1194,29 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     if (w.note) notes.push(w.note)
     if (w.warning) warnings.push(w.warning)
   }
-  if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
-  deductions.push(...otherLines)
+  if (whtMethod === 'annualized') {
+    // the last pay of the year: union dues with the contributions, then the
+    // tax, then loans and the other deductions from what is left
+    const union = otherLines.filter(isUnionDues)
+    deductions.push(...union, ...(withholdingTax !== 0 ? [{ code: 'wht', label: whtLabel, amount: withholdingTax }] : []))
+    let leftCents = Math.round((grossPay - deductions.reduce((s, l) => s + l.amount, 0)) * 100)
+    for (const l of otherLines.filter((x) => !isUnionDues(x))) {
+      const dueCents = Math.round(l.amount * 100)
+      const takeCents = Math.min(dueCents, Math.max(0, leftCents))
+      leftCents -= takeCents
+      if (takeCents > 0) deductions.push({ ...l, amount: takeCents / 100 })
+      if (takeCents < dueCents) {
+        const short = (dueCents - takeCents) / 100
+        otherDeductionsTotal = round2(otherDeductionsTotal - short)
+        warnings.push(
+          `${l.label}: ₱${plainAmount(short)} of this payroll's deduction could not be taken: the year-end tax comes first (RR 2-98 Sec. 2.79(B)(5)(b) Step 4) and the pay doesn't cover it. A loan's balance stays owed for later payrolls; collect any other amount outside payroll.`,
+        )
+      }
+    }
+  } else {
+    if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
+    deductions.push(...otherLines)
+  }
 
   // ---- cash advances: repaid from what is left, never past zero net pay ----
   // They don't touch taxable pay; an installment net pay can't cover stays
@@ -1471,9 +1492,12 @@ function newHireWarning(h: { hireDate: string; year: number }): string {
   return `Hired ${shortDate(h.hireDate)}: record under BIR data whether they had another employer earlier in ${h.year} (the figures on their BIR Form 2316). Until then, withholding and the year-end adjustment treat this as their only employer this year.`
 }
 
+/** A union dues deduction: excluded from taxable pay, and deducted with the contributions. */
+const isUnionDues = (l: PayLine) => l.code.endsWith(':union_dues')
+
 /** The payslip note when the pay can't cover the year-end shortfall (spec T8). */
 function yearEndShortfallNote(shortfall: number, withheld: number, paidByEmployer: number): string {
-  return `This pay can cover only ₱${withheld.toLocaleString()} of the year's ₱${round2(shortfall).toLocaleString()} tax shortfall (net pay can't go below zero): the employer pays the remaining ₱${paidByEmployer.toLocaleString()} with the month's 1601-C. It is recorded as an advance to the employee when this payroll is finalized, to settle between employee and employer, and is never withheld as tax from later pay.`
+  return `This pay can cover only ₱${withheld.toLocaleString()} of the year's ₱${round2(shortfall).toLocaleString()} tax shortfall after the contributions and union dues (net pay can't go below zero): the employer pays the remaining ₱${paidByEmployer.toLocaleString()} with the month's 1601-C. It is recorded as an advance to the employee when this payroll is finalized, to settle between employee and employer, and is never withheld as tax from later pay.`
 }
 
 /** 1234.5 -> "1,234.50": payslip lines print in PDFs, whose fonts have no peso sign. */

@@ -216,10 +216,13 @@ below was made and is easy to change.
 
 
 **T8 (year-end adjustment)**
-- "Net pay available" is what the pay leaves after contributions and the
-  other deductions (loans, union dues, one-time deductions); cash advances
-  come after the tax, so they get nothing when the tax takes all of it.
-  *Question: should the tax come before loan installments instead?*
+- Owner's answer (2026-10-25, replaces "up to the net pay available"):
+  the last pay of the year deducts (1) the compulsory contributions and
+  union dues, (2) the YEA tax, (3) loans, cash advances and other
+  deductions, each from what is left (a loan's balance stays owed for the
+  part not taken). The employer pays only the part of the tax that is more
+  than the pay left after (1) (RR 2-98 §2.79(B)(5)(b) Step 4, as amended by
+  RR 11-2018 §7). Payrolls that don't annualize keep their order.
 - The employer-paid part counts as tax withheld for the year: in the 2316
   and alphalist it is part of the December (or final-pay month) withholding,
   with a separate "of which paid by the employer" line on the 2316 figures,
@@ -230,8 +233,9 @@ below was made and is easy to change.
   deducts it until an admin records the date the employee signed the
   authorization to deduct and resumes it (Labor Code Art. 113). It can't
   be deleted or have its amount changed (reopening the payroll removes it,
-  unless part of it was repaid). *Question: should forgiving it be
-  possible (it would then be extra compensation)?*
+  unless part of it was repaid). Owner's answer (2026-10-25): no "forgive":
+  the employee repays it. PENDING: the tax treatment of a forgiven advance
+  (RR 3-98 not read yet).
 - Refunds stay part of the annualizing payslip (paid with it, so always by
   January 25). The 1601-C page shows per month the tax withheld, the
   employer-paid tax, the refunds recovered and what is left to remit;

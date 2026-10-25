@@ -169,8 +169,10 @@ The app captures everything the annual information return needs:
   across the tax year (a bonus beyond what is left of it is taxed with the
   payroll that pays it), and an **annualizing run** (the last payroll paid
   in December, a payroll that includes an employee's separation, or final
-  pay) trues up the year's tax. It never takes net pay below zero: what the
-  pay can't cover is paid by the employer, shown on the payslip, remitted
+  pay) trues up the year's tax. On that pay the tax comes right after the
+  contributions and union dues, before loans and other deductions, and it
+  never takes net pay below zero: what the pay can't cover is paid by the
+  employer, shown on the payslip, remitted
   with that month's 1601-C and recorded as a paused advance to the employee
   (deducted from pay only after the employee signs an authorization). An
   employee who leaves gets their 2316 figures from the finalized run

@@ -39,10 +39,11 @@ describe('T8 flows: year-end adjustment', () => {
   it('Y1: the December shortfall past net pay is paid by the employer, recorded as a paused advance, and never withheld later', async () => {
     const ent = addEntity({ default_pay_frequency: 'monthly' })
     const emp = addEmployee(ent, { pay_frequency: 'monthly', monthly_rate: 20000 })
-    paidEarlier(ent, emp, 481700, 25000)
+    paidEarlier(ent, emp, 490000, 25000)
     addAttendance(emp, '2026-12-01', '2027-01-31')
+    // union dues come before the year-end tax with the contributions (owner 2026-10-25): 10,000 is left
     db.t.recurring_deductions.push({
-      id: newId(), employee_id: emp.id, label: 'Company loan', category: 'company_loan', amount_per_period: 8300,
+      id: newId(), employee_id: emp.id, label: 'Union dues', category: 'union_dues', amount_per_period: 8300,
       total_amount: null, balance: null, start_date: null, end_date: null, active: true,
     })
     const dec = await run(ent, { period_start: '2026-12-01', period_end: '2026-12-31', pay_date: '2026-12-22', annualize: true })

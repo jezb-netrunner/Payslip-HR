@@ -51,16 +51,33 @@ const december = (over: Partial<PayrollEmployeeInput>, extra: Extra = {}) =>
     ...extra,
   })
 
+// Owner 2026-10-25 (replaces "up to the net pay available"): the last pay
+// of the year deducts (1) compulsory contributions and union dues, (2) the
+// YEA tax, (3) loans, cash advances and other deductions; the employer pays
+// only the part of the tax that is more than the pay left after (1).
+const unionDues = { label: 'Union dues', category: 'union_dues', amount: 8300 }
+const ytdUnion: AnnualPayslipFact[] = [{ ...ytd[0], earnings: [{ amount: 490000, bir: 'basic', taxable: true }] }]
+
 describe('T8 year-end shortfall', () => {
-  it('Y1: tax 42,500 on 500,000, 25,000 withheld: of the 17,500 shortfall the 10,000 net pay is withheld, the employer pays 7,500', () => {
-    const s = december({ extraDeductions: [loan] })
-    // contributions 1,700 (SSS 1,000, PhilHealth 500, Pag-IBIG 200): 18,300 taxable this month
+  it('Y1: tax 42,500 on 500,000, 25,000 withheld: of the 17,500 shortfall the 10,000 pay left is withheld, the employer pays 7,500', () => {
+    // contributions 1,700 and union dues 8,300 come first: 10,000 left (and taxable)
+    const s = december({ extraDeductions: [unionDues] }, { annualization: { payMonth: '2026-12-01', ytd: ytdUnion } })
     expect(s.sssEe + s.philhealthEe + s.pagibigEe).toBe(1700)
     expect(s.withholdingTax).toBe(10000)
     expect(s.taxPaidByEmployer).toBe(7500)
     expect(s.netPay).toBe(0)
     expect(s.whtMethod).toBe('annualized')
     expect(s.trace.notes.join(' ')).toMatch(/employer pays the remaining ₱7,500/)
+  })
+
+  it('the tax comes before loans: the loan gets what is left, the rest stays owed', () => {
+    const s = december({ extraDeductions: [{ ...loan, id: 'loan-1' }] })
+    expect(s.withholdingTax).toBe(17500)
+    expect(s.taxPaidByEmployer).toBe(0)
+    expect(s.deductions.find((l) => l.meta === 'loan-1')?.amount).toBe(800)
+    expect(s.otherDeductionsTotal).toBe(800)
+    expect(s.netPay).toBe(0)
+    expect(s.trace.warnings.join(' ')).toMatch(/Company loan: ₱7,500.00 of this payroll's deduction could not be taken: the year-end tax comes first/)
   })
 
   it('the pay covers the shortfall: all of it is withheld', () => {
@@ -70,18 +87,24 @@ describe('T8 year-end shortfall', () => {
     expect(s.netPay).toBe(800)
   })
 
-  it('no net pay at all: the employer pays the whole shortfall, net pay stays 0', () => {
-    const s = december({ extraDeductions: [{ ...loan, amount: 18300 }] })
-    expect(s.withholdingTax).toBe(0)
-    expect(s.taxPaidByEmployer).toBe(17500)
+  it('the shortfall is more than the pay: the employer pays the rest, the loan gets nothing, net pay stays 0', () => {
+    const s = december({ extraDeductions: [loan] }, { annualization: { payMonth: '2026-12-01', ytd: [{ ...ytd[0], withholdingTax: 0 }] } })
+    expect(s.withholdingTax).toBe(18300)
+    expect(s.taxPaidByEmployer).toBe(24200)
+    expect(s.deductions.some((l) => l.code === 'other:company_loan')).toBe(false)
     expect(s.netPay).toBe(0)
   })
 
-  it('a cash advance is repaid only from what the tax leaves', () => {
+  it('a cash advance is repaid only from what the tax and the loans leave', () => {
     const s = december({ extraDeductions: [loan, { label: 'Cash advance', category: 'cash_advance', amount: 500, upToNet: true, balance: 500 }] })
-    expect(s.withholdingTax).toBe(10000)
+    expect(s.withholdingTax).toBe(17500)
     expect(s.deductions.some((l) => l.code === 'other:cash_advance')).toBe(false)
     expect(s.trace.warnings.join(' ')).toMatch(/Cash advance: ₱500.00 of this payroll's installment could not be deducted/)
+  })
+
+  it('a payroll that does not annualize keeps its order: loans before the tax', () => {
+    const s = december({ extraDeductions: [loan] }, { annualization: undefined })
+    expect(s.deductions.find((l) => l.code === 'other:company_loan')?.amount).toBe(8300)
   })
 
   it('a refund is paid in full (never capped)', () => {
@@ -104,7 +127,7 @@ describe('T8 year-end shortfall', () => {
     expect(s.netPay).toBe(0)
   })
 
-  it('capYearEndWithholding: the shortfall up to what is available, never below 0', () => {
+  it('capYearEndWithholding: the shortfall up to the pay left after contributions and union dues, never below 0', () => {
     expect(capYearEndWithholding(17500, 10000)).toEqual({ withheld: 10000, paidByEmployer: 7500 })
     expect(capYearEndWithholding(17500, 20000)).toEqual({ withheld: 17500, paidByEmployer: 0 })
     expect(capYearEndWithholding(17500, -300)).toEqual({ withheld: 0, paidByEmployer: 17500 })
