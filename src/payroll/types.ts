@@ -295,8 +295,10 @@ export interface PayCode {
   sss_include_pending: boolean
   /** the Christmas bonus: out of the SSS base */
   is_christmas_bonus: boolean
-  /** transportation, board or lodging the employee liquidates: not compensation */
+  /** a business expense the employee paid and liquidates with receipts: not compensation */
   subject_to_liquidation: boolean
+  /** a fringe benefit when given to a managerial or supervisory employee (fringe benefit tax, not withheld on) */
+  fringe_benefit: boolean
   sort_order: number
   active: boolean
 }
@@ -336,6 +338,8 @@ export interface PayrollEmployeeInput {
   isMinimumWageEarner: boolean
   /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
   apprentice?: boolean
+  /** Managerial or supervisory staff: their fringe benefits are subject to the fringe benefit tax, not withheld on. */
+  managerial?: boolean
   /**
    * The national government pays the PhilHealth employee share for this
    * period: employed PWDs (RA 11228) and solo parents (RA 11861, PhilHealth
@@ -457,6 +461,8 @@ export interface PayLine {
   incomeClass?: IncomeClass
   /** Leave cash conversion: the days this line pays. */
   days?: number
+  /** A fringe benefit to a managerial or supervisory employee: for FBT review, not withheld on, not compensation. */
+  fbt?: boolean
 }
 
 export interface SssComputation {

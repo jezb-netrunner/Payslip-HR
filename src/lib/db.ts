@@ -19,6 +19,9 @@ import type { EfpsGroup, FilingMode, ObligationKey } from '../payroll/dueDates'
 
 export type Role = 'company_admin' | 'entity_admin' | 'employee'
 
+/** Rank and file, or managerial/supervisory: a managerial or supervisory employee's fringe benefits are subject to the fringe benefit tax (NIRC Sec. 33). */
+export type JobLevel = 'rank_and_file' | 'managerial_supervisory'
+
 /** Who may be exempted from the maternity salary differential (RA 11210 Sec. 5(c), with DOLE approval each year). */
 export type MaternityExemptionCategory = 'distressed' | 'small_retail_service' | 'micro_business' | 'equal_or_better'
 
@@ -168,6 +171,8 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
+  /** rank and file, or managerial/supervisory (fringe benefits subject to the fringe benefit tax) */
+  job_level: JobLevel
   /** a minimum wage earner's hazard pay is exempt only with these (spec T5) */
   hazard_criteria_met: boolean
   hazard_dole_cert_ref: string | null
@@ -389,6 +394,8 @@ export interface PayslipLine {
   incomeClass?: IncomeClass
   /** leave cash conversion: the days the line pays */
   days?: number
+  /** a fringe benefit to a managerial or supervisory employee: for FBT review, not withheld on */
+  fbt?: boolean
 }
 
 export interface Payslip {

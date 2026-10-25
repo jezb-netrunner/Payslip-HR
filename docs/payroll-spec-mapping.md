@@ -130,12 +130,19 @@ questions at the end. Where the spec or the code left a choice, the choice
 below was made and is easy to change.
 
 **T3 (SSS base)**
-- New codes: CHRISTMAS_BONUS (one-time only), LIQUIDATED_ALLOWANCE (a
-  liquidated transportation, board or lodging allowance or reimbursement)
-  and THIRTEENTH_MONTH (the 13th month run's own code, so P2 has a setting
-  for it). LIQUIDATED_ALLOWANCE is also treated as not taxable, as a
-  reimbursement rather than compensation; the spec only says it is out of
-  the SSS base. *Question: confirm the tax treatment.*
+- New codes: CHRISTMAS_BONUS (one-time only), LIQUIDATED_ALLOWANCE and
+  THIRTEENTH_MONTH (the 13th month run's own code, so P2 has a setting for
+  it). Owner's answer (2026-10-25): LIQUIDATED_ALLOWANCE ("Business expense
+  reimbursement (liquidated)") is non-taxable only when it repays an
+  expense the employee paid for the employer's business (travel,
+  representation), liquidated with receipts. The employee's own board and
+  lodging is BOARD_LODGING: taxable pay (R when paid each period) for
+  rank-and-file staff; for managerial or supervisory staff (the employee's
+  new job level) a fringe benefit — on the payslip, not withheld on, left
+  out of the 2316 compensation, and flagged for the fringe benefit tax
+  review (NIRC §32(A)(1); §33(A), (B)(1), (C)(3)). PENDING: the exact
+  conditions in RR 2-98 §2.78.1(A) and RR 3-98 §2.33. BOARD_LODGING is in
+  the SSS base (taxable pay; not part of the question).
 - The P2/P3 settings apply to all clients (the codes are shared); only
   company admins change them, on the Statutory Tables page, and a change
   marks every client's draft payrolls for recomputing.

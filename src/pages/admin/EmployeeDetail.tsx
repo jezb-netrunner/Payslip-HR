@@ -53,6 +53,7 @@ import type {
   EmployeeAllowance,
   EmployeeTaxYear,
   EmploymentStatus,
+  JobLevel,
   Entity,
   Holiday,
   PaymentMethod,
@@ -431,6 +432,7 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
           separation_reason: f.separation_reason || null,
           separation_remarks: f.separation_remarks || null,
           employment_status: f.employment_status,
+          job_level: f.job_level ?? 'rank_and_file',
           position: f.position,
           department: f.department,
           emergency_contact_name: f.emergency_contact_name || null,
@@ -511,6 +513,15 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
             </Field>
             <Field label="Position"><Input value={f.position} onChange={(e) => set('position', e.target.value)} /></Field>
             <Field label="Department"><Input value={f.department} onChange={(e) => set('department', e.target.value)} /></Field>
+            <Field
+              label="Job level"
+              hint="A managerial or supervisory employee's fringe benefits (own board and lodging) fall under the fringe benefit tax, not withholding"
+            >
+              <Select value={f.job_level ?? 'rank_and_file'} onChange={(e) => set('job_level', e.target.value as JobLevel)}>
+                <option value="rank_and_file">Rank and file</option>
+                <option value="managerial_supervisory">Managerial or supervisory</option>
+              </Select>
+            </Field>
             <Field label="Date started"><Input type="date" value={f.hire_date} onChange={(e) => set('hire_date', e.target.value)} /></Field>
             <Field label="Regularization date"><Input type="date" value={f.regularization_date ?? ''} onChange={(e) => set('regularization_date', e.target.value)} /></Field>
           </div>

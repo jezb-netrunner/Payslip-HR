@@ -307,6 +307,17 @@ export function sssCompensation(lines: readonly Pick<PayLine, 'amount' | 'bir' |
 
 const NO_SSS: SssComputation = { msc: 0, ee: 0, er: 0, ecEr: 0, mpfEe: 0, mpfEr: 0 }
 
+// Basis: NIRC §32(A)(1); §33(A), (B)(1), (C)(3) (owner, 2026-10-25). PENDING: the exact conditions in RR 2-98 §2.78.1(A) and RR 3-98 §2.33 (not read yet).
+/**
+ * A fringe benefit (the employee's own board and lodging) given to a
+ * managerial or supervisory employee is subject to the fringe benefit tax:
+ * not compensation, not withheld on. To rank-and-file staff it is taxable
+ * pay like any other.
+ */
+export function isFringeBenefit(pc: PayCode, managerial: boolean | undefined): boolean {
+  return !!pc.fringe_benefit && !!managerial
+}
+
 // Basis: RA 9679 §4(b) (compensation means basic monthly salary plus mandated COLA) and §7 (the HDMF Board sets the ceiling). Approved Jul 21, 2009. HDMF Circular 460 was not read.
 /**
  * Pag-IBIG's monthly compensation from the components the settings include
@@ -885,6 +896,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
   }
 
+  // fringe benefits of a managerial or supervisory employee: on the
+  // payslip, not withheld on, flagged for the fringe benefit tax review
+  const fringe: { amount: number; label: string }[] = []
+  const earnFringe = (code: string, label: string, amount: number, pc: PayCode, extra: Partial<PayLine> = {}) => {
+    earnings.push({ code, label: `${label} (fringe benefit)`, amount, bir: pc.bir_bucket, taxable: false, fbt: true, payCode: pc.code, sss: pc.sss_include, ...extra })
+    fringe.push({ amount, label: pc.label })
+  }
+
   for (const a of extrasOnly ? [] : employee.allowances) {
     let amt: number
     let suffix = ''
@@ -902,6 +921,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       earnDeMinimis('allowance', `${a.label}${suffix}`, amt, pc, { payCode: pc.code, sss: pc.sss_include })
       continue
     }
+    if (isFringeBenefit(pc, employee.managerial)) {
+      earnFringe('allowance', `${a.label}${suffix}`, amt, pc)
+      continue
+    }
     const taxable = lineTaxable(pc.bir_bucket)
     earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, pc.bir_bucket, { payCode: pc.code, sss: pc.sss_include }, lineIncomeClass(pc, 'allowance'))
   }
@@ -911,6 +934,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     const pc = payCodeOf(e.payCode ?? payCodeForEarningCategory(e.category, e.benefit), codes)
     if (pc.bir_bucket === 'de_minimis') {
       earnDeMinimis('adjustment', e.label, amt, pc, { meta: e.id, payCode: pc.code, sss: pc.sss_include }, e.days)
+      continue
+    }
+    if (isFringeBenefit(pc, employee.managerial)) {
+      earnFringe('adjustment', e.label, amt, pc, { meta: e.id })
       continue
     }
     // pay besides basic pay that counts toward the 13th month (the maternity
@@ -924,6 +951,13 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   }
 
   warnings.push(...deMinimisNotes)
+  if (fringe.length > 0) {
+    const total = round2(fringe.reduce((s, f) => s + f.amount, 0))
+    const what = [...new Set(fringe.map((f) => f.label.toLowerCase()))].join(', ')
+    warnings.push(
+      `For FBT review: ₱${total.toLocaleString()} of ${what} paid to this managerial or supervisory employee is a fringe benefit (NIRC Sec. 33): no withholding tax on it, and it is not compensation on the 2316. Review it for the fringe benefit tax the employer pays (BIR Form 1603Q). Pending legal confirmation: the exact conditions in RR 2-98 Sec. 2.78.1(A) and RR 3-98 Sec. 2.33.`,
+    )
+  }
 
   const grossPay = round2(earnings.reduce((s, l) => s + l.amount, 0))
 

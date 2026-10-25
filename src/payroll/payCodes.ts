@@ -29,6 +29,7 @@ interface CodeSpec {
   benefit?: MaternityBenefit
   is_christmas_bonus?: boolean
   subject_to_liquidation?: boolean
+  fringe_benefit?: boolean
 }
 
 const code = (sort_order: number, c: string, label: string, x: CodeSpec): PayCode => ({
@@ -49,6 +50,7 @@ const code = (sort_order: number, c: string, label: string, x: CodeSpec): PayCod
   sss_include_pending: x.sss === '?',
   is_christmas_bonus: x.is_christmas_bonus ?? false,
   subject_to_liquidation: x.subject_to_liquidation ?? false,
+  fringe_benefit: x.fringe_benefit ?? false,
   sort_order,
   active: x.active ?? true,
 })
@@ -74,9 +76,12 @@ export const PAY_CODES: readonly PayCode[] = [
     description: 'Fixed housing, board or lodging allowance, not liquidated. Regular compensation when paid every period.' }),
   code(90, 'FIXED_ALLOWANCE', 'Other fixed allowance', { use: 'A', bir_bucket: 'other_taxable', income_class: 'regular', tax_treatment: 'taxable', sss: true,
     description: 'Any other taxable allowance paid every period.' }),
-  code(95, 'LIQUIDATED_ALLOWANCE', 'Transportation, board or lodging (liquidated)', { use: 'AO', bir_bucket: 'other_non_taxable', income_class: null, tax_treatment: 'exempt', sss: false,
+  code(95, 'LIQUIDATED_ALLOWANCE', 'Business expense reimbursement (liquidated)', { use: 'AO', bir_bucket: 'other_non_taxable', income_class: null, tax_treatment: 'exempt', sss: false,
     subject_to_liquidation: true,
-    description: 'An allowance or reimbursement the employee liquidates with receipts. Not compensation, so not taxed and not in the SSS base.' }),
+    description: "Repays an expense the employee paid for the employer's business (travel, representation), liquidated with receipts. Not compensation, so not taxed and not in the SSS base. Not for the employee's own board and lodging (use Board and lodging)." }),
+  code(96, 'BOARD_LODGING', "Board and lodging (employee's own)", { use: 'AO', bir_bucket: 'other_taxable', income_class: 'regular', tax_treatment: 'taxable', sss: true,
+    fringe_benefit: true,
+    description: "The employee's own board and lodging. Taxable pay for rank-and-file staff. For managerial or supervisory staff it is a fringe benefit: flagged for the fringe benefit tax review and not withheld on (exact conditions pending: RR 2-98 Sec. 2.78.1(A), RR 3-98 Sec. 2.33)." }),
   code(100, 'HAZARD', 'Hazard pay', { use: 'AO', bir_bucket: 'hazard', income_class: 'supplementary', tax_treatment: 'mwe_exempt', sss: true,
     description: 'Hazard pay. Supplementary compensation. Exempt for minimum wage earners.' }),
   code(110, 'COMMISSION', 'Commission', { use: 'O', bir_bucket: 'other_taxable', income_class: 'supplementary', tax_treatment: 'taxable', sss: true,

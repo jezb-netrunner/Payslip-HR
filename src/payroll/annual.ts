@@ -23,7 +23,7 @@ export interface AnnualPayslipFact {
   payMonth: string
   isMwe: boolean
   /** Lines from spec T5 on also say R or S (incomeClass) when taxable. */
-  earnings: { amount: number; bir?: BirBucket; taxable?: boolean; incomeClass?: IncomeClass }[]
+  earnings: { amount: number; bir?: BirBucket; taxable?: boolean; incomeClass?: IncomeClass; fbt?: boolean }[]
   /** SSS (incl. MPF) + PhilHealth + Pag-IBIG employee shares. */
   contributionsEe: number
   unionDues: number
@@ -162,6 +162,9 @@ export function summarizeYear(
 
   for (const f of facts) {
     for (const l of f.earnings) {
+      // a fringe benefit to a managerial or supervisory employee is not
+      // compensation: the fringe benefit tax covers it
+      if (l.fbt) continue
       gross += l.amount
       const bucket: BirBucket = l.bir ?? (l.taxable ? 'other_taxable' : 'other_non_taxable')
       // an MWE's line of the exempt package is exempt unless the payslip

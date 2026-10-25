@@ -415,7 +415,12 @@ change, done in spec order, one commit each.
 (`employmentPeriods`: a previous employer's from–to plus this employer's
 periods, a period both jobs fall in counted once, the gap between jobs
 not), `PriorWithholding.employedTo`; without both dates it still counts
-straight through (warning names the missing date).
+straight through (warning names the missing date). T3 —
+LIQUIDATED_ALLOWANCE relabelled to business expenses only; BOARD_LODGING
+(`pay_codes.fringe_benefit`) is taxable R for rank-and-file and, for
+`employees.job_level = 'managerial_supervisory'`, an `fbt` line (not
+withheld on, skipped by `summarizeYear`, payslip warning "For FBT
+review"); migration `20261025200000_board_and_lodging`, SQL suite 28.
 
 ### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
 

@@ -137,7 +137,7 @@ export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
   return {
     payMonth: p.pay_date ? `${p.pay_date.slice(0, 7)}-01` : (p.period_month ?? ''),
     isMwe: p.is_minimum_wage_earner,
-    earnings: p.earnings.map((l) => ({ amount: Number(l.amount), bir: l.bir, taxable: l.taxable, incomeClass: l.incomeClass })),
+    earnings: p.earnings.map((l) => ({ amount: Number(l.amount), bir: l.bir, taxable: l.taxable, incomeClass: l.incomeClass, ...(l.fbt ? { fbt: true } : {}) })),
     contributionsEe: Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee),
     unionDues: Number(p.union_dues),
     withholdingTax: Number(p.withholding_tax),
@@ -684,6 +684,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         isMinimumWageEarner: mwe.isMwe,
         hazardExempt,
         apprentice: emp.employment_status === 'apprentice',
+        managerial: emp.job_level === 'managerial_supervisory',
         // the NG share by payroll month (contributions follow the payroll month)
         philhealthEeWaiver: philhealthWaiverFor(waiverOf(emp), run.period_month),
         schedule: emp.work_schedule,

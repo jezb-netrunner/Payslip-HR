@@ -427,6 +427,7 @@ export default function Statutory() {
                     <p className="text-xs text-slate-400">
                       {c.code}
                       {c.de_minimis_item && ` · de minimis item (${c.de_minimis_item})`}
+                      {c.fringe_benefit && ' · fringe benefit for managerial or supervisory staff (FBT, not withheld)'}
                       {!c.active && ' · retired'}
                     </p>
                   </Td>
