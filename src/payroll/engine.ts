@@ -33,6 +33,7 @@ import {
   type DeMinimisItem,
   type IncomeClass,
   type LeavePolicy,
+  type PagibigData,
   type PayCode,
   type PayLine,
   type PayrollEmployeeInput,
@@ -305,6 +306,31 @@ export function sssCompensation(lines: readonly Pick<PayLine, 'amount' | 'bir' |
 }
 
 const NO_SSS: SssComputation = { msc: 0, ee: 0, er: 0, ecEr: 0, mpfEe: 0, mpfEr: 0 }
+
+// Basis: RA 9679 §4(b) (compensation means basic monthly salary plus mandated COLA) and §7 (the HDMF Board sets the ceiling). Approved Jul 21, 2009. HDMF Circular 460 was not read.
+/**
+ * Pag-IBIG's monthly compensation from the components the settings include
+ * (spec P5: basic pay, mandated COLA, other regular allowances), and the
+ * table with the ceiling in force (the setting, else the statutory table's
+ * maximum fund salary).
+ */
+export function pagibigCompensation(
+  monthly: { basic: number; cola: number; otherAllowances: number },
+  rules: PayrollRules,
+  table: PagibigData,
+): { base: number; table: PagibigData; parts: string } {
+  const pick = rules.pagibigBase
+  const included = [
+    pick.basic && { name: 'basic salary', amount: monthly.basic },
+    pick.cola && { name: 'COLA', amount: monthly.cola },
+    pick.otherAllowances && { name: 'allowances', amount: monthly.otherAllowances },
+  ].filter((p): p is { name: string; amount: number } => !!p)
+  return {
+    base: round2(included.reduce((s, p) => s + p.amount, 0)),
+    table: rules.pagibigCeiling ? { ...table, max_fund_salary: rules.pagibigCeiling } : table,
+    parts: included.filter((p) => p.amount > 0).map((p) => p.name).join(' plus ') || 'nothing',
+  }
+}
 
 export function deriveRates(
   employee: PayrollEmployeeInput,
@@ -902,20 +928,23 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const grossPay = round2(earnings.reduce((s, l) => s + l.amount, 0))
 
   // ---- statutory deductions ----
-  // Pag-IBIG's monthly compensation is the basic salary plus allowances (up
-  // to the maximum fund salary); PhilHealth is on the basic salary
-  const allowancesMonthly = round2(
-    employee.allowances
-      .filter((a) => allowanceCode(a, codes).bir_bucket !== 'other_benefits')
-      .reduce(
-        (s, a) =>
-          s + (a.basis === 'monthly' ? a.amount : a.basis === 'per_period' ? a.amount * period.count : (a.amount * settings.workingDaysDivisor) / 12),
-        0,
-      ),
+  // Pag-IBIG's monthly compensation and ceiling are settings (spec P5);
+  // PhilHealth is on the basic salary
+  const monthlyOf = (a: AllowanceInput) =>
+    a.basis === 'monthly' ? a.amount : a.basis === 'per_period' ? a.amount * period.count : (a.amount * settings.workingDaysDivisor) / 12
+  const regularAllowances = employee.allowances.filter((a) => allowanceCode(a, codes).bir_bucket !== 'other_benefits')
+  const pagibig = pagibigCompensation(
+    {
+      basic: statutoryMonthlyBase,
+      cola: regularAllowances.filter((a) => allowanceCode(a, codes).bir_bucket === 'cola').reduce((s, a) => s + monthlyOf(a), 0),
+      otherAllowances: regularAllowances.filter((a) => allowanceCode(a, codes).bir_bucket !== 'cola').reduce((s, a) => s + monthlyOf(a), 0),
+    },
+    rules,
+    tables.pagibig,
   )
-  const stat = computeStatutory(statutoryMonthlyBase, settings, period, tables, round2(statutoryMonthlyBase + allowancesMonthly))
-  if (!extrasOnly && allowancesMonthly > 0 && statutoryMonthlyBase < tables.pagibig.max_fund_salary) {
-    notes.push(`Pag-IBIG on basic salary plus allowances: ₱${round2(statutoryMonthlyBase + allowancesMonthly).toLocaleString()} a month.`)
+  const stat = computeStatutory(statutoryMonthlyBase, settings, period, { ...tables, pagibig: pagibig.table }, pagibig.base)
+  if (!extrasOnly && pagibig.base !== statutoryMonthlyBase && Math.min(pagibig.base, statutoryMonthlyBase) < pagibig.table.max_fund_salary) {
+    notes.push(`Pag-IBIG on ${pagibig.parts}: ₱${pagibig.base.toLocaleString()} a month.`)
   }
   // the national government pays a PWD's or solo parent's PhilHealth
   // employee share (RA 11228; RA 11861, PhilHealth Circular 2026-0015)

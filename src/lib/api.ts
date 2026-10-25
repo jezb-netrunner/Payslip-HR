@@ -45,8 +45,16 @@ export async function getPayrollRules(): Promise<PayrollRules> {
   const { data, error } = await supabase.from('payroll_rules').select('*').maybeSingle()
   if (error) throw error
   const row = (data ?? {}) as Record<string, unknown>
+  const flag = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback)
+  const base = DEFAULT_PAYROLL_RULES.pagibigBase
   return {
     maternityContributions: (row.maternity_contributions as PayrollRules['maternityContributions']) ?? DEFAULT_PAYROLL_RULES.maternityContributions,
+    pagibigBase: {
+      basic: flag(row.pagibig_base_basic, base.basic),
+      cola: flag(row.pagibig_base_cola, base.cola),
+      otherAllowances: flag(row.pagibig_base_other_allowances, base.otherAllowances),
+    },
+    pagibigCeiling: row.pagibig_ceiling == null ? DEFAULT_PAYROLL_RULES.pagibigCeiling : Number(row.pagibig_ceiling),
   }
 }
 

@@ -321,6 +321,10 @@ export interface PayrollRules {
    * on a payroll whose scheduled days are all maternity leave.
    */
   maternityContributions: 'as_usual' | 'pause_full_leave'
+  /** P5: what Pag-IBIG's monthly compensation is made of. */
+  pagibigBase: { basic: boolean; cola: boolean; otherAllowances: boolean }
+  /** P5: the ceiling of Pag-IBIG's monthly compensation; null = the statutory table's maximum fund salary. */
+  pagibigCeiling: number | null
 }
 
 export interface PayrollEmployeeInput {

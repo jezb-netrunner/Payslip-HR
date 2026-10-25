@@ -263,6 +263,54 @@ export default function Statutory() {
                 </Select>
               </div>
             )}
+            {rules && (
+              <div className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,18rem)] sm:items-start">
+                <div>
+                  <p className="font-semibold text-slate-700">Pag-IBIG: monthly compensation and ceiling</p>
+                  <p className="text-xs text-slate-500">
+                    RA 9679 Sec. 4(b) and 7 (HDMF Circular 460 not yet read). Default: basic pay plus the regular allowances,
+                    up to the statutory table's maximum fund salary{pi ? ` (₱${pi.max_fund_salary.toLocaleString()})` : ''}. Only the
+                    compulsory employee share is excluded from taxable pay.
+                  </p>
+                  <div className="mt-1"><PendingBadge /></div>
+                </div>
+                <div className="space-y-2">
+                  {(
+                    [
+                      ['basic', 'pagibig_base_basic', 'Basic pay'],
+                      ['cola', 'pagibig_base_cola', 'Mandated COLA'],
+                      ['otherAllowances', 'pagibig_base_other_allowances', 'Other regular allowances'],
+                    ] as const
+                  ).map(([k, rule, label]) => (
+                    <label key={k} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-brand-700"
+                        checked={rules.pagibigBase[k]}
+                        disabled={!isCompanyAdmin || savingCode !== ''}
+                        onChange={(e) => saveRule('P5', 'The Pag-IBIG setting', () => setPayrollRule(rule, String(e.target.checked)))}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                  <Field label="Ceiling (PHP a month)" hint="Blank = the statutory table's">
+                    <Input
+                      key={String(rules.pagibigCeiling)}
+                      type="number"
+                      min={1}
+                      step="0.01"
+                      defaultValue={rules.pagibigCeiling ?? ''}
+                      placeholder={pi ? String(pi.max_fund_salary) : ''}
+                      disabled={!isCompanyAdmin || savingCode !== ''}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim()
+                        if (v !== String(rules.pagibigCeiling ?? '')) saveRule('P5', 'The Pag-IBIG ceiling', () => setPayrollRule('pagibig_ceiling', v))
+                      }}
+                    />
+                  </Field>
+                </div>
+              </div>
+            )}
             <p className="py-3 text-xs text-slate-500">
               SSS on 13th month pay, de minimis benefits, other non-taxable pay and the advanced SSS maternity benefit:
               the SSS column of <b>Pay codes</b> below.
@@ -278,7 +326,7 @@ export default function Statutory() {
             {sss && ph && pi && wht && salary > 0 && (() => {
               const s = computeSss(salary, sss)
               const p = computePhilHealth(salary, ph)
-              const g = computePagibig(salary, pi)
+              const g = computePagibig(salary, rules?.pagibigCeiling ? { ...pi, max_fund_salary: rules.pagibigCeiling } : pi)
               const monthlyEe = s.ee + s.mpfEe + p.ee + g.ee
               const tax = computeWithholdingTax(salary - monthlyEe, 'monthly', wht)
               return (
@@ -294,7 +342,7 @@ export default function Statutory() {
           </div>
           <p className="mt-3 text-xs text-slate-500">
             A month of basic pay only. Payroll takes SSS on the month's actual pay (overtime and allowances included,
-            settled on the month's last payroll) and Pag-IBIG on basic pay plus allowances.
+            settled on the month's last payroll) and Pag-IBIG on what the setting above includes (basic pay plus allowances by default).
           </p>
         </Card>
 

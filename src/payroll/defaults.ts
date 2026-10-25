@@ -140,4 +140,7 @@ export const DEFAULT_TABLES: StatutoryTables = {
 /** The PENDING rules' defaults: today's behavior (spec P4). */
 export const DEFAULT_PAYROLL_RULES: PayrollRules = {
   maternityContributions: 'as_usual',
+  // P5: today's rule — basic pay plus the regular allowances, up to the table's maximum fund salary
+  pagibigBase: { basic: true, cola: true, otherAllowances: true },
+  pagibigCeiling: null,
 }

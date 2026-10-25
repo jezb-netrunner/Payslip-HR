@@ -260,3 +260,15 @@ below was made and is easy to change.
   criteria (T5) is in the taxable hazard column, without them.
 - No DAT file (P7); 1601-C lines 15–19 and the quarterly hazard list are
   skipped (owner's decision); refunds already reduce the 1601-C (T8).
+
+**T11 (Pag-IBIG, P5)**
+- The settings are for every client (like P4), changed by company admins on
+  Statutory Tables. The ceiling left blank means the statutory table's
+  maximum fund salary (₱10,000 now), so a new table version still applies
+  unless a ceiling is typed in.
+- "Mandated COLA" is the allowances with the COLA pay code; "other regular
+  allowances" is every other allowance except those in the ₱90k bucket (de
+  minimis and liquidated allowances included, as before).
+- The app has no voluntary Pag-IBIG contribution, so only the computed
+  compulsory share is ever excluded from taxable pay; a voluntary amount
+  recorded as an ordinary deduction stays taxable.

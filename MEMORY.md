@@ -407,6 +407,20 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T11: Pag-IBIG settings, P5 (same branch)
+
+**Did:** `payroll_rules` gained `pagibig_base_basic`, `pagibig_base_cola`,
+`pagibig_base_other_allowances` (all true) and `pagibig_ceiling` (null =
+the statutory table's maximum fund salary, ₱10,000), set through
+`set_payroll_rule` (company admins; marks drafts stale). The engine's
+`pagibigCompensation` sums the included components (COLA = allowances with
+bucket cola, other = the remaining regular allowances, as before) and
+applies the ceiling; only the computed compulsory share is excluded from
+taxable pay (there is no voluntary Pag-IBIG amount in the app). Checkboxes
+and the ceiling with the Pending badge on Statutory Tables. Migration
+`20261025180000_pagibig_rules` (not live). Tests 502 → 506 plus SQL suite
+26 (seen failing first).
+
 ### 2026-10-25 — Spec T10: BIR exports (same branch)
 
 **Did:** `src/payroll/form2316.ts` builds the 2316 by the form's parts (I
@@ -553,7 +567,8 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5),
 `20261025140000 philhealth_ng_share` (T6), `20261025150000
 de_minimis_items` (T7), `20261025160000 year_end_adjustment` (T8) and
-`20261025170000 due_dates` (T9) are in the branch, NOT live** (apply in order after T2's, before the front end;
+`20261025170000 due_dates` (T9) and `20261025180000 pagibig_rules` (T11)
+are in the branch, NOT live** (apply in order after T2's, before the front end;
 T4's drops and re-adds a constraint and T6's drops columns, so they need
 the SQL editor).
 
