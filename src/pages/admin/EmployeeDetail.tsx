@@ -77,6 +77,7 @@ import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { payCodeHint, payCodeLabel, usePayCodes } from '../../lib/usePayCodes'
+import { EmployeeDocuments, PhilhealthWaiverPast } from './EmployeeDocuments'
 import { ScheduleTab } from './EmployeeSchedule'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
@@ -586,8 +587,10 @@ function PayTab({
     bank_name: employee.bank_name ?? '',
     bank_account_no: employee.bank_account_no ?? '',
     ph_waiver: employee.philhealth_ee_waiver ?? '',
-    ph_waiver_from: employee.philhealth_ee_waiver_from ?? '',
-    ph_waiver_until: employee.philhealth_ee_waiver_until ?? '',
+    // <input type="month">: YYYY-MM
+    ph_start: employee.philhealth_waiver_start_month?.slice(0, 7) ?? '',
+    ph_spic: employee.philhealth_spic_expiry ?? '',
+    ph_status: employee.philhealth_pwd_status ?? 'for_verification',
   })
   const [busy, setBusy] = useState(false)
   const [listBusy, setListBusy] = useState(false)
@@ -604,7 +607,7 @@ function PayTab({
       toast('error', 'Days-per-year factor must be between 1 and 366 (or blank for the client default).')
       return
     }
-    const waiverProblem = philhealthWaiverProblem(f.ph_waiver, f.ph_waiver_from, f.ph_waiver_until)
+    const waiverProblem = philhealthWaiverProblem(f.ph_waiver, f.ph_start, f.ph_spic)
     if (waiverProblem) {
       toast('error', waiverProblem)
       return
@@ -626,8 +629,9 @@ function PayTab({
           bank_name: f.bank_name || null,
           bank_account_no: f.bank_account_no || null,
           philhealth_ee_waiver: f.ph_waiver || null,
-          philhealth_ee_waiver_from: f.ph_waiver ? f.ph_waiver_from : null,
-          philhealth_ee_waiver_until: f.ph_waiver ? f.ph_waiver_until || null : null,
+          philhealth_waiver_start_month: f.ph_waiver ? `${f.ph_start}-01` : null,
+          philhealth_spic_expiry: f.ph_waiver === 'solo_parent' ? f.ph_spic : null,
+          philhealth_pwd_status: f.ph_waiver === 'pwd' ? f.ph_status : null,
         })
         .eq('id', employee.id)
       if (error) throw error
@@ -801,7 +805,7 @@ function PayTab({
         <div className="mt-4 space-y-3 rounded-lg bg-slate-50 p-3">
           <Field
             label="PhilHealth employee share"
-            hint="The national government pays it for an employed PWD (RA 11228) and, from Sep 26, 2026, a solo parent (RA 11861; PhilHealth Circular 2026-0015). The employer share is unchanged. Keep a copy of the PWD or Solo Parent ID."
+            hint="The national government pays it, month by month, for an employed PWD whose status PhilHealth confirmed (RA 11228; Circular 2026-0017) and for a solo parent in the months a valid SPIC fully covers (RA 11861; Circular 2026-0015). The employer share is unchanged."
           >
             <Select value={f.ph_waiver} onChange={(e) => setF({ ...f, ph_waiver: e.target.value as typeof f.ph_waiver })}>
               <option value="">Deducted from pay</option>
@@ -811,14 +815,28 @@ function PayTab({
           </Field>
           {f.ph_waiver && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="From">
-                <Input type="date" value={f.ph_waiver_from} onChange={(e) => setF({ ...f, ph_waiver_from: e.target.value })} />
+              <Field
+                label="From the month of"
+                hint={f.ph_waiver === 'pwd' ? 'The month you submitted the complete requirements' : "PhilHealth's tagging of the solo parent"}
+              >
+                <Input type="month" value={f.ph_start} onChange={(e) => setF({ ...f, ph_start: e.target.value })} />
               </Field>
-              <Field label="Until (optional)" hint="e.g. when the ID expires">
-                <Input type="date" value={f.ph_waiver_until} onChange={(e) => setF({ ...f, ph_waiver_until: e.target.value })} />
-              </Field>
+              {f.ph_waiver === 'solo_parent' ? (
+                <Field label="Solo parent ID (SPIC) valid until" hint="Payroll warns 30 days before it expires">
+                  <Input type="date" value={f.ph_spic} onChange={(e) => setF({ ...f, ph_spic: e.target.value })} />
+                </Field>
+              ) : (
+                <Field label="PhilHealth status" hint="Deducted as usual while for verification">
+                  <Select value={f.ph_status} onChange={(e) => setF({ ...f, ph_status: e.target.value as typeof f.ph_status })}>
+                    <option value="for_verification">For verification</option>
+                    <option value="confirmed">Confirmed</option>
+                  </Select>
+                </Field>
+              )}
             </div>
           )}
+          <PhilhealthWaiverPast employee={employee} />
+          {employee.philhealth_ee_waiver && <EmployeeDocuments employee={employee} />}
         </div>
         <Button className="mt-4" disabled={busy} onClick={savePay}>
           {busy ? 'Saving…' : 'Save pay details'}

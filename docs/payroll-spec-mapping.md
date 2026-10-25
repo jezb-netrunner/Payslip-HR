@@ -168,3 +168,16 @@ below was made and is easy to change.
   other taxable S pay (commission, other one-time pay, the MWE add-ons) now
   goes to the supplementary "Others" box instead of the regular one.
 
+**T6 (PhilHealth NG share)**
+- The waiver month is the payroll month (contributions follow it). A
+  month the SPIC covers only in part is no longer waived — for an existing
+  solo parent whose end date fell mid-month, that month's employee share is
+  now deducted (the spec's rule).
+- A solo parent without an SPIC expiry on file gets no NG share (payroll
+  warns), so the expiry is required on the form.
+- The "past periods" warning is on the employee's Pay tab (it lists the
+  finalized months that deducted the share while the NG share now covers
+  them), not repeated on every payslip.
+- The spec's five slots hold six files: the SPIC (or PWD ID) has a front and
+  a back slot. Files are private to the admins of the employee's client.
+

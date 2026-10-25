@@ -110,13 +110,12 @@ select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, e
   values ('30000000-0000-0000-0000-0000000016f1', '20000000-0000-0000-0000-0000000016f1', 'earning', 'Unknown', 100, 'other_non_taxable', 'paternity')$$, '%payroll_adjustments_benefit_check%');
 commit;
 
-\echo '--- 16.6 PhilHealth waiver: a kind and its start date go together'
-select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'pwd' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_ee_waiver_dates%');
-select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'senior', philhealth_ee_waiver_from = '2026-10-01' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_ee_waiver_check%');
-select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'pwd', philhealth_ee_waiver_from = '2026-10-01', philhealth_ee_waiver_until = '2026-09-30' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_ee_waiver_dates%');
-update employees set philhealth_ee_waiver = 'solo_parent', philhealth_ee_waiver_from = '2026-10-01', philhealth_ee_waiver_until = '2027-09-30'
+\echo '--- 16.6 PhilHealth waiver: a kind and its start month go together (by month since spec T6, suite 22)'
+select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'pwd' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_waiver%');
+select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'senior', philhealth_waiver_start_month = '2026-10-01' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_ee_waiver_check%');
+update employees set philhealth_ee_waiver = 'solo_parent', philhealth_waiver_start_month = '2026-10-01', philhealth_spic_expiry = '2027-09-30'
   where id = '20000000-0000-0000-0000-0000000016f1';
-update employees set philhealth_ee_waiver = null, philhealth_ee_waiver_from = null, philhealth_ee_waiver_until = null
+update employees set philhealth_ee_waiver = null, philhealth_waiver_start_month = null, philhealth_spic_expiry = null
   where id = '20000000-0000-0000-0000-0000000016f1';
 
 \echo '--- 16.7 a change in the days before a period with a regular holiday stales that draft'

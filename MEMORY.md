@@ -407,6 +407,24 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T6: PhilHealth NG share by month (same branch)
+
+**Did:** `employees.philhealth_waiver_start_month` (first of month),
+`philhealth_spic_expiry` (solo parent), `philhealth_pwd_status`
+(for_verification / confirmed) replace the from/until dates (dropped; the
+data converts as the owner decided — live had no waivers, checked
+read-only). `src/payroll/philhealthWaiver.ts`: the NG share applies to a
+payroll month from the start month, for a solo parent only when the SPIC
+covers the whole month, for a PWD only when confirmed; payslip warnings
+for an SPIC expiring within 30 days, an uncovered month, and a PWD still
+for verification. The employee's Pay tab lists finalized payrolls that
+deducted the share in months now waived, and holds the six document files
+(`employee_documents` + private bucket `employee-documents`, RLS by
+`can_manage_employee`). Migration `20261025140000_philhealth_ng_share`
+(not live; drops columns → SQL editor). Tests 439 → 451 plus SQL suite 22;
+suite 16.6 moved to the new columns. The session's worker restarted once:
+restart the local Postgres (CLAUDE.md command) after a restart.
+
 ### 2026-10-25 — Spec T5: MWE premium add-ons and hazard pay (same branch)
 
 **Did:** for MWEs the engine splits rest-day / special-day pay into the
@@ -460,8 +478,8 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 ## Current deployed state (update when it changes)
 
 **2026-10-25: `20261025110000 sss_pay_codes` (T3), `20261025120000
-maternity_rules` (T4) and `20261025130000 mwe_hazard_pay` (T5) are in the
-branch, NOT live** (apply in order after
+maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5) and
+`20261025140000 philhealth_ng_share` (T6) are in the branch, NOT live** (apply in order after
 T2's, before the front end; T4's drops and re-adds a constraint, so it
 needs the SQL editor).
 

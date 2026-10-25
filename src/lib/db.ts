@@ -132,10 +132,14 @@ export interface Employee {
   /** a minimum wage earner's hazard pay is exempt only with these (spec T5) */
   hazard_criteria_met: boolean
   hazard_dole_cert_ref: string | null
-  /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent) */
+  /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent), by month (spec T6) */
   philhealth_ee_waiver?: 'pwd' | 'solo_parent' | null
-  philhealth_ee_waiver_from?: string | null
-  philhealth_ee_waiver_until?: string | null
+  /** first month of the NG share (YYYY-MM-01) */
+  philhealth_waiver_start_month?: string | null
+  /** solo parent: the SPIC's expiry (only months it fully covers are waived) */
+  philhealth_spic_expiry?: string | null
+  /** PWD: PhilHealth's status (only "confirmed" is waived) */
+  philhealth_pwd_status?: 'for_verification' | 'confirmed' | null
   payment_method: PaymentMethod
   work_schedule: WorkSchedule
   bank_name: string | null

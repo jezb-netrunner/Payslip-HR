@@ -145,12 +145,16 @@ export const RUN_TYPE_LABELS: Record<string, string> = {
 export const SOLO_PARENT_PHILHEALTH_FROM = '2026-09-26'
 
 /** Why a PhilHealth employee-share waiver can't be saved ('' = fine). */
-export function philhealthWaiverProblem(kind: string, from: string, until: string): string {
+/**
+ * The NG share form (spec T6): the start month (YYYY-MM), and the solo
+ * parent's SPIC expiry. A PWD's status defaults to "for verification".
+ */
+export function philhealthWaiverProblem(kind: string, startMonth: string, spicExpiry: string): string {
   if (!kind) return ''
-  if (!from) return 'Enter the date the PhilHealth employee share stops being deducted.'
-  if (until && until < from) return 'The PhilHealth waiver ends before it starts.'
-  if (kind === 'solo_parent' && from < SOLO_PARENT_PHILHEALTH_FROM) {
+  if (!/^\d{4}-\d{2}$/.test(startMonth)) return 'Enter the month the government starts paying the PhilHealth employee share.'
+  if (kind === 'solo_parent' && `${startMonth}-01` < SOLO_PARENT_PHILHEALTH_FROM.slice(0, 7) + '-01') {
     return 'For solo parents the government pays the PhilHealth employee share from Sep 26, 2026 (PhilHealth Circular 2026-0015).'
   }
+  if (kind === 'solo_parent' && !spicExpiry) return "Enter the solo parent ID (SPIC)'s expiry date: only months it fully covers are waived."
   return ''
 }

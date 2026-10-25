@@ -25,6 +25,7 @@ import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
 import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet } from './engine'
 import { round2 } from './types'
+import { philhealthWaiverFor, philhealthWaiverWarnings, type PhilhealthWaiverRecord } from './philhealthWaiver'
 import { withholdingFactOf, type PriorWithholding } from './withholding'
 import type {
   BirBucket,
@@ -162,12 +163,14 @@ function separatedBy(e: Employee, run: PayrollRun): boolean {
   return !!e.separation_date && e.separation_date <= run.period_end
 }
 
-/** The PhilHealth employee-share waiver in force at the end of the run's period, if any. */
-function philhealthWaiverFor(e: Employee, run: PayrollRun): 'pwd' | 'solo_parent' | undefined {
-  const w = e.philhealth_ee_waiver
-  if (!w || !e.philhealth_ee_waiver_from || e.philhealth_ee_waiver_from > run.period_end) return undefined
-  if (e.philhealth_ee_waiver_until && e.philhealth_ee_waiver_until < run.period_end) return undefined
-  return w
+/** An employee's PhilHealth NG share record (spec T6). */
+function waiverOf(e: Employee): PhilhealthWaiverRecord {
+  return {
+    kind: e.philhealth_ee_waiver ?? null,
+    startMonth: e.philhealth_waiver_start_month ?? null,
+    spicExpiry: e.philhealth_spic_expiry ?? null,
+    pwdStatus: e.philhealth_pwd_status ?? null,
+  }
 }
 
 /** Final pay released after the employee's last day: nothing worked to pay. */
@@ -587,7 +590,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         isMinimumWageEarner: emp.is_minimum_wage_earner,
         hazardExempt: !!emp.hazard_criteria_met && !!emp.hazard_dole_cert_ref?.trim(),
         apprentice: emp.employment_status === 'apprentice',
-        philhealthEeWaiver: philhealthWaiverFor(emp, run),
+        // the NG share by payroll month (contributions follow the payroll month)
+        philhealthEeWaiver: philhealthWaiverFor(waiverOf(emp), run.period_month),
         schedule: emp.work_schedule,
         hireDate: emp.hire_date,
         separationDate: emp.separation_date,
@@ -700,6 +704,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : Math.max(0, tables.bir_annual.other_benefits_exemption_cap - prior.thirteenthOtherBenefitsExempt - taxYearBenefits),
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
+    if (!isThirteenth) slip.trace.warnings.push(...philhealthWaiverWarnings(waiverOf(emp), run.period_month, run.period_end))
     // 13th month pay in the SSS base (a setting, spec P2) is settled by the
     // month's last regular payroll: one already final has to be recomputed
     const closedMonth = empMonth.some((p) => (p.payroll_runs?.period_index ?? 0) >= (p.payroll_runs?.periods_in_month ?? Infinity))
