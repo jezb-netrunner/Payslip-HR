@@ -245,8 +245,10 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
       })}
       <p className="text-[11px] text-slate-400">
         Layout follows the 1604-C alphalist (RMC 73-2019): Schedule 1 employees, Schedule 2 minimum
-        wage earners, each figure as declared on BIR Form 2316. Key or import the CSV figures into the BIR Alphalist
-        Data Entry and Validation Module (it generates the DAT file for eSubmission). Balance = tax due − tax withheld.
+        wage earners, each figure as declared on BIR Form 2316; a minimum wage earner paid exempt hazard pay also carries
+        the period of employment, the amount and the DOLE certification reference. Key or import the CSV figures into the
+        BIR Alphalist Data Entry and Validation Module v7.4 (RMC 15-2025; it generates the DAT file for eSubmission).
+        Balance = tax due − tax withheld.
       </p>
 
       {viewing && <Form2316Modal row={viewing} entity={entity} year={year} onClose={() => setViewing(null)} />}

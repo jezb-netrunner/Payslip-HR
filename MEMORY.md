@@ -407,6 +407,22 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T10: BIR exports (same branch)
+
+**Did:** `src/payroll/form2316.ts` builds the 2316 by the form's parts (I
+employee with SMW per day/month and the MWE box, II present employer, III
+previous employer with address and ZIP, IV-A summary, IV-B non-taxable with
+the MWE lines first, IV-B taxable regular and supplementary);
+`Form2316Modal` renders and prints it (also at final pay, T8). Alphalist
+rows carry `hasPreviousEmployer`, the previous employer's address/ZIP and
+`hazardCertRef`; both schedule CSVs gained the MWE hazard pay fields
+(period of employment, amount, DOLE certification reference — blank
+without exempt hazard pay) and the row is flagged when the reference is
+missing. No DAT writer (P7), 1601-C lines 15–19 and the quarterly hazard
+list skipped (owner). The 2316 item numbers are left out: the BIR site is
+blocked here (403) and secondary sources disagree. No migration. Tests
+496 → 502.
+
 ### 2026-10-25 — Spec T9: due-date calendar (same branch)
 
 **Did:** `src/payroll/dueDates.ts` — `due1601c` (10th of the next month, or

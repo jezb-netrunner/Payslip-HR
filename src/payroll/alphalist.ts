@@ -41,14 +41,20 @@ export interface AlphalistRow {
   smwPerMonth: number
   smwPerYear: number
   substitutedFiling: boolean
+  /** A previous employer this year is on record (their 2316 figures). */
+  hasPreviousEmployer: boolean
   prevEmployerTin: string
   prevEmployerName: string
+  prevEmployerAddress: string
+  prevEmployerZip: string
   /** Previous employer's section: status code, employment period, reason-of-separation code. */
   prevStatusCode: string
   prevFrom: string
   prevTo: string
   prevSeparationCode: string
   prior: PriorEmployerInput
+  /** The DOLE certification reference justifying a minimum wage earner's exempt hazard pay (spec T10). */
+  hazardCertRef: string
   /** Data to fix before filing. */
   issues: string[]
   /** Withheld vs due difference, settled by an annualizing run; normal while the year is in progress. */
@@ -117,6 +123,7 @@ export function buildAlphalist(params: {
     if (separatedBefore) {
       issues.push(`Separated ${e.separation_date}, paid in ${year}: check the employment dates the BIR module accepts`)
     }
+    if (summary.mweHazard > 0 && !e.hazard_dole_cert_ref?.trim()) issues.push('MWE hazard pay without a DOLE certification reference')
 
     rows.push({
       schedule: summary.allMwe ? 2 : 1,
@@ -132,13 +139,17 @@ export function buildAlphalist(params: {
       smwPerMonth: round2((smwPerDay * factor) / 12),
       smwPerYear: round2(smwPerDay * factor),
       substitutedFiling,
+      hasPreviousEmployer: !!ty?.has_previous_employer,
       prevEmployerTin: ty?.has_previous_employer ? ty.prev_employer_tin : '',
       prevEmployerName: ty?.has_previous_employer ? ty.prev_employer_name : '',
+      prevEmployerAddress: ty?.has_previous_employer ? (ty.prev_employer_address ?? '') : '',
+      prevEmployerZip: ty?.has_previous_employer ? (ty.prev_employer_zip ?? '') : '',
       prevStatusCode: ty?.has_previous_employer && ty.prev_employment_status ? EMPLOYMENT_STATUS_BIR[ty.prev_employment_status] : '',
       prevFrom: ty?.has_previous_employer ? (ty.prev_employment_from ?? '') : '',
       prevTo: ty?.has_previous_employer ? (ty.prev_employment_to ?? '') : '',
       prevSeparationCode: ty?.has_previous_employer && ty.prev_separation_reason ? SEPARATION_REASON_BIR[ty.prev_separation_reason] : '',
       prior,
+      hazardCertRef: e.hazard_dole_cert_ref?.trim() ?? '',
       issues,
       withholdingGap:
         summary.variance > 0
@@ -153,6 +164,13 @@ export function buildAlphalist(params: {
   )
 }
 
+// Basis: RR 2-98 §2.78.1(B)(13) and §2.83.1, as amended by RR 11-2018 §§6, 12 (an MWE's exempt hazard pay, reported with the alphalist).
+/** For a minimum wage earner paid exempt hazard pay: the period of employment, the amount and its justification; else blanks. */
+function mweHazardFields(r: AlphalistRow): (string | number)[] {
+  if (r.summary.mweHazard <= 0) return ['', '', '', '']
+  return [r.from, r.to, r.summary.mweHazard, r.hazardCertRef]
+}
+
 /** CSV header + rows with every 2316 / alphalist figure for one schedule. */
 export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | number)[][] {
   const header = [
@@ -163,6 +181,7 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
     'NT: Basic SMW (MWE)', 'NT: Holiday Pay (MWE)', 'NT: Overtime Pay (MWE)', 'NT: Night Shift Diff (MWE)', 'NT: Hazard Pay (MWE)',
     'NT: 13th Month & Other Benefits', 'NT: De Minimis', 'NT: SSS/PHIC/HDMF & Union Dues', 'NT: Salaries & Other Compensation',
     'Total Non-Taxable',
+    'MWE Hazard Pay: Employed From', 'MWE Hazard Pay: Employed To', 'MWE Hazard Pay Amount', 'MWE Hazard Pay Justification (DOLE certification)',
     'TX: Basic Salary', 'TX: Representation', 'TX: Transportation', 'TX: COLA', 'TX: Housing Allowance', 'TX: Other Regular',
     'TX: 13th Month & Other Benefits', 'TX: Hazard Pay', 'TX: Overtime Pay', 'TX: Other Supplementary',
     'Total Taxable (present)',
@@ -190,6 +209,7 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
         s.mweBasic, s.mweHoliday, s.mweOvertime, s.mweNightDiff, s.mweHazard,
         s.thirteenthOtherBenefitsExempt, s.deMinimis, s.contributions, s.otherNonTaxable,
         s.totalNonTaxable,
+        ...mweHazardFields(r),
         s.taxableBasic, s.taxableRepresentation, s.taxableTransportation, s.taxableCola, s.taxableHousing, s.taxableOtherRegular,
         s.taxable13thOtherBenefits, s.taxableHazard, s.taxableOvertime, s.taxableOtherSupplementary,
         s.totalTaxablePresent,

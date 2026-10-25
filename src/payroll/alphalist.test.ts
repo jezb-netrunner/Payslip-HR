@@ -142,3 +142,46 @@ describe('1604-C alphalist rows', () => {
     expect(s2.every((r) => r.length === s2[0].length)).toBe(true)
   })
 })
+
+// Spec T10: for each minimum wage earner who received hazard pay, the
+// alphalist export carries the period of employment, the hazard pay amount
+// and the justification (the DOLE certification reference).
+describe('T10 MWE hazard pay in the alphalist', () => {
+  const hazard = (m: number, amount: number): AnnualPayslipFact => ({
+    ...fact(m, true, 19630),
+    earnings: [{ amount: 19630, bir: 'basic' }, { amount, bir: 'hazard', taxable: false }],
+  })
+  const rows = buildAlphalist({
+    year: 2026,
+    entity,
+    employees: [
+      emp('haz', { hazard_criteria_met: true, hazard_dole_cert_ref: 'DOLE-NCR-HZ-2026-014', hire_date: '2026-02-01' }),
+      emp('nocert'),
+      emp('plain'),
+    ],
+    payslips: [
+      ...[2, 3].map((m) => ({ employee_id: 'haz', fact: hazard(m, 1000) })),
+      { employee_id: 'nocert', fact: hazard(1, 500) },
+      { employee_id: 'plain', fact: fact(1, true, 19630) },
+    ],
+    taxYears: [],
+    annual: BIR_ANNUAL_2023,
+  })
+  const csv = alphalistCsv(rows, 2)
+  const col = (name: string) => csv[0].indexOf(name)
+  const line = (first: string) => csv.find((r) => r[3] === first)!
+
+  it('period of employment, amount and the DOLE certification reference', () => {
+    const cols = ['MWE Hazard Pay: Employed From', 'MWE Hazard Pay: Employed To', 'MWE Hazard Pay Amount', 'MWE Hazard Pay Justification (DOLE certification)']
+    expect(cols.map(col).every((i) => i > 0)).toBe(true)
+    expect(cols.map((c) => line('HAZ')[col(c)])).toEqual(['2026-02-01', '2026-12-31', 2000, 'DOLE-NCR-HZ-2026-014'])
+    // no hazard pay: blank
+    expect(cols.map((c) => line('PLAIN')[col(c)])).toEqual(['', '', '', ''])
+    expect(csv.every((r) => r.length === csv[0].length)).toBe(true)
+  })
+
+  it('exempt hazard pay without the DOLE certification reference is flagged', () => {
+    expect(rows.find((r) => r.employee.id === 'nocert')?.issues).toContain('MWE hazard pay without a DOLE certification reference')
+    expect(rows.find((r) => r.employee.id === 'haz')?.issues).toEqual([])
+  })
+})

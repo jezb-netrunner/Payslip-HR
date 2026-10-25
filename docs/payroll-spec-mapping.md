@@ -244,3 +244,19 @@ below was made and is easy to change.
 - The calendar is BIR & Reports → Due dates (one year at a time: each
   month's 1601-C and contributions, then the tax year's annual dates); the
   dashboard's obligation tiles show the date in force.
+
+**T10 (BIR exports)**
+- The 2316 figures follow the form's parts and wording but without item
+  numbers: the BIR's own copy couldn't be read from this environment and
+  the copies found elsewhere number the items differently. *Question:
+  confirm the January 2018 ENCS item numbers if you want them printed.*
+- "Basic salary (including the exempt ₱250,000 and below)": a non-MWE's
+  basic pay stays under taxable compensation even when the year's tax is
+  zero, as before (the alphalist does the same). *Question: should basic
+  pay of employees at or below ₱250,000 move to the non-taxable column?*
+- The MWE hazard pay fields are four columns in both schedule CSVs (period
+  of employment from/to, amount, DOLE certification reference), filled only
+  for exempt MWE hazard pay; an MWE's hazard pay taxed for lack of the
+  criteria (T5) is in the taxable hazard column, without them.
+- No DAT file (P7); 1601-C lines 15–19 and the quarterly hazard list are
+  skipped (owner's decision); refunds already reduce the 1601-C (T8).
