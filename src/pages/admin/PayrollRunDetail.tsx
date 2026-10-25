@@ -906,16 +906,23 @@ function AdjustmentModal({
     // earnings: what it is (its pay code); deductions: 'other' or 'union_dues'
     payCode: 'OTHER_TAXABLE',
     category: 'other',
+    // leave cash conversion: the days converted
+    days: '',
     authorized: '',
   })
   const [busy, setBusy] = useState(false)
   const oneTimeCodes = payCodes.filter((c) => c.for_one_time && c.active)
   const code = f.kind === 'earning' ? payCodes.find((c) => c.code === f.payCode) : undefined
   const needsAuthorization = f.kind === 'deduction' && f.category === 'other'
+  const byTheDay = code?.de_minimis_item === 'a'
 
   async function save() {
     if (!employees.some((e) => e.id === f.employee_id) || !f.label.trim() || !(Number(f.amount) > 0)) {
       toast('error', 'Employee, label and a positive amount are required.')
+      return
+    }
+    if (byTheDay && !(Number(f.days) > 0)) {
+      toast('error', 'Enter the number of leave days converted.')
       return
     }
     if (needsAuthorization && !f.authorized) {
@@ -931,7 +938,9 @@ function AdjustmentModal({
       label: f.label.trim(),
       amount: Number(f.amount),
       // an earning's BIR category and maternity benefit follow its pay code (set by the database)
-      ...(f.kind === 'earning' ? { pay_code: f.payCode } : { category: f.category === 'union_dues' ? 'union_dues' : 'other' }),
+      ...(f.kind === 'earning'
+        ? { pay_code: f.payCode, days: byTheDay ? Number(f.days) : null }
+        : { category: f.category === 'union_dues' ? 'union_dues' : 'other' }),
       authorized_on: needsAuthorization ? f.authorized : null,
       created_by: userData.user?.id ?? null,
     })
@@ -986,6 +995,11 @@ function AdjustmentModal({
               <option value="other">Other deduction</option>
               <option value="union_dues">Union dues (tax-exempt)</option>
             </Select>
+          </Field>
+        )}
+        {byTheDay && (
+          <Field label="Days converted" hint="Pay the days at the employee's daily rate. The client's leave policy decides the tax (Client Settings).">
+            <Input type="number" min={0} step="0.5" value={f.days} onChange={(e) => setF({ ...f, days: e.target.value })} />
           </Field>
         )}
         {needsAuthorization && (

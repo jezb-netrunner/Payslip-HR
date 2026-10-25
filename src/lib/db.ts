@@ -7,6 +7,7 @@ import type {
   BirBucket,
   ContributionTiming,
   IncomeClass,
+  LeavePolicy,
   MaternityBenefit,
   PayFrequency,
   RoundingMode,
@@ -52,6 +53,8 @@ export interface Entity {
   minimum_wage_region: string
   minimum_wage_daily: number
   minimum_wage_reference: string
+  /** how cash conversion of unused leave is taxed (spec T7) */
+  leave_policy: LeavePolicy
   /** DOLE exemption from the maternity salary differential (RA 11210 Sec. 5(c)): kind, approval reference and the year it covers */
   maternity_exemption_category: MaternityExemptionCategory | null
   maternity_exemption_dole_ref: string | null
@@ -346,6 +349,8 @@ export interface PayslipLine {
   thirteenthBasis?: boolean
   /** taxable lines from spec T5 on: regular or supplementary compensation */
   incomeClass?: IncomeClass
+  /** leave cash conversion: the days the line pays */
+  days?: number
 }
 
 export interface Payslip {
@@ -426,6 +431,8 @@ export interface PayrollAdjustment {
   category: string
   /** earnings only: pay_codes.code (spec T2) */
   pay_code?: string | null
+  /** leave cash conversion: the days converted (spec T7) */
+  days?: number | null
   /** RA 11210 maternity pay (category other_non_taxable), set by the pay code */
   benefit?: MaternityBenefit | null
   /** date the employee signed the written authorization ('other' deductions, Labor Code Art. 113) */

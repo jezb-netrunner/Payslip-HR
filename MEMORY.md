@@ -407,6 +407,23 @@ one engine test (13th-month excess, 16,944.15 on the old method) updated to
 CAM; SQL suites 10 and 16 unchanged. Backfill checked on a seeded pre-T2
 database (finalized run's adjustments coded, no audit rows, drafts marked).
 
+### 2026-10-25 — Spec T7: de minimis ceilings per item (same branch)
+
+**Did:** pay codes per de minimis item (DM_* for c–k, LEAVE_CONVERSION for
+item a, `pay_codes.de_minimis_item`); DE_MINIMIS retired (inactive,
+unchecked, warns). The engine's `earnDeMinimis` splits a line into the part
+within the ceiling (bucket de_minimis) and the excess (bucket
+other_benefits, the ₱90k bucket); `deMinimisUsed` comes from the tax-year
+payslips by pay-date window (month / half-year / year) and only from pay
+dated on or after the ceiling version (`tables.de_minimis_from`, from
+`pickStatutoryTables`); item j caps at 30% of the client minimum wage per
+day with OT or night work. LEAVE_CONVERSION needs `days`
+(`payroll_adjustments.days`, sync trigger); client `leave_policy`
+(default sil_only): vl_in_place_of_sil → 12 de minimis days a year,
+sil_only → taxable S. Migration `20261025150000_de_minimis_items` (not
+live). Tests 451 → 466 plus SQL suite 23 (19.1 now checks its codes by
+name).
+
 ### 2026-10-25 — Spec T6: PhilHealth NG share by month (same branch)
 
 **Did:** `employees.philhealth_waiver_start_month` (first of month),
@@ -479,7 +496,8 @@ Tests 405 → 415 plus SQL suite 19 (18.1 now checks the T2 codes by name).
 
 **2026-10-25: `20261025110000 sss_pay_codes` (T3), `20261025120000
 maternity_rules` (T4), `20261025130000 mwe_hazard_pay` (T5) and
-`20261025140000 philhealth_ng_share` (T6) are in the branch, NOT live** (apply in order after
+`20261025140000 philhealth_ng_share` (T6) and `20261025150000
+de_minimis_items` (T7) are in the branch, NOT live** (apply in order after
 T2's, before the front end; T4's drops and re-adds a constraint, so it
 needs the SQL editor).
 

@@ -77,9 +77,12 @@ describe('T3 SSS base by pay code', () => {
     for (const c of included) expect(`${c}: ${payCodeOf(c).sss_include}`).toBe(`${c}: true`)
   })
 
-  it('P2/P3: 13th month, de minimis, other non-taxable pay and the advanced SSS maternity benefit are settings, excluded by default', () => {
+  it('P2/P3: 13th month, de minimis, other non-taxable pay, leave conversion and the advanced SSS maternity benefit are settings, excluded by default', () => {
     const pending = PAY_CODES.filter((c) => c.sss_include_pending).map((c) => c.code).sort()
-    expect(pending).toEqual(['DE_MINIMIS', 'MAT_SSS_BENEFIT', 'NON_TAXABLE', 'THIRTEENTH_MONTH'])
+    expect(pending).toEqual([
+      'DE_MINIMIS', 'DM_ACHIEVEMENT', 'DM_CBA_PRODUCTIVITY', 'DM_GIFTS', 'DM_LAUNDRY', 'DM_MEAL', 'DM_MEDICAL_ASSISTANCE',
+      'DM_MEDICAL_DEPENDENTS', 'DM_RICE', 'DM_UNIFORM', 'LEAVE_CONVERSION', 'MAT_SSS_BENEFIT', 'NON_TAXABLE', 'THIRTEENTH_MONTH',
+    ])
     for (const c of pending) expect(payCodeOf(c).sss_include).toBe(false)
   })
 

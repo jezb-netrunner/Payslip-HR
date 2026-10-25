@@ -7,7 +7,7 @@
 // tables; this list mirrors it for tests (supabase/tests/18_pay_codes_tests.sql
 // checks the two agree).
 
-import type { AllowanceCategory, BirBucket, IncomeClass, MaternityBenefit, PayCode } from './types'
+import type { AllowanceCategory, BirBucket, DeMinimisItem, IncomeClass, MaternityBenefit, PayCode } from './types'
 
 interface CodeSpec {
   /** where it is offered: allowances (A), one-time earnings (O), or neither (a code the payroll uses itself) */
@@ -22,6 +22,10 @@ interface CodeSpec {
   taxPending?: boolean
   /** counts toward the 13th month besides basic pay; '?' = a setting, included until confirmed (P9) */
   thirteenth?: boolean | '?'
+  /** the de minimis item whose ceiling applies */
+  item?: DeMinimisItem
+  /** offered for new rows (a retired code keeps working on the rows that have it) */
+  active?: boolean
   benefit?: MaternityBenefit
   is_christmas_bonus?: boolean
   subject_to_liquidation?: boolean
@@ -40,12 +44,13 @@ const code = (sort_order: number, c: string, label: string, x: CodeSpec): PayCod
   include_in_13th_month_base: x.thirteenth === true || x.thirteenth === '?',
   thirteenth_pending: x.thirteenth === '?',
   benefit: x.benefit ?? null,
+  de_minimis_item: x.item ?? null,
   sss_include: x.sss === true,
   sss_include_pending: x.sss === '?',
   is_christmas_bonus: x.is_christmas_bonus ?? false,
   subject_to_liquidation: x.subject_to_liquidation ?? false,
   sort_order,
-  active: true,
+  active: x.active ?? true,
 })
 
 export const PAY_CODES: readonly PayCode[] = [
@@ -81,8 +86,26 @@ export const PAY_CODES: readonly PayCode[] = [
   code(135, 'CHRISTMAS_BONUS', 'Christmas bonus (₱90k bucket)', { use: 'O', bir_bucket: 'other_benefits', income_class: 'supplementary', tax_treatment: 'benefits', sss: false,
     is_christmas_bonus: true,
     description: 'The Christmas bonus. In the ₱90k bucket for tax, and out of the SSS base.' }),
-  code(140, 'DE_MINIMIS', 'De minimis benefit', { use: 'AO', bir_bucket: 'de_minimis', income_class: 'supplementary', tax_treatment: 'de_minimis', sss: '?',
-    description: 'A de minimis benefit within its BIR ceiling (RR 29-2025).' }),
+  code(140, 'DE_MINIMIS', 'De minimis benefit (no item)', { use: 'AO', bir_bucket: 'de_minimis', income_class: 'supplementary', tax_treatment: 'de_minimis', sss: '?',
+    active: false,
+    description: 'Retired: a de minimis benefit saved before the items. Its ceiling is not checked; change it to the item\'s pay code.' }),
+  ...([
+    [141, 'DM_MEDICAL_DEPENDENTS', 'Medical cash allowance to dependents (de minimis)', 'c', 'AO'],
+    [142, 'DM_RICE', 'Rice subsidy (de minimis)', 'd', 'AO'],
+    [143, 'DM_UNIFORM', 'Uniform and clothing allowance (de minimis)', 'e', 'AO'],
+    [144, 'DM_MEDICAL_ASSISTANCE', 'Actual medical assistance (de minimis)', 'f', 'AO'],
+    [145, 'DM_LAUNDRY', 'Laundry allowance (de minimis)', 'g', 'AO'],
+    [146, 'DM_ACHIEVEMENT', 'Employee achievement award (de minimis)', 'h', 'O'],
+    [147, 'DM_GIFTS', 'Christmas or anniversary gift (de minimis)', 'i', 'O'],
+    [148, 'DM_MEAL', 'Meal allowance for overtime or night shift (de minimis)', 'j', 'AO'],
+    [149, 'DM_CBA_PRODUCTIVITY', 'CBA or productivity incentive (de minimis)', 'k', 'O'],
+  ] as const).map(([sort, c, label, item, use]) =>
+    code(sort, c, label, { use, bir_bucket: 'de_minimis', income_class: 'supplementary', tax_treatment: 'de_minimis', sss: '?', item,
+      description: `De minimis item (${item}) of RR 29-2025: exempt up to its ceiling, the excess goes to the ₱90k bucket.` }),
+  ),
+  code(125, 'LEAVE_CONVERSION', 'Cash conversion of unused leave', { use: 'O', bir_bucket: 'de_minimis', income_class: 'supplementary', tax_treatment: 'de_minimis', sss: '?',
+    item: 'a',
+    description: 'Unused leave paid in cash, with the days converted. A client giving vacation leave in place of SIL: de minimis up to 12 days a year, the rest to the ₱90k bucket. A client giving SIL only: SIL conversion, taxable supplementary compensation.' }),
   code(150, 'NON_TAXABLE', 'Other non-taxable pay', { use: 'AO', bir_bucket: 'other_non_taxable', income_class: null, tax_treatment: 'exempt', sss: '?',
     description: 'Other pay the law exempts from tax.' }),
   code(160, 'MAT_SSS_BENEFIT', 'SSS maternity benefit', { use: 'O', bir_bucket: 'other_non_taxable', income_class: null, tax_treatment: 'exempt', sss: '?',

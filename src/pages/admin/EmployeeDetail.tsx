@@ -889,8 +889,8 @@ function PayTab({
           ))}
         </div>
         <p className="mt-2 text-[11px] text-slate-400">
-          De minimis benefits within BIR ceilings (RR 29-2025 for 2026: rice ₱2,500/mo, uniform ₱8,000/yr,
-          laundry ₱400/mo, etc.) are non-taxable; bonuses share the ₱90,000 cap with the 13th month pay.
+          Pick a de minimis benefit's own pay code (rice subsidy, uniform, laundry…): payroll keeps it within its
+          BIR ceiling (RR 29-2025) and moves any excess to the ₱90,000 cap it shares with bonuses and the 13th month pay.
           COLA is exempt for minimum wage earners.
         </p>
       </Card>

@@ -357,11 +357,13 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
   compensation (RR 2-98 Sec. 2.78.1(B)(13), RMC 50-2018 A13 — the owner's
   spec, T5). Hazard pay stays exempt only with the criteria met and a DOLE
   certification reference on the employee's record.
-- De minimis ceilings are on file as a statutory table (RR 29-2025, pay
-  dated 2026-01-07 and later; Statutory Tables page), but payroll doesn't
-  apply them yet: classifying allowances as de minimis within the ceilings
-  stays the admin's responsibility until the per-item tracking (payroll tax
-  rules spec, T7) is built.
+- De minimis benefits have one pay code per item of RR 29-2025; payroll
+  applies the ceiling in force on the pay date, counting what the item
+  already used in the pay month, half-year or year, and moves the excess to
+  the ₱90,000 bucket. Unused leave paid in cash follows the client's leave
+  policy: de minimis up to 12 days a year when vacation leave replaces SIL,
+  otherwise taxable SIL conversion. The meal allowance's ceiling uses the
+  client's minimum wage.
 - The cumulative average method follows the payroll tax rules spec; where
   it is silent the app reads it this way: a payroll with no pay at all is
   not "S at least R"; a 13th-month payslip (no regular pay of its own) does

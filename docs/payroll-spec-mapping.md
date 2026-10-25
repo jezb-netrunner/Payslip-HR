@@ -181,3 +181,20 @@ below was made and is easy to change.
 - The spec's five slots hold six files: the SPIC (or PWD ID) has a front and
   a back slot. Files are private to the admins of the employee's client.
 
+**T7 (de minimis)**
+- *Question:* the spec gives no default `leave_policy`. Existing clients
+  start on "SIL only" (the Labor Code minimum), which taxes leave
+  conversion; switch a client that gives 5+ days of vacation leave in place
+  of SIL on Client Settings.
+- One LEAVE_CONVERSION code whose tax follows the client's leave policy,
+  rather than separate VL and SIL codes. It needs the days converted.
+- Ceiling windows follow the pay date (the pay month, half-year or year),
+  like the tax year, and only pay dated on or after the ceilings' effective
+  date counts. A monthly allowance paid semi-monthly therefore meets the
+  monthly ceiling by the payments made in each calendar month.
+- Item (j), the meal allowance: 30% of the client's daily minimum wage for
+  each day of the payroll with overtime or night work (T12's wage table
+  supplies the minimum wage).
+- The item-less DE_MINIMIS code is retired: existing allowances keep it
+  (unchecked, with a warning on each payroll) until an admin picks the item.
+

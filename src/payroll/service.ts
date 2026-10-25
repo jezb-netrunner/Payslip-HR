@@ -29,6 +29,7 @@ import { philhealthWaiverFor, philhealthWaiverWarnings, type PhilhealthWaiverRec
 import { withholdingFactOf, type PriorWithholding } from './withholding'
 import type {
   BirBucket,
+  DeMinimisItem,
   HolidayLite,
   LeaveLite,
   PayrollSettingsInput,
@@ -257,7 +258,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     run.pay_date === run.period_end ? null : getStatutoryTables(run.pay_date),
   ])
   const tables = payTables
-    ? { ...periodTables, bir_wht: payTables.bir_wht, bir_annual: payTables.bir_annual }
+    ? { ...periodTables, bir_wht: payTables.bir_wht, bir_annual: payTables.bir_annual, de_minimis: payTables.de_minimis, de_minimis_from: payTables.de_minimis_from }
     : periodTables
   // A regular holiday is paid after work or paid leave on the workday before
   // it, which for a holiday early in the period lies in the days before it
@@ -491,6 +492,31 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   const yearBy = groupBy(yearSlips.filter((p) => p.payroll_run_id !== run.id))
   const taxBy = groupBy(taxSlips.filter((p) => p.payroll_run_id !== run.id))
   const monthBy = groupBy(monthSlips)
+  // What each de minimis item already used in its ceiling's window — the
+  // pay month, half-year or year of this payroll's pay date (spec T7)
+  const units = new Map((tables.de_minimis?.items ?? []).map((c) => [c.item, c.unit]))
+  const itemOf = new Map(payCodes.filter((c) => c.de_minimis_item).map((c) => [c.code, c.de_minimis_item as DeMinimisItem]))
+  const half = (d: string) => `${d.slice(0, 4)}-${d.slice(5, 7) <= '06' ? 1 : 2}`
+  const deMinimisUsedIn = (slips: YearPayslip[]) => {
+    const used: Partial<Record<DeMinimisItem, number>> = {}
+    for (const p of slips) {
+      const paid = p.pay_date ?? ''
+      // only pay under the same ceilings counts (and only what was paid by now)
+      if (paid > run.pay_date || paid < (tables.de_minimis_from ?? '')) continue
+      for (const l of p.earnings) {
+        const item = l.payCode ? itemOf.get(l.payCode) : undefined
+        if (!item || l.bir !== 'de_minimis') continue
+        const unit = units.get(item)
+        const same =
+          unit === 'per_month' ? paid.slice(0, 7) === run.pay_date.slice(0, 7)
+            : unit === 'per_semester' ? half(paid) === half(run.pay_date)
+              : unit === 'per_year' || unit === 'days_per_year' ? paid.slice(0, 4) === run.pay_date.slice(0, 4)
+                : false // the meal allowance's ceiling is per payroll
+        if (same) used[item] = round2((used[item] ?? 0) + Number(unit === 'days_per_year' ? (l.days ?? 0) : l.amount))
+      }
+    }
+    return used
+  }
   // a differential line: its pay code, or (before pay codes) the one adjustment counted toward the 13th month
   const isDifferential = (l: PayslipLine) => l.payCode === 'MAT_DIFFERENTIAL' || (!l.payCode && l.code === 'adjustment' && !!l.thirteenthBasis)
   const differentialBy = groupBy(differentialSlips.filter((p) => (p.earnings ?? []).some(isDifferential)))
@@ -643,6 +669,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             category: a.category as BirBucket,
             ...(a.benefit ? { benefit: a.benefit } : {}),
             payCode: a.pay_code ?? undefined,
+            ...(a.days ? { days: Number(a.days) } : {}),
           })),
       },
       settings: engineSettings,
@@ -650,6 +677,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       rules,
       maternityDifferentialExempt: differentialExempt,
       maternityDifferentialPaid: (differentialBy.get(emp.id) ?? []).map((p) => p.pay_date ?? ''),
+      leavePolicy: entity.leave_policy,
+      deMinimisUsed: deMinimisUsedIn(empTax),
       withholding: {
         payDate: run.pay_date,
         ytd: empTax.map((p) => withholdingFactOf({ ...p, pay_date: p.pay_date ?? run.pay_date, run_type: p.run_type ?? 'regular' })),

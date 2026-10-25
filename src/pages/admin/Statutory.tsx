@@ -373,7 +373,11 @@ export default function Statutory() {
                 <tr key={c.code}>
                   <Td>
                     <p className="font-semibold text-slate-700">{c.label}</p>
-                    <p className="text-xs text-slate-400">{c.code}</p>
+                    <p className="text-xs text-slate-400">
+                      {c.code}
+                      {c.de_minimis_item && ` · de minimis item (${c.de_minimis_item})`}
+                      {!c.active && ' · retired'}
+                    </p>
                   </Td>
                   <Td>{[c.for_allowances && 'Allowances', c.for_one_time && 'One-time earnings'].filter(Boolean).join(', ')}</Td>
                   <Td>{PAY_CODE_TAX_LABELS[c.tax_treatment]}</Td>

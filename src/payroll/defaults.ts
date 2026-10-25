@@ -134,6 +134,7 @@ export const DEFAULT_TABLES: StatutoryTables = {
   bir_wht: BIR_WHT_2023,
   bir_annual: BIR_ANNUAL_2023,
   de_minimis: DE_MINIMIS_2026,
+  de_minimis_from: DE_MINIMIS_2026_EFFECTIVE,
 }
 
 /** The PENDING rules' defaults: today's behavior (spec P4). */

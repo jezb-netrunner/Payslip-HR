@@ -30,7 +30,9 @@ import {
   type ContributionTiming,
   type DayComputation,
   type DayType,
+  type DeMinimisItem,
   type IncomeClass,
+  type LeavePolicy,
   type PayCode,
   type PayLine,
   type PayrollEmployeeInput,
@@ -218,6 +220,13 @@ export interface ComputePayslipParams {
   maternityDifferentialExempt?: boolean
   /** Pay dates of the employee's finalized payslips that paid a maternity salary differential. */
   maternityDifferentialPaid?: string[]
+  /** The client's leave policy: how cash conversion of unused leave is taxed (omitted: SIL only). */
+  leavePolicy?: LeavePolicy
+  /**
+   * What each de minimis item already used in its ceiling's month, semester
+   * or year (pesos; days for item a), from the employee's finalized payslips.
+   */
+  deMinimisUsed?: Partial<Record<DeMinimisItem, number>>
   /** Cash net-pay rounding for this employee (omitted = exact centavos). */
   rounding?: RoundingInput
   /** Annualize withholding in this payroll (last payroll of the year / separation). */
@@ -794,6 +803,55 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   if (round2(holidayAddOn) > 0) earn('holiday_addon', 'Holiday Pay above 200% (taxable)', round2(holidayAddOn), 'other_taxable', {}, 'supplementary')
 
   const paidDays = daysWorked + paidLeaveDays + paidUnworkedHolidays
+  // Basis: RR 2-98 §2.78.1(A)(3), as amended by RR 29-2025 §1 (item (a): cash conversion of unused vacation leave, 12 days a year). RMC 50-2018 A5 (the list is exclusive) and A6 (the excess goes to "other benefits"). Labor Code (PD 442) Art. 95: SIL is a separate leave, not owed where paid vacation leave of at least five days is given.
+  // de minimis items: exempt up to the ceiling of the pay date (tracked over
+  // its month, semester or year), the excess to the ₱90k bucket (spec T7)
+  const ceilings = new Map((tables.de_minimis?.items ?? []).map((c) => [c.item, c]))
+  const used: Partial<Record<DeMinimisItem, number>> = { ...(params.deMinimisUsed ?? {}) }
+  const leavePolicy = params.leavePolicy ?? 'sil_only'
+  // item (j): 30% of the minimum wage for each day of overtime or night work
+  const mealDays = days.filter((d) => d.otMinutes > 0 || d.nightDiffMinutes > 0).length
+  const deMinimisNotes = new Set<string>()
+  const earnDeMinimis = (code: string, label: string, amount: number, pc: PayCode, extra: Partial<PayLine>, lineDays?: number) => {
+    const item = pc.de_minimis_item
+    const withDays = (d: number | undefined) => (d !== undefined && d > 0 ? { days: d } : {})
+    // leave converted under a SIL-only policy is SIL conversion: taxable S
+    if (item === 'a' && leavePolicy === 'sil_only') {
+      earn(code, `${label} (SIL conversion)`, amount, 'other_taxable', { ...extra, ...withDays(lineDays) }, 'supplementary')
+      return
+    }
+    const ceiling = item ? ceilings.get(item) : undefined
+    if (!item || !ceiling) {
+      deMinimisNotes.add(
+        !item
+          ? `"${label}" has no de minimis item, so its ceiling isn't checked: change it to the item's pay code (rice subsidy, uniform, laundry…).`
+          : 'No de minimis ceilings on file for this pay date (RR 29-2025 applies to pay dated Jan 7, 2026 and later): de minimis benefits are not checked against a ceiling.',
+      )
+      earn(code, `${label} (non-taxable)`, amount, 'de_minimis', { ...extra, ...withDays(lineDays) })
+      return
+    }
+    let within: number
+    let withinDays: number | undefined
+    if (ceiling.unit === 'days_per_year') {
+      const lineDayCount = lineDays ?? 0
+      withinDays = Math.min(lineDayCount, Math.max(0, ceiling.limit - (used[item] ?? 0)))
+      within = lineDayCount > 0 ? round2((amount * withinDays) / lineDayCount) : 0
+      used[item] = (used[item] ?? 0) + withinDays
+    } else {
+      const cap = ceiling.unit === 'share_of_regional_minimum_wage' ? round2(ceiling.limit * settings.minimumWageDaily * mealDays) : ceiling.limit
+      within = round2(Math.min(amount, Math.max(0, cap - (used[item] ?? 0))))
+      used[item] = round2((used[item] ?? 0) + within)
+    }
+    const excess = round2(amount - within)
+    if (within > 0) earn(code, `${label} (de minimis)`, within, 'de_minimis', { ...extra, ...withDays(withinDays) })
+    if (excess > 0) {
+      earn(code, `${label} (above the de minimis ceiling)`, excess, 'other_benefits', {
+        ...extra,
+        ...withDays(lineDays !== undefined ? round2(lineDays - (withinDays ?? 0)) : undefined),
+      }, 'supplementary')
+    }
+  }
+
   for (const a of extrasOnly ? [] : employee.allowances) {
     let amt: number
     let suffix = ''
@@ -807,6 +865,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
     if (amt === 0) continue
     const pc = allowanceCode(a, codes)
+    if (pc.bir_bucket === 'de_minimis') {
+      earnDeMinimis('allowance', `${a.label}${suffix}`, amt, pc, { payCode: pc.code, sss: pc.sss_include })
+      continue
+    }
     const taxable = lineTaxable(pc.bir_bucket)
     earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, pc.bir_bucket, { payCode: pc.code, sss: pc.sss_include }, lineIncomeClass(pc, 'allowance'))
   }
@@ -814,6 +876,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     const amt = round2(e.amount)
     if (amt === 0) continue
     const pc = payCodeOf(e.payCode ?? payCodeForEarningCategory(e.category, e.benefit), codes)
+    if (pc.bir_bucket === 'de_minimis') {
+      earnDeMinimis('adjustment', e.label, amt, pc, { meta: e.id, payCode: pc.code, sss: pc.sss_include }, e.days)
+      continue
+    }
     // pay besides basic pay that counts toward the 13th month (the maternity
     // salary differential, a setting: spec P9)
     earn('adjustment', e.label, amt, pc.bir_bucket, {
@@ -823,6 +889,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       ...(pc.include_in_13th_month_base && pc.bir_bucket !== 'basic' ? { thirteenthBasis: true } : {}),
     }, lineIncomeClass(pc, 'one_time'))
   }
+
+  warnings.push(...deMinimisNotes)
 
   const grossPay = round2(earnings.reduce((s, l) => s + l.amount, 0))
 

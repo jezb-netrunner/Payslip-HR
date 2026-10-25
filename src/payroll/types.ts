@@ -87,6 +87,8 @@ export interface StatutoryTables {
   bir_annual: BirAnnualData
   /** De minimis ceilings in force on the pay date; none on file before 2026-01-07. */
   de_minimis?: DeMinimisData
+  /** When those ceilings took effect: pay dated earlier used other ceilings. */
+  de_minimis_from?: string
 }
 
 export type StatutoryKind = 'sss' | 'philhealth' | 'pagibig' | 'bir_wht' | 'bir_annual' | 'de_minimis'
@@ -285,6 +287,8 @@ export interface PayCode {
   thirteenth_pending: boolean
   /** the maternity benefit the code pays */
   benefit: MaternityBenefit | null
+  /** the de minimis item whose ceiling applies (RR 29-2025; spec T7) */
+  de_minimis_item: DeMinimisItem | null
   /** in the SSS compensation base (RA 11199 Sec. 8(f), SSS IRR Rule 12 Sec. 6) */
   sss_include: boolean
   /** sss_include is a setting until the law is confirmed (spec P2, P3) */
@@ -296,6 +300,13 @@ export interface PayCode {
   sort_order: number
   active: boolean
 }
+
+/**
+ * A client's leave policy (spec T7): paid vacation leave of at least 5 days
+ * in place of the service incentive leave, or SIL only (Labor Code Art. 95).
+ * It decides how cash conversion of unused leave is taxed.
+ */
+export type LeavePolicy = 'vl_in_place_of_sil' | 'sil_only'
 
 /** How a payslip's withholding tax was computed. */
 export type WhtMethod = 'regular' | 'cam' | 'annualized'
@@ -366,6 +377,8 @@ export interface OneTimeEarningInput {
   benefit?: MaternityBenefit
   /** its pay code (omitted: the category's code, for rows saved before pay codes) */
   payCode?: string
+  /** leave cash conversion: the days converted */
+  days?: number
 }
 
 export interface ExtraDeductionInput {
@@ -433,6 +446,8 @@ export interface PayLine {
   sss?: boolean
   /** Taxable earnings only: regular (R) or supplementary (S) compensation (payslips from before spec T5 have none). */
   incomeClass?: IncomeClass
+  /** Leave cash conversion: the days this line pays. */
+  days?: number
 }
 
 export interface SssComputation {

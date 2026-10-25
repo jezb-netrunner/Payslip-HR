@@ -21,10 +21,11 @@ import type {
  * ceilings are optional (none are on file for pay dated before 2026-01-07).
  */
 export function pickStatutoryTables(rows: readonly StatutoryVersionRow[], asOf: string): StatutoryTables {
-  const pick = (kind: StatutoryKind) =>
+  const version = (kind: StatutoryKind) =>
     rows
       .filter((r) => r.kind === kind && r.effective_from <= asOf)
-      .reduce<StatutoryVersionRow | undefined>((best, r) => (!best || r.effective_from > best.effective_from ? r : best), undefined)?.data
+      .reduce<StatutoryVersionRow | undefined>((best, r) => (!best || r.effective_from > best.effective_from ? r : best), undefined)
+  const pick = (kind: StatutoryKind) => version(kind)?.data
   const sss = pick('sss') as SssTableData | undefined
   const philhealth = pick('philhealth') as PhilHealthData | undefined
   const pagibig = pick('pagibig') as PagibigData | undefined
@@ -36,5 +37,8 @@ export function pickStatutoryTables(rows: readonly StatutoryVersionRow[], asOf: 
       'Statutory tables are incomplete for ' + asOf + '. The missing table version has to be published by the system maintainer (statutory tables ship with the software).',
     )
   }
-  return { sss, philhealth, pagibig, bir_wht, bir_annual, ...(de_minimis ? { de_minimis } : {}) }
+  return {
+    sss, philhealth, pagibig, bir_wht, bir_annual,
+    ...(de_minimis ? { de_minimis, de_minimis_from: version('de_minimis')!.effective_from } : {}),
+  }
 }

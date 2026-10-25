@@ -30,7 +30,11 @@ grant execute on function pg_temp.check(boolean, text) to authenticated, anon, s
 \echo '--- 19.1 sss_include and the new codes'
 select pg_temp.check(
   (select string_agg(code || ':' || (case when sss_include then 'in' else 'out' end) || (case when sss_include_pending then '?' else '' end),
-     ' ' order by code) from pay_codes) =
+     ' ' order by code) from pay_codes
+   -- the codes of T2 and T3 (T7's de minimis items: suite 23)
+   where code in ('BASIC_ADJ','BONUS','CHRISTMAS_BONUS','COLA','COMMISSION','DE_MINIMIS','FIXED_ALLOWANCE','HAZARD','HOLIDAY_ADJ',
+                  'HOUSING','LIQUIDATED_ALLOWANCE','MAT_DIFFERENTIAL','MAT_SSS_BENEFIT','NIGHT_DIFF_ADJ','NON_TAXABLE','OTHER_TAXABLE',
+                  'OVERTIME_ADJ','REPRESENTATION','THIRTEENTH_MONTH','TRANSPORTATION')) =
   'BASIC_ADJ:in BONUS:in CHRISTMAS_BONUS:out COLA:in COMMISSION:in DE_MINIMIS:out? FIXED_ALLOWANCE:in HAZARD:in '
   'HOLIDAY_ADJ:in HOUSING:in LIQUIDATED_ALLOWANCE:out MAT_DIFFERENTIAL:in MAT_SSS_BENEFIT:out? NIGHT_DIFF_ADJ:in '
   'NON_TAXABLE:out? OTHER_TAXABLE:in OVERTIME_ADJ:in REPRESENTATION:in THIRTEENTH_MONTH:out? TRANSPORTATION:in',

@@ -83,6 +83,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           grace_period_minutes: Number(s.grace_period_minutes),
           night_diff_rate: Number(s.night_diff_rate),
           contribution_deduction_timing: s.contribution_deduction_timing,
+          leave_policy: s.leave_policy,
           net_pay_rounding: s.net_pay_rounding,
           rounding_scope: s.rounding_scope,
           pay_date_lag_days: Number(s.pay_date_lag_days),
@@ -233,6 +234,15 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             </Field>
             <Field label="Night differential rate" hint="At least 0.10 (10%) for 10pm–6am">
               <Input type="number" step="0.01" value={s.night_diff_rate} onChange={(e) => set('night_diff_rate', e.target.value as unknown as number)} />
+            </Field>
+            <Field
+              label="Leave policy"
+              hint="Decides how unused leave paid in cash is taxed: de minimis up to 12 days a year (vacation leave in place of SIL), or taxable (SIL only)"
+            >
+              <Select value={s.leave_policy} onChange={(e) => set('leave_policy', e.target.value as Entity['leave_policy'])}>
+                <option value="vl_in_place_of_sil">Paid vacation leave of 5 days or more, in place of SIL</option>
+                <option value="sil_only">Service incentive leave (SIL) only</option>
+              </Select>
             </Field>
             <Field label="Days from period end to pay date" hint="Used to suggest the pay date of new runs">
               <Input type="number" value={s.pay_date_lag_days} onChange={(e) => set('pay_date_lag_days', e.target.value as unknown as number)} />
