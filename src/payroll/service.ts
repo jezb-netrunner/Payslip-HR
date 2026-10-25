@@ -136,8 +136,17 @@ export async function fetchRemittanceSlips(entityId: string, from: string, throu
 export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
   return {
     payMonth: p.pay_date ? `${p.pay_date.slice(0, 7)}-01` : (p.period_month ?? ''),
+    ...(p.pay_date ? { payDate: p.pay_date } : {}),
     isMwe: p.is_minimum_wage_earner,
-    earnings: p.earnings.map((l) => ({ amount: Number(l.amount), bir: l.bir, taxable: l.taxable, incomeClass: l.incomeClass, ...(l.fbt ? { fbt: true } : {}) })),
+    earnings: p.earnings.map((l) => ({
+      amount: Number(l.amount),
+      bir: l.bir,
+      taxable: l.taxable,
+      incomeClass: l.incomeClass,
+      ...(l.fbt ? { fbt: true } : {}),
+      ...(l.payCode ? { payCode: l.payCode } : {}),
+      ...(l.days ? { days: Number(l.days) } : {}),
+    })),
     contributionsEe: Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee),
     unionDues: Number(p.union_dues),
     withholdingTax: Number(p.withholding_tax),

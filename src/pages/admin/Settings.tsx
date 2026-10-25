@@ -339,7 +339,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             </Field>
             <Field
               label="Leave policy"
-              hint="Decides how unused leave paid in cash is taxed: de minimis up to 12 days a year (vacation leave in place of SIL), or taxable (SIL only)"
+              hint="Decides how unused leave paid in cash is taxed: de minimis up to 12 days a year (vacation leave in place of SIL), or taxable (SIL only). Changed during the year, the year-end adjustment applies it to the whole year's conversions"
             >
               <Select value={s.leave_policy} onChange={(e) => set('leave_policy', e.target.value as Entity['leave_policy'])}>
                 <option value="vl_in_place_of_sil">Paid vacation leave of 5 days or more, in place of SIL</option>

@@ -7,6 +7,8 @@ import type { Entity } from '../lib/db'
 import { fetchAll } from '../lib/fetchAll'
 import { supabase } from '../lib/supabase'
 import { buildAlphalist, type AlphalistRow, type YearEndRate } from './alphalist'
+import type { AnnualPayslipFact } from './annual'
+import { reclassifyLeaveConversions } from './leaveConversion'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, retestedFact } from './service'
 
 /**
@@ -62,11 +64,19 @@ export async function loadAlphalist(entity: Entity, year: number, employeeId?: s
       hazardExempt: !!e?.hazard_criteria_met && !!e?.hazard_dole_cert_ref?.trim(),
     }).fact
   }
+  // each employee's leave cash conversions under the client's leave policy
+  // now, as the year-end adjustment classified them (owner, 2026-10-25)
+  const daysCeiling = (tables.de_minimis?.items ?? []).find((c) => c.item === 'a')?.limit ?? null
+  const facts: { employee_id: string; fact: AnnualPayslipFact }[] = []
+  for (const id of new Set(slips.map((p) => p.employee_id))) {
+    const own = slips.filter((p) => p.employee_id === id).map(factOf)
+    for (const fact of reclassifyLeaveConversions(own, entity.leave_policy ?? 'sil_only', daysCeiling).facts) facts.push({ employee_id: id, fact })
+  }
   return buildAlphalist({
     year,
     entity,
     employees: employeeId ? employees.filter((e) => e.id === employeeId) : employees,
-    payslips: slips.map((p) => ({ employee_id: p.employee_id, fact: factOf(p) })),
+    payslips: facts,
     taxYears,
     annual: tables.bir_annual,
     yearEndRates,

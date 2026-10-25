@@ -194,10 +194,14 @@ below was made and is easy to change.
   a back slot. Files are private to the admins of the employee's client.
 
 **T7 (de minimis)**
-- *Question:* the spec gives no default `leave_policy`. Existing clients
-  start on "SIL only" (the Labor Code minimum), which taxes leave
-  conversion; switch a client that gives 5+ days of vacation leave in place
-  of SIL on Client Settings.
+- The spec gives no default `leave_policy`; existing clients start on "SIL
+  only" (the Labor Code minimum), which taxes leave conversion. Owner's
+  answer (2026-10-25): keep that default, and when an admin changes a
+  client's policy during the year the year-end adjustment reclassifies
+  that year's leave conversions under the policy in force (de minimis up to
+  the item (a) days in pay-date order, the rest to the ₱90k bucket; or all
+  taxable S). The 2316 and alphalist classify them the same way; the
+  payslips themselves keep their lines.
 - One LEAVE_CONVERSION code whose tax follows the client's leave policy,
   rather than separate VL and SIL codes. It needs the days converted.
 - Ceiling windows follow the pay date (the pay month, half-year or year),

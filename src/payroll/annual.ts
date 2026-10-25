@@ -21,9 +21,11 @@ export interface AnnualPayslipFact {
    *  when compensation is paid, so this — not the payroll month — decides
    *  the tax year and the December / January–November split. */
   payMonth: string
+  /** The pay date itself, when known: orders the year's payslips (leave conversions, spec T7). */
+  payDate?: string
   isMwe: boolean
   /** Lines from spec T5 on also say R or S (incomeClass) when taxable. */
-  earnings: { amount: number; bir?: BirBucket; taxable?: boolean; incomeClass?: IncomeClass; fbt?: boolean }[]
+  earnings: { amount: number; bir?: BirBucket; taxable?: boolean; incomeClass?: IncomeClass; fbt?: boolean; payCode?: string; days?: number }[]
   /** SSS (incl. MPF) + PhilHealth + Pag-IBIG employee shares. */
   contributionsEe: number
   unionDues: number

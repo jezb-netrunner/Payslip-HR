@@ -49,6 +49,7 @@ import {
   type WhtMethod,
 } from './types'
 import { DEFAULT_PAYROLL_RULES } from './defaults'
+import { reclassifyLeaveConversions } from './leaveConversion'
 import { capYearEndWithholding, periodWithholding, type PeriodWithholding, type PriorWithholding, type WithholdingYtdFact } from './withholding'
 
 export const DAY_MULT: Record<DayType, number> = {
@@ -1157,15 +1158,19 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   if (params.annualization) {
     const current: AnnualPayslipFact = {
       payMonth: params.annualization.payMonth,
+      ...(params.withholding?.payDate ? { payDate: params.withholding.payDate } : {}),
       isMwe,
       earnings,
       contributionsEe: sssEe + sssMpfEe + philhealthEe + pagibigEe,
       unionDues,
       withholdingTax: 0,
     }
+    // the year's leave cash conversions under the client's policy now (owner, 2026-10-25)
+    const year = yearUnderLeavePolicy(params.annualization.ytd, current, leavePolicy, ceilings.get('a')?.limit ?? null)
+    if (year.note) notes.push(year.note)
     const { withholding, summary } = annualizedWithholding(
-      params.annualization.ytd,
-      current,
+      year.ytd,
+      year.current,
       tables.bir_annual,
       params.annualization.prior,
       params.annualization.peraCredit ?? 0,
@@ -1338,16 +1343,16 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   if (params.annualization) {
     // Paid after the year's tax was already annualized (last December
     // payroll or final pay): true up the year again so it still reconciles.
-    const { withholding, summary } = annualizedWithholding(
+    const year = yearUnderLeavePolicy(
       params.annualization.ytd,
-      {
-        payMonth: params.annualization.payMonth,
-        isMwe: employee.isMinimumWageEarner,
-        earnings,
-        contributionsEe: 0,
-        unionDues: 0,
-        withholdingTax: 0,
-      },
+      { payMonth: params.annualization.payMonth, isMwe: employee.isMinimumWageEarner, earnings, contributionsEe: 0, unionDues: 0, withholdingTax: 0 },
+      params.leavePolicy ?? 'sil_only',
+      (tables.de_minimis?.items ?? []).find((c) => c.item === 'a')?.limit ?? null,
+    )
+    if (year.note) notes.push(year.note)
+    const { withholding, summary } = annualizedWithholding(
+      year.ytd,
+      year.current,
       tables.bir_annual,
       params.annualization.prior,
       params.annualization.peraCredit ?? 0,
@@ -1433,6 +1438,31 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       errors,
       days,
     },
+  }
+}
+
+/**
+ * The year an annualizing payroll computes on, its leave cash conversions
+ * classified under the client's leave policy now (owner's answer to the T7
+ * question, 2026-10-25), with a note when that changed earlier payslips.
+ */
+function yearUnderLeavePolicy(
+  ytd: AnnualPayslipFact[],
+  current: AnnualPayslipFact,
+  policy: LeavePolicy,
+  daysCeiling: number | null,
+): { ytd: AnnualPayslipFact[]; current: AnnualPayslipFact; note: string | null } {
+  const { facts } = reclassifyLeaveConversions([...ytd, current], policy, daysCeiling)
+  const earlier = facts.slice(0, -1)
+  const n = earlier.filter((f, k) => f !== ytd[k]).length
+  const policyText = policy === 'sil_only' ? 'SIL only: taxable' : `vacation leave in place of SIL: de minimis up to ${daysCeiling ?? 'all the'} days a year`
+  return {
+    ytd: earlier,
+    current: facts[facts.length - 1],
+    note:
+      n > 0
+        ? `The year-end adjustment classifies ${n} earlier payslip${n === 1 ? "'s" : "s'"} leave cash conversions under the client's leave policy now (${policyText}), as if it had applied all year.`
+        : null,
   }
 }
 

@@ -4,10 +4,12 @@
 // dated 2026-01-07 and later.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeSupabase, resetDb, addEntity, addEmployee, addAttendance, addRun, finalize, slipsOf, newId, db } from './fakeSupabase'
+import { endOfMonth } from '../../lib/manila'
 
 vi.mock('../../lib/supabase', () => ({ supabase: fakeSupabase }))
 
 import { computeRun } from '../service'
+import { loadAlphalist } from '../alphalistData'
 
 type Row = Record<string, unknown>
 const linesOf = (slip: Row, code: string) =>
@@ -73,5 +75,30 @@ describe('T7 flows: de minimis usage', () => {
     expect((dec.computation_trace as Row).warnings).toEqual(expect.arrayContaining([expect.stringMatching(/No de minimis ceilings on file/)]))
     const jan = await run(ent, { pay_frequency: 'monthly', period_start: '2026-01-01', period_end: '2026-01-31', pay_date: '2026-01-31' })
     expect(linesOf(jan, 'DM_RICE')).toEqual([['de_minimis', 2500], ['other_benefits', 500]])
+  })
+
+  it('owner 2026-10-25: a leave policy changed during the year — the YEA reclassifies the year\'s conversions, the 2316 agrees', async () => {
+    const ent = addEntity({ default_pay_frequency: 'monthly', leave_policy: 'vl_in_place_of_sil' })
+    const emp = addEmployee(ent, { pay_frequency: 'monthly', monthly_rate: 60000 })
+    addAttendance(emp, '2026-03-01', '2026-12-31')
+    const convert = (days: number) => (r: Row) =>
+      db.t.payroll_adjustments.push({
+        id: newId(), payroll_run_id: r.id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: `VL conversion (${days} days)`,
+        amount: days * 2000, category: 'de_minimis', benefit: null, pay_code: 'LEAVE_CONVERSION', days,
+      })
+    const mar = await run(ent, { pay_frequency: 'monthly', period_start: '2026-03-01', period_end: '2026-03-31', pay_date: '2026-03-31' }, convert(5))
+    expect(linesOf(mar, 'LEAVE_CONVERSION')).toEqual([['de_minimis', 10000]])
+    for (let m = 4; m <= 11; m++) {
+      const mm = String(m).padStart(2, '0')
+      await run(ent, { pay_frequency: 'monthly', period_start: `2026-${mm}-01`, period_end: endOfMonth(`2026-${mm}-01`), pay_date: endOfMonth(`2026-${mm}-01`) })
+    }
+    // the client turns out to give SIL only
+    ent.leave_policy = 'sil_only'
+    const dec = await run(ent, { pay_frequency: 'monthly', period_start: '2026-12-01', period_end: '2026-12-31', pay_date: '2026-12-22', annualize: true })
+    expect(((dec.computation_trace as Row).notes as string[]).join(' ')).toMatch(/classifies 1 earlier payslip's leave cash conversions under the client's leave policy now \(SIL only: taxable\)/)
+    const [row] = await loadAlphalist(ent as never, 2026, emp.id as string)
+    expect(row.summary.deMinimis).toBe(0)
+    expect(row.summary.taxableOtherSupplementary).toBe(10000)
+    expect(row.summary.variance).toBe(0)
   })
 })

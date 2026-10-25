@@ -422,7 +422,10 @@ LIQUIDATED_ALLOWANCE relabelled to business expenses only; BOARD_LODGING
 withheld on, skipped by `summarizeYear`, payslip warning "For FBT
 review"); migration `20261025200000_board_and_lodging`, SQL suite 28.
 T4 — P4 stays "as usual" (no change; the pending reason is on Statutory
-Tables).
+Tables). T7 — `reclassifyLeaveConversions` (year facts now carry `payDate`
+and line `payCode`/`days`): annualizing payrolls and the alphalist
+classify the year's conversions under the client's current leave policy
+(engine `yearUnderLeavePolicy`, note on the YEA payslip).
 
 ### 2026-10-25 — Spec T12: minimum wage table, computed MWE status (same branch)
 
