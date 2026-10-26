@@ -894,6 +894,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       // counts toward the 13th month, the SSS benefit does not
       earn('adjustment', e.label, amt, 'other_non_taxable', {
         meta: e.id,
+        benefit: e.benefit,
         sss: false,
         ...(e.benefit === 'maternity_differential' ? { thirteenthBasis: true } : {}),
       })
@@ -1076,8 +1077,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // uses what the maternity pay prepaid for it, then its own pay; what is
   // left waits for the maternity pay — or, at a client exempt from the
   // differential, the employer advances it as an employee share to collect (O3).
-  const maternityPay = round2(earnings.filter((l) => l.code === 'adjustment' && l.sss === false && l.bir === 'other_non_taxable').reduce((s, l) => s + l.amount, 0))
+  const maternityPay = round2(earnings.filter((l) => l.benefit).reduce((s, l) => s + l.amount, 0))
   const eeHere = round2(sssEe + sssMpfEe + philhealthEe + pagibigEe)
+  // what this payroll's own pay funds of its share (the maternity pay included)
+  let fromPayHere = 0
   if (maternityMonth && mat && eeHere > 0) {
     const m = mat.months.find((x) => x.month === mat.thisMonth)
     const fromPrepaid = round2(Math.min(eeHere, Math.max(0, (m?.covered ?? 0) - (m?.prepaidUsed ?? 0))))
@@ -1085,6 +1088,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     const rest = round2(eeHere - fromPrepaid)
     const ownPay = Math.max(0, grossPay - (differentialExempt ? maternityPay : 0))
     const short = round2(rest - Math.min(rest, ownPay))
+    fromPayHere = round2(rest - short)
     if (short > 0 && differentialExempt) {
       deductions.push({ code: 'ee_collect', label: 'Employee share to collect (advanced by the employer)', amount: -short })
       warnings.push(
@@ -1094,13 +1098,19 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       deductions.push({ code: 'ee_pending', label: 'Employee contributions to be deducted from the maternity pay', amount: -short })
     }
   }
-  // the payroll paying the maternity pay takes the shares of the other leave
-  // months: owed by months already paid, prepaid for months to come
+  // the payroll paying the maternity pay takes the shares of every leave
+  // month not yet funded: owed by payrolls already paid, prepaid for payrolls
+  // to come — its own month's other payrolls included (the month's usual
+  // share less what its pay, earlier payouts and this payroll funded)
   if (mat && maternityPay > 0 && !differentialExempt) {
     const usual = round2(stat.sss.ee + stat.sss.mpfEe + philhealthEeDue + stat.pagibigEe)
     const covers = mat.months
-      .filter((m) => m.month !== mat.thisMonth)
-      .map((m) => ({ month: m.month, amount: round2(Math.max(0, Math.max(usual, m.charged) - m.fundedByPay - m.covered)) }))
+      .map((m) => ({
+        month: m.month,
+        amount: round2(
+          Math.max(0, Math.max(usual, m.charged) - m.fundedByPay - m.covered - (m.month === mat.thisMonth ? fromPayHere : 0)),
+        ),
+      }))
       .filter((c) => c.amount > 0)
     if (covers.length > 0) {
       deductions.push({

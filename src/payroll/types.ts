@@ -398,6 +398,8 @@ export interface PayLine {
   leaveDays?: number
   /** Earnings only: false = not SSS compensation (Christmas bonus, allowance subject to liquidation, maternity pay). */
   sss?: boolean
+  /** Earnings only: the RA 11210 maternity pay this line is. */
+  benefit?: MaternityBenefit
   /** Deductions only: the maternity leave months a payout's contribution deduction covers. */
   covers?: { month: string; amount: number }[]
   /**
