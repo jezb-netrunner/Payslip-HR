@@ -102,8 +102,10 @@ alter table public.employee_allowances
     constraint employee_allowances_de_minimis_kind_check check (de_minimis_kind in
       ('medical_dependents','rice','uniform','medical_assistance','laundry','achievement_award',
        'christmas_gift','meal_ot','cba_productivity')),
+  -- NOT VALID: a de minimis allowance saved before this rule stays until it is
+  -- next edited (payroll taxes it meanwhile, with a warning)
   add constraint employee_allowances_de_minimis_named check (
-    (category = 'de_minimis') = (de_minimis_kind is not null));
+    (category = 'de_minimis') = (de_minimis_kind is not null)) not valid;
 
 -- one-time items: the benefit, and for unused leave converted to cash the days
 alter table public.payroll_adjustments
@@ -114,7 +116,7 @@ alter table public.payroll_adjustments
   add column if not exists leave_days numeric(6,2)
     constraint payroll_adjustments_leave_days_check check (leave_days > 0 and leave_days <= 365),
   add constraint payroll_adjustments_de_minimis_named check (
-    kind <> 'earning' or (category = 'de_minimis') = (de_minimis_kind is not null)),
+    kind <> 'earning' or (category = 'de_minimis') = (de_minimis_kind is not null)) not valid,
   add constraint payroll_adjustments_leave_conversion check (
     (de_minimis_kind = 'monetized_vl') = (leave_days is not null));
 

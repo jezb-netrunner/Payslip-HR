@@ -15,13 +15,20 @@ alter table public.employees rename column philhealth_ee_waiver_until to id_vali
 alter table public.employees rename constraint employees_philhealth_ee_waiver_check to employees_ph_ng_type_check;
 alter table public.employees rename constraint employees_philhealth_ee_waiver_dates to employees_ph_ng_dates;
 
+-- the first month is a month: an old waiver's start date counts from its month
+update public.employees
+  set ph_ng_from_month = date_trunc('month', ph_ng_from_month)::date
+  where ph_ng_from_month is not null and ph_ng_from_month <> date_trunc('month', ph_ng_from_month)::date;
+
+-- the ID is required from now on (NOT VALID: an old waiver without it stays
+-- until the record is next saved, and payroll deducts the share until then)
 alter table public.employees
   add column if not exists id_number text not null default ''
     constraint employees_id_number_length check (length(id_number) <= 60),
   add constraint employees_ph_ng_from_month_start check (ph_ng_from_month = date_trunc('month', ph_ng_from_month)::date),
   add constraint employees_ph_ng_documented check (
     ph_ng_type is null
-    or (length(btrim(id_number)) > 0 and (ph_ng_type <> 'solo_parent' or id_valid_until is not null)));
+    or (length(btrim(id_number)) > 0 and (ph_ng_type <> 'solo_parent' or id_valid_until is not null))) not valid;
 
 -- the government's half on each payslip: shown, not deducted, not remitted
 alter table public.payslips
