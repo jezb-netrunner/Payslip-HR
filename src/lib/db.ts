@@ -69,6 +69,12 @@ export interface Entity {
   maternity_differential_exempt: boolean
   dole_exemption_ref: string
   dole_exemption_valid_until: string | null
+  /** no regular holiday pay after unpaid absence on the workday before (default off) */
+  holiday_absence_rule: boolean
+  /** a retail or service establishment regularly employing less than 10 workers: no holiday pay (Art. 94) */
+  holiday_pay_exempt: boolean
+  retail_service_establishment: boolean
+  regular_workers: number | null
   is_active: boolean
   created_at: string
 }

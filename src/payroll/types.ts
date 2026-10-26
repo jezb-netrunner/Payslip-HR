@@ -352,6 +352,13 @@ export interface PayrollSettingsInput {
   sssInclude13thMonth?: boolean
   /** The client's DOLE exemption from the maternity salary differential, when it claims one. */
   maternityDifferentialExemption?: { ref: string; validUntil: string }
+  /**
+   * No regular holiday pay after unpaid absence on the workday before a
+   * holiday not worked (client setting, default off: the holiday is paid, O8).
+   */
+  holidayAbsenceRule?: boolean
+  /** A retail or service establishment regularly employing less than 10 workers: no holiday pay (Labor Code Art. 94). */
+  holidayPayExempt?: boolean
 }
 
 export interface PeriodInput {

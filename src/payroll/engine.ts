@@ -20,7 +20,7 @@
 
 import { annualizedWithholding, isTaxableBucket, type AnnualPayslipFact, type PriorEmployerInput } from './annual'
 import { bracketOf, computePagibig, computePhilHealth, computeSss } from './statutory'
-import { LEAVE, OVERTIME, PREMIUM } from './law'
+import { HOLIDAY_PAY, LEAVE, OVERTIME, PREMIUM } from './law'
 import { periodWithholding, REGULAR_COMPENSATION_BUCKETS, type PeriodTax, type TaxYearToDate } from './withholding'
 import {
   round2,
@@ -429,11 +429,34 @@ const FREQUENCY_LABEL: Record<PayrollSettingsInput['payFrequency'], string> = {
   monthly: 'monthly',
 }
 
+/** Why a client can't claim the holiday pay exemption ('' = it can). */
+export function holidayPayExemptProblem(c: { retailOrService: boolean; regularWorkers: number | null }): string {
+  if (!c.retailOrService) return 'Only a retail or service establishment can be exempt from holiday pay (Labor Code Art. 94).'
+  const limit = HOLIDAY_PAY.exemptBelowWorkers.value
+  if (c.regularWorkers === null || !(c.regularWorkers < limit)) {
+    return `Only an establishment regularly employing less than ${limit} workers is exempt from holiday pay (Labor Code Art. 94).`
+  }
+  return ''
+}
+
+/**
+ * A retail or service establishment regularly employing less than 10
+ * workers pays no holiday pay (Labor Code Art. 94(a); Omnibus Rules Book
+ * III, Rule IV, Sec. 1): its regular holidays are ordinary days (a rest day
+ * stays a rest day).
+ */
+function withoutHolidayPay(d: DayComputation): DayComputation {
+  if (d.dayType === 'regular_holiday') return { ...d, dayType: 'regular' }
+  if (d.dayType === 'regular_holiday_rest') return { ...d, dayType: 'rest_day' }
+  return d
+}
+
 export function computePayslip(params: ComputePayslipParams): PayslipComputation {
   const { employee, settings, period, tables, runType } = params
   if (runType === 'thirteenth_month') return computeThirteenthMonth(params)
   const extrasOnly = params.extrasOnly === true
-  const days = extrasOnly ? [] : params.days
+  const holidayPayExempt = settings.holidayPayExempt === true
+  const days = (extrasOnly ? [] : params.days).map((d) => (holidayPayExempt ? withoutHolidayPay(d) : d))
 
   const notes: string[] = []
   const warnings: string[] = []
@@ -470,11 +493,22 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     )
   }
 
-  const holidayPaid = unworkedHolidaysPaid([...(params.daysBefore ?? []), ...days], employed)
+  // The holiday absence rule is a client setting, off by default: an unworked
+  // regular holiday is then paid after an unpaid absence the workday before
+  // too (Labor Code Arts. 94, 100; Omnibus Rules Book III, Rule IV, Sec. 6
+  // "may not be paid", open item O8)
+  const holidayPaid = settings.holidayAbsenceRule
+    ? unworkedHolidaysPaid([...(params.daysBefore ?? []), ...days], employed)
+    : new Map<string, boolean>()
   const unpaidHolidays = days.filter((d) => holidayPaid.get(d.date) === false)
   if (unpaidHolidays.length > 0) {
     warnings.push(
-      `Regular holiday not paid (${unpaidHolidays.map((d) => `${d.holidayName ?? 'holiday'}, ${shortDate(d.date)}`).join('; ')}): no work or paid leave on the workday before it (IRR Book III, Rule IV, Sec. 6). If the employee worked that day, enter the time and recompute.`,
+      `Regular holiday not paid (${unpaidHolidays.map((d) => `${d.holidayName ?? 'holiday'}, ${shortDate(d.date)}`).join('; ')}): no work or paid leave on the workday before it (IRR Book III, Rule IV, Sec. 6; the client's holiday absence rule). If the employee worked that day, enter the time and recompute.`,
+    )
+  }
+  if (holidayPayExempt && params.days.some((d) => isRegularHolidayType(d.dayType))) {
+    notes.push(
+      'Regular holidays are paid as ordinary days: a retail or service establishment regularly employing less than 10 workers is exempt from holiday pay (Labor Code Art. 94).',
     )
   }
 
@@ -1281,7 +1315,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       statutoryMonthlyBase,
       notes,
       warnings,
-      days,
+      days: extrasOnly ? [] : params.days,
       tax: taxTrace,
     },
   }

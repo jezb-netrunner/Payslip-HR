@@ -353,7 +353,7 @@ describe('review fixes: holidays on rest days, unpaid leave, divisor semantics',
     expect(rest?.amount).toBe(295.89)
   })
 
-  it('withholds holiday pay from a daily-paid employee on leave without pay over the holiday', () => {
+  it('withholds holiday pay from a daily-paid employee on leave without pay over the holiday (holiday absence rule on)', () => {
     const holidays: HolidayLite[] = [
       { holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' },
     ]
@@ -372,7 +372,7 @@ describe('review fixes: holidays on rest days, unpaid leave, divisor semantics',
     })
     const slip = computePayslip({
       employee: dailyEmployee,
-      settings,
+      settings: { ...settings, holidayAbsenceRule: true },
       period,
       tables: DEFAULT_TABLES,
       days,
@@ -380,6 +380,9 @@ describe('review fixes: holidays on rest days, unpaid leave, divisor semantics',
     })
     expect(slip.earnings.find((l) => l.code === 'holiday')).toBeUndefined()
     expect(slip.earnings.find((l) => l.code === 'basic')?.amount).toBe(3500)
+    // with the rule off (the default) the holiday is paid
+    const byDefault = computePayslip({ employee: dailyEmployee, settings, period, tables: DEFAULT_TABLES, days, runType: 'regular' })
+    expect(byDefault.earnings.find((l) => l.code === 'holiday')?.amount).toBe(dailyEmployee.dailyRate)
   })
 })
 
@@ -637,11 +640,13 @@ describe('payslip: cash advances', () => {
   })
 })
 
-describe('regular holiday pay needs the workday before (IRR Book III, Rule IV, Secs. 6 and 10)', () => {
+describe('with the holiday absence rule on, regular holiday pay needs the workday before (IRR Book III, Rule IV, Secs. 6 and 10)', () => {
   const heroes: HolidayLite[] = [{ holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' }]
   const dailyEmployee: PayrollEmployeeInput = { ...monthlyEmployee, id: 'e4', payType: 'daily', monthlyRate: 0, dailyRate: 700 }
+  // the rule is a client setting, off by default (C8): these tests turn it on
+  const ruleOn = { ...settings, holidayAbsenceRule: true }
   const pay = (employee: PayrollEmployeeInput, days: DayComputation[], daysBefore?: DayComputation[]) =>
-    computePayslip({ employee, settings, period, tables: DEFAULT_TABLES, days, daysBefore, runType: 'regular' })
+    computePayslip({ employee, settings: ruleOn, period, tables: DEFAULT_TABLES, days, daysBefore, runType: 'regular' })
   // absent Friday Aug 28, the workday before Monday's holiday
   const absentFriday = WORKDAYS.filter((d) => d !== '2026-08-28' && d !== '2026-08-31').map((d) => entry(d))
 

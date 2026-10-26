@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { annualizedWithholding, summarizeYear } from './annual'
 import { DEFAULT_TABLES } from './defaults'
 import { buildAlphalist } from './alphalist'
-import { capShortfall, computePayslip, sssCompensation, type MaternityContext } from './engine'
+import { capShortfall, computePayslip, holidayPayExemptProblem, sssCompensation, type MaternityContext } from './engine'
 import { eachDate, endOfMonth } from '../lib/manila'
 import { remittances1601C } from './remittance'
 import { computeSss, computeWithholdingTax } from './statutory'
@@ -569,5 +569,51 @@ describe('C7: PhilHealth — the national government pays the employee half for 
     expect(philhealthNgProblem('solo_parent', '2026-10-01', '', '2027-09-01')).toMatch(/Solo Parent ID/)
     expect(philhealthNgProblem('solo_parent', '2026-10-01', 'SPIC-1', '')).toMatch(/valid until/)
     expect(philhealthNgProblem('pwd', '2026-08-01', 'PWD-1', '')).toBe('')
+  })
+})
+
+describe('C8: holiday pay settings', () => {
+  const daily: PayrollEmployeeInput = { ...mwe, id: 'd1', isMinimumWageEarner: false, schedule: { days: [1, 2, 3, 4, 5], start: '08:00', end: '17:00', break_minutes: 60 } }
+  const period: PeriodInput = { start: '2026-08-27', end: '2026-08-31', index: 2, count: 2 }
+  const rest = (date: string): DayComputation => ({ ...workday(date, 'rest_day'), scheduled: false, workedMinutes: 0, payableMinutes: 0, expectedMinutes: 0 })
+  // worked Thursday, absent without pay Friday, the weekend, then Monday's regular holiday
+  const week = (holidayWorked: boolean): DayComputation[] => [
+    workday('2026-08-27', 'regular'),
+    { ...workday('2026-08-28', 'regular'), workedMinutes: 0, payableMinutes: 0, absent: true },
+    rest('2026-08-29'),
+    rest('2026-08-30'),
+    holidayWorked
+      ? { ...workday('2026-08-31', 'regular_holiday'), holidayName: 'National Heroes Day' }
+      : { ...workday('2026-08-31', 'regular_holiday'), holidayName: 'National Heroes Day', workedMinutes: 0, payableMinutes: 0 },
+  ]
+  const pay = (s: PayrollSettingsInput, days: DayComputation[]) =>
+    computePayslip({ employee: daily, settings: s, period, tables: DEFAULT_TABLES, days, runType: 'regular' })
+  const holidayPay = (slip: ReturnType<typeof pay>) => slip.earnings.find((l) => l.code === 'holiday')?.amount ?? 0
+
+  it('default (rule off, O8): an unpaid absence on the workday before does not cost the holiday pay', () => {
+    expect(holidayPay(pay(settings, week(false)))).toBe(700)
+  })
+
+  it('rule on: no regular holiday pay after an unpaid absence on the workday before', () => {
+    const slip = pay({ ...settings, holidayAbsenceRule: true }, week(false))
+    expect(holidayPay(slip)).toBe(0)
+    expect(slip.trace.warnings.some((w) => w.startsWith('Regular holiday not paid'))).toBe(true)
+  })
+
+  it('rule on and the employee worked the holiday: paid as a worked holiday (200%)', () => {
+    const slip = pay({ ...settings, holidayAbsenceRule: true }, week(true))
+    expect(holidayPay(slip)).toBe(700)
+    expect(slip.earnings.find((l) => l.code === 'basic')?.amount).toBe(1400) // Thursday + the holiday's 100%
+  })
+
+  it('an exempt retail or service establishment (fewer than 10 workers) pays a regular holiday as an ordinary day', () => {
+    const exempt = { ...settings, holidayPayExempt: true }
+    expect(holidayPay(pay(exempt, week(false)))).toBe(0)
+    const worked = pay(exempt, week(true))
+    expect(holidayPay(worked)).toBe(0)
+    expect(worked.earnings.find((l) => l.code === 'basic')?.amount).toBe(1400)
+    expect(holidayPayExemptProblem({ retailOrService: true, regularWorkers: 9 })).toBe('')
+    expect(holidayPayExemptProblem({ retailOrService: true, regularWorkers: 10 })).toMatch(/less than 10/)
+    expect(holidayPayExemptProblem({ retailOrService: false, regularWorkers: 3 })).toMatch(/retail or service/)
   })
 })

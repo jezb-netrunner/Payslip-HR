@@ -98,4 +98,11 @@ update employees set ph_ng_type = 'pwd', ph_ng_from_month = '2026-08-01', id_num
   where id = '20000000-0000-0000-0000-0000000017f1';
 select pg_temp.check((select column_default from information_schema.columns where table_name = 'payslips' and column_name = 'philhealth_ng') = '0', 'payslips.philhealth_ng defaults to 0');
 
+\echo '--- 17.6 C8: the holiday absence rule is off by default; only a small retail or service establishment is exempt from holiday pay'
+select pg_temp.check(not (select holiday_absence_rule from entities where id = '10000000-0000-0000-0000-0000000017f0'), 'rule off by default (O8)');
+select pg_temp.check(not (select holiday_pay_exempt from entities where id = '10000000-0000-0000-0000-0000000017f0'), 'not exempt by default');
+select pg_temp.expect_error($$update entities set holiday_pay_exempt = true where id = '10000000-0000-0000-0000-0000000017f0'$$, '%entities_holiday_pay_exempt_small_retail%');
+select pg_temp.expect_error($$update entities set holiday_pay_exempt = true, retail_service_establishment = true, regular_workers = 10 where id = '10000000-0000-0000-0000-0000000017f0'$$, '%entities_holiday_pay_exempt_small_retail%');
+update entities set holiday_pay_exempt = true, retail_service_establishment = true, regular_workers = 9 where id = '10000000-0000-0000-0000-0000000017f0';
+
 \echo 'PASSED 17'

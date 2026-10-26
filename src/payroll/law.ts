@@ -52,3 +52,9 @@ export const PHILHEALTH_NG = {
     source: 'PhilHealth Circular 2026-0015 Secs. V.C, V.E.5, V.F.2 (effective 26 Sep 2026) and its Q&A; RA 11861',
   },
 } satisfies Record<string, LegalValue<string>>
+
+/** Holiday pay (Labor Code Art. 94). */
+export const HOLIDAY_PAY = {
+  /** retail and service establishments regularly employing fewer workers than this are exempt from holiday pay */
+  exemptBelowWorkers: { value: 10, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 94(a); Omnibus Rules Book III, Rule IV, Sec. 1' },
+} satisfies Record<string, LegalValue>

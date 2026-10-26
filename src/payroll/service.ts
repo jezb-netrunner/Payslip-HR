@@ -332,7 +332,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         name: h.name,
         kind: h.kind,
       }))
-  const looksBack = holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start)
+  // only the client's holiday absence rule (off by default) needs those days
+  const looksBack = entity.holiday_absence_rule === true && holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start)
   const attendanceFrom = looksBack ? lookbackStart : run.period_start
 
   const candidates = employeesForRun(
@@ -603,6 +604,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       paidVlDaysPerYear: Number(entity.paid_vl_days_per_year ?? 0),
       silConversionTaxable: entity.sil_conversion_taxable !== false,
       sssInclude13thMonth: entity.sss_include_13th_month !== false,
+      holidayAbsenceRule: entity.holiday_absence_rule === true,
+      holidayPayExempt: entity.holiday_pay_exempt === true,
       ...(entity.maternity_differential_exempt && entity.dole_exemption_valid_until
         ? { maternityDifferentialExemption: { ref: entity.dole_exemption_ref, validUntil: entity.dole_exemption_valid_until } }
         : {}),

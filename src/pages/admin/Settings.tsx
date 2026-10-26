@@ -9,6 +9,7 @@ import { CONTRIBUTION_TIMING_LABELS, FREQUENCY_LABELS, PH_REGIONS, ROUNDING_LABE
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { splitClientTin } from '../../lib/format'
+import { holidayPayExemptProblem } from '../../payroll/engine'
 
 export default function Settings() {
   const { entity, reload } = useEntity()
@@ -34,6 +35,12 @@ function settingsRangeProblem(s: Entity): string | null {
   if (!(n(s.paid_vl_days_per_year) >= 0 && n(s.paid_vl_days_per_year) <= 365)) return 'Paid vacation leave days must be between 0 and 365.'
   if (s.maternity_differential_exempt && (!s.dole_exemption_ref.trim() || !s.dole_exemption_valid_until))
     return "A DOLE exemption from the maternity salary differential needs the exemption's reference and the date it is valid until."
+  const workers = s.regular_workers === null || String(s.regular_workers) === '' ? null : n(s.regular_workers)
+  if (workers !== null && !(int(workers) && workers >= 0)) return 'Workers regularly employed must be a whole number.'
+  if (s.holiday_pay_exempt) {
+    const problem = holidayPayExemptProblem({ retailOrService: s.retail_service_establishment, regularWorkers: workers })
+    if (problem) return problem
+  }
   return null
 }
 
@@ -95,6 +102,10 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           maternity_differential_exempt: s.maternity_differential_exempt,
           dole_exemption_ref: s.maternity_differential_exempt ? s.dole_exemption_ref.trim() : '',
           dole_exemption_valid_until: s.maternity_differential_exempt ? s.dole_exemption_valid_until || null : null,
+          holiday_absence_rule: s.holiday_absence_rule,
+          retail_service_establishment: s.retail_service_establishment,
+          regular_workers: s.regular_workers === null || String(s.regular_workers) === '' ? null : Number(s.regular_workers),
+          holiday_pay_exempt: s.holiday_pay_exempt,
         })
         .eq('id', s.id)
       if (error) throw error
@@ -299,6 +310,26 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 checked={s.maternity_differential_exempt}
                 onChange={(v) => set('maternity_differential_exempt', v)}
                 label="DOLE exempted this client from the maternity salary differential"
+              />
+              <Toggle
+                checked={s.holiday_absence_rule}
+                onChange={(v) => set('holiday_absence_rule', v)}
+                label="No regular holiday pay after an unpaid absence on the workday before (unless the holiday is worked)"
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Toggle
+                  checked={s.retail_service_establishment}
+                  onChange={(v) => set('retail_service_establishment', v)}
+                  label="Retail or service establishment"
+                />
+                <Field label="Workers regularly employed" hint="All the establishment's workers, not only those on this payroll">
+                  <Input type="number" min={0} value={s.regular_workers ?? ''} onChange={(e) => set('regular_workers', e.target.value as unknown as number)} />
+                </Field>
+              </div>
+              <Toggle
+                checked={s.holiday_pay_exempt}
+                onChange={(v) => set('holiday_pay_exempt', v)}
+                label="Exempt from holiday pay (retail or service establishment regularly employing less than 10 workers, Art. 94)"
               />
               {s.maternity_differential_exempt && (
                 <div className="grid gap-3 sm:grid-cols-2">
