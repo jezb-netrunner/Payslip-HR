@@ -53,6 +53,8 @@ export interface AlphalistRow {
   issues: string[]
   /** Withheld vs due difference, settled by an annualizing run; normal while the year is in progress. */
   withholdingGap: string
+  /** The 2316 of an employee separated in the year is issued on the last pay day (NIRC Sec. 83(A)); else ''. */
+  issuedOn: string
 }
 
 /** The pay rate on an employee's last minimum-wage payslip of the year. */
@@ -118,6 +120,7 @@ export function buildAlphalist(params: {
       issues.push(`Separated ${e.separation_date}, paid in ${year}: check the employment dates the BIR module accepts`)
     }
 
+    const lastPay = facts.reduce((m, f) => ((f.payDate ?? '') > m ? (f.payDate ?? '') : m), '')
     rows.push({
       schedule: summary.allMwe ? 2 : 1,
       employee: e,
@@ -146,6 +149,7 @@ export function buildAlphalist(params: {
           : summary.variance < 0
             ? `Over-withheld by ₱${(-summary.variance).toLocaleString()} — refund via annualization`
             : '',
+      issuedOn: separated ? lastPay : '',
     })
   }
   return rows.sort((a, b) =>

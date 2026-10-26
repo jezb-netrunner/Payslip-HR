@@ -117,6 +117,7 @@ function whtMethodOf(p: YearPayslip): string | undefined {
 export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
   return {
     payMonth: p.pay_date ? `${p.pay_date.slice(0, 7)}-01` : (p.period_month ?? ''),
+    payDate: p.pay_date ?? undefined,
     isMwe: p.is_minimum_wage_earner,
     earnings: p.earnings.map((l) => ({ amount: Number(l.amount), bir: l.bir, taxable: l.taxable })),
     contributionsEe: Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee),

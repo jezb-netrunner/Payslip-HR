@@ -11,11 +11,58 @@ import { fmtDate, fmtMonth, fmtTin, fullName, money, plural } from '../../lib/fo
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { alphalistCsv, buildAlphalist, type AlphalistRow, type YearEndRate } from '../../payroll/alphalist'
+import { remittances1601C, type RemittanceMonth } from '../../payroll/remittance'
+import { round2 } from '../../payroll/types'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
 import Insights from './Insights'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
+
+type WithholdingSlip = { pay_date: string | null; withholding_tax: number }
+
+/**
+ * The year's 1601-C by month (pay date): tax withheld, refunds paid, and
+ * the amount to remit — a refund larger than the month's tax carries to the
+ * following months (NIRC Sec. 79(F); RR 2-98 Sec. 2.79(B)(5)(b)).
+ */
+function monthlyRemittances(slips: WithholdingSlip[], year: number, openingCarry = 0): RemittanceMonth[] {
+  const by = new Map<string, { withheld: number; refunds: number }>()
+  for (const p of slips) {
+    if (!p.pay_date || Number(p.pay_date.slice(0, 4)) !== year) continue
+    const k = p.pay_date.slice(5, 7)
+    const m = by.get(k) ?? { withheld: 0, refunds: 0 }
+    const v = Number(p.withholding_tax)
+    if (v >= 0) m.withheld += v
+    else m.refunds -= v
+    by.set(k, m)
+  }
+  return remittances1601C(
+    MONTHS.map((mm) => ({
+      month: `${year}-${mm}-01`,
+      withheld: round2(by.get(mm)?.withheld ?? 0),
+      refunds: round2(by.get(mm)?.refunds ?? 0),
+    })),
+    openingCarry,
+  )
+}
+
+/** Refunds the previous year left unused at December's 1601-C, applied from January. */
+async function refundCarryInto(entityId: string, year: number): Promise<number> {
+  const prev = await fetchAll<WithholdingSlip>((from, to) =>
+    supabase
+      .from('payslips')
+      .select('pay_date, withholding_tax, payroll_runs!inner(status)')
+      .eq('entity_id', entityId)
+      .in('payroll_runs.status', ['finalized', 'paid'])
+      .gte('pay_date', `${year - 1}-01-01`)
+      .lte('pay_date', `${year - 1}-12-31`)
+      .order('id')
+      .range(from, to),
+  )
+  if (!prev.some((p) => Number(p.withholding_tax) < 0)) return 0
+  return monthlyRemittances(prev, year - 1).at(-1)?.carryOut ?? 0
+}
 
 export default function Reports() {
   const { entity } = useEntity()
@@ -342,6 +389,7 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
       <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2316 (Certificate of Compensation Payment / Tax Withheld).</p>
       <p style="font-size:12px"><b>Employee:</b> ${esc(`${e.last_name}, ${e.first_name} ${e.middle_name ?? ''}`)} · TIN ${esc(e.tin ?? '—')} · Born ${esc(e.birth_date ?? '—')}<br/>
       <b>Address:</b> ${esc(e.address ?? '—')} ${esc(e.zip_code ?? '')} · <b>Period:</b> ${esc(row.from)} to ${esc(row.to)}${row.schedule === 2 ? ` · <b>MWE</b> ${esc(row.region)} SMW ₱${val(row.smwPerDay)}/day` : ''}<br/>
+      ${row.issuedOn ? `<b>Date issued:</b> ${esc(row.issuedOn)} (last pay day of a separated employee)<br/>` : ''}
       <b>Employer:</b> ${esc(entity.name)} · TIN ${esc(fmtTin(entity.tin, entity.tin_branch_code))} · ${esc(entity.registered_address)} ${esc(entity.zip_code)}
       ${row.prevEmployerTin ? `<br/><b>Previous employer:</b> ${esc(row.prevEmployerName)} · TIN ${esc(row.prevEmployerTin)}` : ''}</p>
       ${sections}</body></html>`,
@@ -356,6 +404,7 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
         <p className="text-xs text-slate-500">
           {e.last_name}, {e.first_name} · TIN {e.tin || '—'} · {fmtDate(row.from)} – {fmtDate(row.to)}
           {row.schedule === 2 && ` · MWE (${row.region}) ₱${row.smwPerDay}/day × ${row.factor} days`}
+          {row.issuedOn && ` · issued ${fmtDate(row.issuedOn)}, the last pay day (separated)`}
         </p>
         {groups.map(([title, items]) => (
           <div key={title}>
@@ -400,21 +449,18 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
   }, [entity.id, year])
   const error = alphaError || remitError
 
-  const withheldByMonth = useMemo(() => {
-    const m: Record<string, number> = {}
-    for (const s of slips) {
-      const k = (s.pay_date ?? '').slice(5, 7)
-      m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
-    }
-    return m
-  }, [slips])
+  const [carryIn, setCarryIn] = useState(0)
+  useEffect(() => {
+    refundCarryInto(entity.id, year).then(setCarryIn, () => setCarryIn(0))
+  }, [entity.id, year])
+  const due = useMemo(() => monthlyRemittances(slips, year, carryIn), [slips, year, carryIn])
 
   if (error) return <Card><p className="text-sm text-rose-600">{error}</p></Card>
   if (!rows) return <Spinner />
 
-  const months = MONTHS.map((mm) => {
+  const months = MONTHS.map((mm, i) => {
     const r = remits.find((x) => x.period_month.slice(5, 7) === mm)
-    return { mm, payroll: Math.round((withheldByMonth[mm] ?? 0) * 100) / 100, r }
+    return { mm, payroll: due[i].toRemit, r }
   })
   const totals = {
     payroll: months.reduce((s, m) => s + m.payroll, 0),
@@ -502,7 +548,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {months.map((m) => {
-              const mismatch = m.r ? Math.abs(Number(m.r.taxes_withheld) - m.payroll) > 0.005 : m.payroll > 0
+              const mismatch = m.r ? Math.abs(Number(m.r.taxes_withheld) + Number(m.r.adjustment) - m.payroll) > 0.005 : m.payroll > 0
               return (
                 <tr key={m.mm}>
                   <Td className="font-semibold">{fmtMonth(`${year}-${m.mm}-01`)}</Td>
@@ -529,8 +575,9 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
           </tbody>
         </TableShell>
         <p className="mt-3 text-[11px] text-slate-400">
-          "Withheld per payroll" sums finalized payslips by the month they were paid (pay date) — refunds from annualization reduce it;
-          record each monthly 1601-C payment under 1601-C remittances. Amber = payroll and remittance differ.
+          "Withheld per payroll" is the month's tax to remit: finalized payslips by the month they were paid (pay date), less the
+          year-end refunds paid that month — a refund larger than the month's tax carries to the following months. Record each
+          monthly 1601-C payment under 1601-C remittances. Amber = payroll and remittance differ.
         </p>
       </Card>
 
@@ -553,7 +600,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
 function Remittances({ entity, year }: { entity: Entity; year: number }) {
   const toast = useToast()
   const [remits, setRemits] = useState<TaxRemittance[]>([])
-  const [byMonth, setByMonth] = useState<Record<string, number>>({})
+  const [due, setDue] = useState<RemittanceMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [editing, setEditing] = useState<Partial<TaxRemittance> & { period_month: string } | null>(null)
@@ -561,19 +608,15 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
   const load = useCallback(async () => {
     setLoadError('')
     try {
-      const [{ data, error }, slips] = await Promise.all([
+      const [{ data, error }, slips, carryIn] = await Promise.all([
         supabase.from('tax_remittances').select('*').eq('entity_id', entity.id).gte('period_month', `${year}-01-01`).lte('period_month', `${year}-12-01`),
         fetchFinalizedPayslipsForTaxYear(entity.id, year),
+        refundCarryInto(entity.id, year),
       ])
       if (error) throw error
       setRemits((data ?? []) as TaxRemittance[])
-      // 1601-C covers tax withheld in the month the pay was released
-      const m: Record<string, number> = {}
-      for (const s of slips) {
-        const k = (s.pay_date ?? '').slice(5, 7)
-        m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
-      }
-      setByMonth(m)
+      // 1601-C covers tax withheld in the month the pay was released, less refunds paid that month
+      setDue(monthlyRemittances(slips, year, carryIn))
     } catch (err) {
       setLoadError(errorMessage(err, 'Failed to load'))
     } finally {
@@ -616,6 +659,8 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
           <tr>
             <Th>Month</Th>
             <Th className="text-right">Withheld per payroll</Th>
+            <Th className="text-right">Refunds paid</Th>
+            <Th className="text-right">To remit</Th>
             <Th>Date remitted</Th>
             <Th>Reference</Th>
             <Th className="text-right">Total remitted</Th>
@@ -623,20 +668,31 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {MONTHS.map((mm) => {
+          {MONTHS.map((mm, i) => {
             const month = `${year}-${mm}-01`
             const r = remits.find((x) => x.period_month === month)
-            const payroll = Math.round((byMonth[mm] ?? 0) * 100) / 100
+            const d = due[i] ?? { withheld: 0, refunds: 0, carryIn: 0, toRemit: 0, carryOut: 0 }
+            const applied = round2(d.withheld - d.toRemit)
             return (
               <tr key={mm} className="hover:bg-slate-50">
                 <Td className="font-semibold">{fmtMonth(month)}</Td>
-                <Td className="text-right">{money(payroll)}</Td>
+                <Td className="text-right">{money(d.withheld)}</Td>
+                <Td className="text-right text-xs">
+                  {d.refunds > 0 || d.carryIn > 0 ? (
+                    <>
+                      {money(d.refunds)}
+                      {d.carryIn > 0 && <span className="block text-slate-400">+ {money(d.carryIn)} carried in</span>}
+                      {d.carryOut > 0 && <span className="block text-amber-600">{money(d.carryOut)} carried to next month</span>}
+                    </>
+                  ) : '—'}
+                </Td>
+                <Td className="text-right">{money(d.toRemit)}</Td>
                 <Td className="text-xs">{r?.date_paid ? fmtDate(r.date_paid) : '—'}</Td>
                 <Td className="text-xs">{r ? `${r.bank_or_agency || '—'} · ${r.reference_no || '—'}` : '—'}</Td>
                 <Td className="text-right font-semibold">{r ? money(Number(r.total_remitted)) : '—'}</Td>
                 <Td>
                   <button
-                    onClick={() => setEditing(r ? { ...r } : { period_month: month, taxes_withheld: payroll, adjustment: 0, penalties: 0 })}
+                    onClick={() => setEditing(r ? { ...r } : { period_month: month, taxes_withheld: d.withheld, adjustment: -applied, penalties: 0 })}
                     className="flex items-center gap-1 text-xs font-semibold text-brand-600"
                   >
                     <Pencil className="size-3.5" /> {r ? 'Edit' : 'Record'}
@@ -648,7 +704,8 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
         </tbody>
       </TableShell>
       <p className="mt-3 text-[11px] text-slate-400">
-        1601-C is filed and paid monthly (eFPS/eBIRForms); these records feed Part II of the 1604-C.
+        1601-C is filed and paid monthly (eFPS/eBIRForms); these records feed Part II of the 1604-C. Year-end refunds (due by
+        January 25) reduce the 1601-C of the month they are paid; what a month can't absorb carries to the next months.
       </p>
 
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={`1601-C — ${editing ? fmtMonth(editing.period_month) : ''}`}>

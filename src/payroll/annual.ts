@@ -21,6 +21,8 @@ export interface AnnualPayslipFact {
    *  when compensation is paid, so this — not the payroll month — decides
    *  the tax year and the December / January–November split. */
   payMonth: string
+  /** The pay date (the 2316 of a separated employee is dated the last one). */
+  payDate?: string
   isMwe: boolean
   earnings: { amount: number; bir?: BirBucket; taxable?: boolean }[]
   /** SSS (incl. MPF) + PhilHealth + Pag-IBIG employee shares. */

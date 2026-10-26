@@ -356,6 +356,20 @@ export function applyNetPayRounding(
   }
 }
 
+/**
+ * The year-end (or separation) shortfall is withheld from this pay only as
+ * far as it goes: net pay reaches zero, never below. The employer pays the
+ * rest — remitted with the month's 1601-C, shown as withheld on the 2316 —
+ * and collects it from the employee as an advance. A refund is never capped.
+ * Basis: NIRC Secs. 79(F), 83(A); RR 2-98 Sec. 2.79(B)(5)(b) as amended by
+ * RR 11-2018.
+ */
+export function capShortfall(due: number, available: number): { withheld: number; advanced: number } {
+  if (due <= 0) return { withheld: round2(due), advanced: 0 }
+  const withheld = round2(Math.min(due, Math.max(0, available)))
+  return { withheld, advanced: round2(due - withheld) }
+}
+
 const WHT_TABLE: Record<PayrollSettingsInput['payFrequency'], 'weekly' | 'semi_monthly' | 'monthly'> = {
   weekly: 'weekly',
   semi_monthly: 'semi_monthly',
@@ -953,6 +967,15 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   }
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
   deductions.push(...otherLines)
+  if (params.annualization) {
+    // what this pay holds for the tax after contributions and the other deductions
+    const available = round2(grossPay - deductions.filter((l) => l.code !== 'wht').reduce((s, l) => s + l.amount, 0))
+    const { advanced } = capShortfall(withholdingTax, available)
+    if (advanced > 0) {
+      deductions.push({ code: 'tax_advance', label: 'Tax advanced by employer (receivable)', amount: -advanced })
+      warnings.push(taxAdvanceWarning(advanced))
+    }
+  }
 
   // ---- cash advances: repaid from what is left, never past zero net pay ----
   // They don't touch taxable pay; an installment net pay can't cover stays
@@ -1175,6 +1198,11 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
 
   const deductions: PayLine[] = []
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
+  const { advanced } = capShortfall(withholdingTax, gross13)
+  if (params.annualization && advanced > 0) {
+    deductions.push({ code: 'tax_advance', label: 'Tax advanced by employer (receivable)', amount: -advanced })
+    warnings.push(taxAdvanceWarning(advanced))
+  }
 
   const totalDeductions = round2(deductions.reduce((s, l) => s + l.amount, 0))
   const netExact = round2(gross13 - totalDeductions)
@@ -1226,6 +1254,10 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       tax: taxTrace,
     },
   }
+}
+
+function taxAdvanceWarning(advanced: number): string {
+  return `₱${plainAmount(advanced)} of the tax shortfall is more than this pay can bear: the employer pays it with this month's 1601-C, the 2316 shows it as withheld, and it is recorded as "Tax advanced by employer", a receivable to collect from the employee. No shortfall carries into January.`
 }
 
 /** 1234.5 -> "1,234.50": payslip lines print in PDFs, whose fonts have no peso sign. */

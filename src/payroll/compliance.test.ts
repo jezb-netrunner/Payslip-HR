@@ -4,7 +4,9 @@
 import { describe, expect, it } from 'vitest'
 import { annualizedWithholding, summarizeYear } from './annual'
 import { DEFAULT_TABLES } from './defaults'
-import { computePayslip } from './engine'
+import { buildAlphalist } from './alphalist'
+import { capShortfall, computePayslip } from './engine'
+import { remittances1601C } from './remittance'
 import { computeWithholdingTax } from './statutory'
 import { periodsThisYear, periodWithholding } from './withholding'
 import type { DayComputation, DayType, PayLine, PayrollEmployeeInput, PayrollSettingsInput, PeriodInput } from './types'
@@ -217,5 +219,79 @@ describe('C2: withholding on supplementary pay', () => {
     })
     expect(slip.trace.tax).toMatchObject({ method: 'supplementary', supplementary: 20000 })
     expect(slip.trace.tax?.regular).toBe(slip.taxableIncome - 20000)
+  })
+})
+
+describe('C3: year-end adjustment, refunds, separations', () => {
+  it('YEA-1: withholds the shortfall up to the pay after contributions; the employer pays the rest', () => {
+    expect(capShortfall(25000, 18500)).toEqual({ withheld: 18500, advanced: 6500 })
+    expect(capShortfall(25000, 30000)).toEqual({ withheld: 25000, advanced: 0 })
+    expect(capShortfall(-1200, 18500)).toEqual({ withheld: -1200, advanced: 0 }) // a refund is never capped
+  })
+
+  it('YEA-1 in the payslip: full annual tax withheld on the 2316, net pay 0, receivable recorded', () => {
+    const employee: PayrollEmployeeInput = { ...mwe, isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 20000, dailyRate: 0 }
+    // the year so far: 600,000 taxable with nothing withheld (an under-withheld year)
+    const ytd = Array.from({ length: 11 }, (_, i) => ({
+      payMonth: `2026-${String(i + 1).padStart(2, '0')}-01`,
+      isMwe: false,
+      earnings: [{ amount: 600000 / 11, bir: 'basic' as const, taxable: true }],
+      contributionsEe: 0,
+      unionDues: 0,
+      withholdingTax: 0,
+    }))
+    const slip = computePayslip({
+      employee,
+      settings: { ...settings, payFrequency: 'monthly', workingDaysDivisor: 261 },
+      period: { start: '2026-12-01', end: '2026-12-31', index: 1, count: 1 },
+      tables: DEFAULT_TABLES,
+      days: [],
+      runType: 'regular',
+      annualization: { payMonth: '2026-12-01', ytd },
+    })
+    const contributions = slip.sssEe + slip.sssMpfEe + slip.philhealthEe + slip.pagibigEe
+    const advance = slip.deductions.find((l) => l.code === 'tax_advance')
+    expect(slip.withholdingTax).toBeGreaterThan(slip.grossPay - contributions)
+    expect(advance?.amount).toBe(-Math.round((slip.withholdingTax - (slip.grossPay - contributions)) * 100) / 100)
+    expect(advance?.label).toBe('Tax advanced by employer (receivable)')
+    expect(slip.netPay).toBe(0)
+    expect(slip.trace.warnings.some((w) => w.includes('Tax advanced by employer'))).toBe(true)
+  })
+
+  it('YEA-2: a refund reduces the 1601-C of the month it is paid; the unused part carries to later months', () => {
+    const months = remittances1601C([
+      { month: '2027-01-01', withheld: 800, refunds: 1200 },
+      { month: '2027-02-01', withheld: 1000, refunds: 0 },
+    ])
+    expect(months[0]).toMatchObject({ toRemit: 0, carryOut: 400 })
+    expect(months[1]).toMatchObject({ carryIn: 400, toRemit: 600, carryOut: 0 })
+  })
+
+  it('SEP-1: a separation before December settles the tax on the annual table without projecting; the 2316 is dated the last pay', () => {
+    const fact = (month: string, taxable: number, withheld: number, payDate?: string) => ({
+      payMonth: `${month}-01`,
+      payDate,
+      isMwe: false,
+      earnings: [{ amount: taxable, bir: 'basic' as const, taxable: true }],
+      contributionsEe: 0,
+      unionDues: 0,
+      withholdingTax: withheld,
+    })
+    const ytd = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'].map((m) => fact(m, 60000, 2600))
+    const last = fact('2026-06', 30000, 0, '2026-06-15')
+    const { withholding, summary } = annualizedWithholding(ytd, last, DEFAULT_TABLES.bir_annual)
+    expect(summary.totalTaxable).toBe(330000)
+    expect(summary.taxDue).toBe(12000)
+    expect(withholding).toBe(-1000)
+    const [row] = buildAlphalist({
+      year: 2026,
+      entity: { minimum_wage_region: 'CAR', working_days_divisor: 261 } as never,
+      employees: [{ id: 'e', hire_date: '2020-01-01', separation_date: '2026-06-15', separation_reason: 'resignation', employment_status: 'regular', pay_type: 'monthly', monthly_rate: 60000, daily_rate: 0, last_name: 'A', first_name: 'B', tin: '1', birth_date: '1990-01-01', address: 'x', zip_code: '1' } as never],
+      payslips: [...ytd.map((f, i) => ({ employee_id: 'e', fact: { ...f, payDate: `2026-0${i + 1}-30` } })), { employee_id: 'e', fact: { ...last, withholdingTax: withholding } }],
+      taxYears: [],
+      annual: DEFAULT_TABLES.bir_annual,
+    })
+    expect(row.issuedOn).toBe('2026-06-15')
+    expect(row.summary.variance).toBe(0)
   })
 })
