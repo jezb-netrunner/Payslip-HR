@@ -113,10 +113,11 @@ export async function fetchFinalizedPayslipsForTaxYear(entityId: string, year: n
 
 /**
  * De minimis benefits the tax year's payslips already paid, per benefit, for
- * their ceilings: in the pay month, half-year and year of `payDate` (pesos;
+ * their ceilings: in the payroll month `periodMonth` (a monthly allowance is
+ * split over its payrolls), and the half-year and year of `payDate` (pesos;
  * days for monetized leave).
  */
-export function deMinimisPaid(slips: YearPayslip[], payDate: string): Partial<Record<DeMinimisKind, DeMinimisUsed>> {
+export function deMinimisPaid(slips: YearPayslip[], payDate: string, periodMonth: string): Partial<Record<DeMinimisKind, DeMinimisUsed>> {
   const used: Partial<Record<DeMinimisKind, DeMinimisUsed>> = {}
   const half = (d: string) => (Number(d.slice(5, 7)) <= 6 ? 1 : 2)
   for (const p of slips) {
@@ -127,7 +128,7 @@ export function deMinimisPaid(slips: YearPayslip[], payDate: string): Partial<Re
       const v = l.dm === 'monetized_vl' ? Number(l.leaveDays ?? 0) : Number(l.amount)
       const u = used[l.dm] ?? { month: 0, semester: 0, year: 0 }
       used[l.dm] = {
-        month: round2(u.month + (d.slice(0, 7) === payDate.slice(0, 7) ? v : 0)),
+        month: round2(u.month + (p.period_month === periodMonth ? v : 0)),
         semester: round2(u.semester + (half(d) === half(payDate) ? v : 0)),
         year: round2(u.year + v),
       }
@@ -821,7 +822,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ? undefined
         : Math.max(0, tables.bir_annual.other_benefits_exemption_cap - prior.thirteenthOtherBenefitsExempt - taxYearBenefits),
       taxYear: taxYearToDate,
-      deMinimisUsed: deMinimisPaid(taxBefore, run.pay_date),
+      deMinimisUsed: deMinimisPaid(taxBefore, run.pay_date, run.period_month),
       maternity: leaveFor.has(emp.id)
         ? maternityContext(leaveFor.get(emp.id)!, matSlips.filter((p) => p.employee_id === emp.id), run.period_month)
         : undefined,
