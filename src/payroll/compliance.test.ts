@@ -11,6 +11,7 @@ import { remittances1601C } from './remittance'
 import { computeSss, computeWithholdingTax } from './statutory'
 import { periodsThisYear, periodWithholding } from './withholding'
 import { philhealthNgFor, philhealthNgProblem } from './philhealth'
+import { filingCalendar, type DueDate } from './dueDates'
 import { round2, type DayComputation, type DayType, type PayLine, type PayrollEmployeeInput, type PayrollSettingsInput, type PeriodInput } from './types'
 
 const settings: PayrollSettingsInput = {
@@ -615,5 +616,43 @@ describe('C8: holiday pay settings', () => {
     expect(holidayPayExemptProblem({ retailOrService: true, regularWorkers: 9 })).toBe('')
     expect(holidayPayExemptProblem({ retailOrService: true, regularWorkers: 10 })).toMatch(/less than 10/)
     expect(holidayPayExemptProblem({ retailOrService: false, regularWorkers: 3 })).toMatch(/retail or service/)
+  })
+})
+
+describe('C9: filing due dates', () => {
+  const client = { filing: 'manual' as const, efpsGroup: null, philhealthEmployerNo: '01-234567890-3', pagibigDueDay: null }
+  const due = (rows: DueDate[], filing: DueDate['filing'], period: string) => rows.find((r) => r.filing === filing && r.period === period)
+  const holidays = [{ holiday_date: '2026-11-30', name: 'Bonifacio Day' }]
+  const rows = filingCalendar(2026, client, holidays)
+
+  it('1601-C: the 10th of the next month, December on 15 January (manual filing)', () => {
+    expect(due(rows, '1601c', '2026-03-01')?.due).toBe('2026-04-10')
+    expect(due(rows, '1601c', '2026-12-01')?.due).toBe('2027-01-15')
+  })
+
+  it('1601-C on eFPS: 15/14/13/12/11 days after month-end for groups A to E', () => {
+    const efps = (g: 'A' | 'B' | 'C' | 'D' | 'E') => due(filingCalendar(2026, { ...client, filing: 'efps', efpsGroup: g }, []), '1601c', '2026-03-01')?.due
+    expect(['A', 'B', 'C', 'D', 'E'].map((g) => efps(g as 'A'))).toEqual(['2026-04-15', '2026-04-14', '2026-04-13', '2026-04-12', '2026-04-11'])
+  })
+
+  it('SSS: the last day of the month after; PhilHealth by the employer number; Pag-IBIG as the client enters it', () => {
+    expect(due(rows, 'sss', '2026-01-01')?.due).toBe('2026-02-28')
+    expect(due(rows, 'philhealth', '2026-03-01')).toMatchObject({ from: '2026-04-11', due: '2026-04-15' }) // PEN ends in 3
+    expect(due(filingCalendar(2026, { ...client, philhealthEmployerNo: '01-234567890-7' }, []), 'philhealth', '2026-03-01')).toMatchObject({ from: '2026-04-16', due: '2026-04-20' })
+    expect(due(rows, 'pagibig', '2026-03-01')?.due).toBe('')
+    expect(due(filingCalendar(2026, { ...client, pagibigDueDay: 15 }, []), 'pagibig', '2026-03-01')?.due).toBe('2026-04-15')
+  })
+
+  it('the year-end filings: refunds 25 Jan, 2316 to employees and 1604-C 31 Jan, BIR copies and Annex F 28 Feb', () => {
+    expect(['refunds', '2316_employees', '1604c', '2316_bir'].map((f) => due(rows, f as DueDate['filing'], '2026-01-01')?.due)).toEqual([
+      '2027-01-25', '2027-01-31', '2027-01-31', '2027-02-28',
+    ])
+  })
+
+  it('a date on a weekend or a holiday is shown with a note, not moved; an extension replaces the date', () => {
+    expect(due(rows, '1601c', '2026-09-01')).toMatchObject({ due: '2026-10-10', note: 'Falls on a Saturday' })
+    expect(due(rows, 'sss', '2026-10-01')).toMatchObject({ due: '2026-11-30', note: 'Falls on Bonifacio Day' })
+    const extended = filingCalendar(2026, client, [], [{ filing: '1601c', period: '2026-03-01', due_date: '2026-04-20', note: 'RMC extension' }])
+    expect(due(extended, '1601c', '2026-03-01')).toMatchObject({ due: '2026-04-20', overridden: true, note: 'RMC extension' })
   })
 })

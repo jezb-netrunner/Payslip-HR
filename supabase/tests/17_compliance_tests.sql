@@ -105,4 +105,20 @@ select pg_temp.expect_error($$update entities set holiday_pay_exempt = true wher
 select pg_temp.expect_error($$update entities set holiday_pay_exempt = true, retail_service_establishment = true, regular_workers = 10 where id = '10000000-0000-0000-0000-0000000017f0'$$, '%entities_holiday_pay_exempt_small_retail%');
 update entities set holiday_pay_exempt = true, retail_service_establishment = true, regular_workers = 9 where id = '10000000-0000-0000-0000-0000000017f0';
 
+\echo '--- 17.7 C9: due-date extensions per client and year, readable and writable by the client''s admins only'
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :ma, true);
+update entities set bir_filing_method = 'efps', efps_group = 'C', pagibig_due_day = 15 where id = '10000000-0000-0000-0000-0000000017f0';
+insert into filing_due_dates (entity_id, filing, period, due_date, note)
+values ('10000000-0000-0000-0000-0000000017f0', '1601c', '2026-03-01', '2026-04-20', 'Extension');
+select pg_temp.expect_error($$insert into filing_due_dates (entity_id, filing, period, due_date) values ('10000000-0000-0000-0000-0000000017f0', 'sss', '2026-03-15', '2026-04-30')$$, '%filing_due_dates_period_check%');
+select pg_temp.expect_error($$update entities set efps_group = 'F' where id = '10000000-0000-0000-0000-0000000017f0'$$, '%entities_efps_group_check%');
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000089', true);
+select pg_temp.check((select count(*) from filing_due_dates) = 0, 'another client''s admin sees none');
+commit;
+
 \echo 'PASSED 17'

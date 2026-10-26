@@ -75,6 +75,11 @@ export interface Entity {
   holiday_pay_exempt: boolean
   retail_service_establishment: boolean
   regular_workers: number | null
+  /** BIR 1601-C filing: manual (eBIRForms) or eFPS, and the eFPS group */
+  bir_filing_method: 'manual' | 'efps'
+  efps_group: 'A' | 'B' | 'C' | 'D' | 'E' | null
+  /** Pag-IBIG due day of the following month, as the client enters it */
+  pagibig_due_day: number | null
   is_active: boolean
   created_at: string
 }

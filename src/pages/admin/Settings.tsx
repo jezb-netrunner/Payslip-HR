@@ -35,6 +35,9 @@ function settingsRangeProblem(s: Entity): string | null {
   if (!(n(s.paid_vl_days_per_year) >= 0 && n(s.paid_vl_days_per_year) <= 365)) return 'Paid vacation leave days must be between 0 and 365.'
   if (s.maternity_differential_exempt && (!s.dole_exemption_ref.trim() || !s.dole_exemption_valid_until))
     return "A DOLE exemption from the maternity salary differential needs the exemption's reference and the date it is valid until."
+  if (s.bir_filing_method === 'efps' && !s.efps_group) return 'Pick the eFPS group (A to E): it sets the 1601-C due date.'
+  const pagibigDay = s.pagibig_due_day === null || String(s.pagibig_due_day) === '' ? null : n(s.pagibig_due_day)
+  if (pagibigDay !== null && !(int(pagibigDay) && pagibigDay >= 1 && pagibigDay <= 31)) return 'The Pag-IBIG due day must be a day of the month, 1–31.'
   const workers = s.regular_workers === null || String(s.regular_workers) === '' ? null : n(s.regular_workers)
   if (workers !== null && !(int(workers) && workers >= 0)) return 'Workers regularly employed must be a whole number.'
   if (s.holiday_pay_exempt) {
@@ -106,6 +109,9 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           retail_service_establishment: s.retail_service_establishment,
           regular_workers: s.regular_workers === null || String(s.regular_workers) === '' ? null : Number(s.regular_workers),
           holiday_pay_exempt: s.holiday_pay_exempt,
+          bir_filing_method: s.bir_filing_method,
+          efps_group: s.bir_filing_method === 'efps' ? s.efps_group : null,
+          pagibig_due_day: s.pagibig_due_day === null || String(s.pagibig_due_day) === '' ? null : Number(s.pagibig_due_day),
         })
         .eq('id', s.id)
       if (error) throw error
@@ -252,6 +258,25 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             </Field>
             <Field label="Days from period end to pay date" hint="Used to suggest the pay date of new runs">
               <Input type="number" value={s.pay_date_lag_days} onChange={(e) => set('pay_date_lag_days', e.target.value as unknown as number)} />
+            </Field>
+            <Field label="BIR 1601-C filing" hint="Sets the due dates under BIR & Reports">
+              <Select value={s.bir_filing_method} onChange={(e) => set('bir_filing_method', e.target.value as Entity['bir_filing_method'])}>
+                <option value="manual">Manual / eBIRForms (10th of the next month)</option>
+                <option value="efps">eFPS</option>
+              </Select>
+            </Field>
+            {s.bir_filing_method === 'efps' && (
+              <Field label="eFPS group">
+                <Select value={s.efps_group ?? ''} onChange={(e) => set('efps_group', (e.target.value || null) as Entity['efps_group'])}>
+                  <option value="">Pick the group…</option>
+                  {(['A', 'B', 'C', 'D', 'E'] as const).map((g) => (
+                    <option key={g} value={g}>Group {g}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            <Field label="Pag-IBIG due day (next month)" hint="As your Pag-IBIG branch sets it; blank until entered">
+              <Input type="number" min={1} max={31} value={s.pagibig_due_day ?? ''} onChange={(e) => set('pagibig_due_day', e.target.value as unknown as number)} />
             </Field>
           </div>
         </Card>

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th, StatGroup } from '../../components/ui'
 import { useToast } from '../../components/toast'
-import { downloadCsv, getEmployees, getStatutoryTables } from '../../lib/api'
+import { downloadCsv, getEmployees, getHolidaysBetween, getStatutoryTables } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fetchAll } from '../../lib/fetchAll'
 import type { Entity, Payslip, TaxRemittance } from '../../lib/db'
@@ -12,6 +12,7 @@ import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { alphalistCsv, buildAlphalist, type AlphalistRow, type YearEndRate } from '../../payroll/alphalist'
 import { remittances1601C, type RemittanceMonth } from '../../payroll/remittance'
+import { FILING_LABELS, filingCalendar, type DueDate, type DueDateOverride } from '../../payroll/dueDates'
 import { round2 } from '../../payroll/types'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
@@ -98,6 +99,7 @@ export default function Reports() {
           { key: '1604c', label: '1604-C summary', icon: <FileText /> },
           { key: '1601c', label: '1601-C remittances', icon: <Landmark /> },
           { key: 'contrib', label: 'SSS / PhilHealth / Pag-IBIG', icon: <ShieldCheck /> },
+          { key: 'due', label: 'Due dates', icon: <CalendarClock /> },
         ]}
         active={tab}
         onChange={setTab}
@@ -107,6 +109,7 @@ export default function Reports() {
       {tab === '1604c' && <Summary1604C key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === '1601c' && <Remittances key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === 'contrib' && <Contributions key={`${entity.id}${year}`} entity={entity} year={year} />}
+      {tab === 'due' && <DueDates key={`${entity.id}${year}`} entity={entity} year={year} />}
     </div>
   )
 }
@@ -870,5 +873,132 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
         for a solo parent or PWD: neither deducted nor remitted.
       </p>
     </Card>
+  )
+}
+
+// ---------- filing and payment due dates ----------
+
+function DueDates({ entity, year }: { entity: Entity; year: number }) {
+  const toast = useToast()
+  const [rows, setRows] = useState<DueDate[] | null>(null)
+  const [error, setError] = useState('')
+  const [editing, setEditing] = useState<{ row: DueDate; due: string; note: string } | null>(null)
+  const [reload, setReload] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      getHolidaysBetween(entity.id, `${year}-01-01`, `${year + 1}-03-31`),
+      supabase.from('filing_due_dates').select('filing, period, due_date, note').eq('entity_id', entity.id).gte('period', `${year}-01-01`).lte('period', `${year}-12-01`),
+    ])
+      .then(([holidays, overrides]) => {
+        if (overrides.error) throw overrides.error
+        if (cancelled) return
+        setRows(
+          filingCalendar(
+            year,
+            {
+              filing: entity.bir_filing_method ?? 'manual',
+              efpsGroup: entity.efps_group ?? null,
+              philhealthEmployerNo: entity.philhealth_employer_no ?? '',
+              pagibigDueDay: entity.pagibig_due_day ?? null,
+            },
+            holidays,
+            (overrides.data ?? []) as DueDateOverride[],
+          ),
+        )
+      })
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err, 'Failed to load'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [entity, year, reload])
+
+  async function save(useStandard: boolean) {
+    if (!editing) return
+    const key = { entity_id: entity.id, filing: editing.row.filing, period: editing.row.period }
+    const { error: err } = useStandard
+      ? await supabase.from('filing_due_dates').delete().match(key)
+      : await supabase.from('filing_due_dates').upsert({ ...key, due_date: editing.due, note: editing.note.trim() }, { onConflict: 'entity_id,filing,period' })
+    if (err) toast('error', errorMessage(err, 'Save failed'))
+    else {
+      toast('success', useStandard ? 'Back to the standard date.' : 'Due date changed for this year (audit-logged).')
+      setEditing(null)
+      setReload((n) => n + 1)
+    }
+  }
+
+  if (error) return <Card><p className="text-sm text-rose-600">{error}</p></Card>
+  if (!rows) return <Spinner />
+  const monthly = rows.filter((r) => !['refunds', '2316_employees', '1604c', '2316_bir'].includes(r.filing))
+  const yearEnd = rows.filter((r) => ['refunds', '2316_employees', '1604c', '2316_bir'].includes(r.filing))
+  const table = (list: DueDate[], showPeriod: boolean) => (
+    <TableShell>
+      <thead className="bg-slate-50">
+        <tr>
+          {showPeriod && <Th>Covers</Th>}
+          <Th>Filing / payment</Th>
+          <Th>Due</Th>
+          <Th>Note</Th>
+          <Th></Th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {list.map((r) => (
+          <tr key={`${r.filing}${r.period}`}>
+            {showPeriod && <Td className="whitespace-nowrap font-semibold">{fmtMonth(r.period)}</Td>}
+            <Td>
+              <p className="text-sm">{FILING_LABELS[r.filing]}</p>
+              <p className="text-[11px] text-slate-400">{r.basis}</p>
+            </Td>
+            <Td className="whitespace-nowrap text-sm font-semibold">
+              {r.due ? (r.from ? `${fmtDate(r.from)} – ${fmtDate(r.due)}` : fmtDate(r.due)) : '—'}
+              {r.overridden && <Badge tone="blue">changed</Badge>}
+            </Td>
+            <Td className={`text-xs ${r.note.startsWith('Falls on') || r.note.includes('. Falls on') ? 'text-amber-700' : 'text-slate-500'}`}>{r.note || '—'}</Td>
+            <Td>
+              <button onClick={() => setEditing({ row: r, due: r.due, note: r.overridden ? r.note : '' })} className="flex items-center gap-1 text-xs font-semibold text-brand-600">
+                <Pencil className="size-3.5" /> Change
+              </button>
+            </Td>
+          </tr>
+        ))}
+      </tbody>
+    </TableShell>
+  )
+  return (
+    <div className="space-y-6">
+      <Card title={`Monthly filings and payments — ${year}`} icon={<CalendarClock />}>
+        {table(monthly, true)}
+      </Card>
+      <Card title={`Year-end filings for ${year}`} icon={<CalendarClock />}>
+        {table(yearEnd, false)}
+        <p className="mt-3 text-[11px] text-slate-400">
+          Dates follow the BIR, SSS and PhilHealth rules; a date on a weekend or holiday is shown with a note, not moved.
+          When an agency extends a deadline, change the date for this year. Set the filing method, eFPS group and
+          Pag-IBIG due day in Client Settings.
+        </p>
+      </Card>
+      <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing ? `${FILING_LABELS[editing.row.filing]} — ${fmtMonth(editing.row.period)}` : ''}>
+        {editing && (
+          <div className="space-y-4">
+            <Field label="Due date">
+              <Input type="date" value={editing.due} onChange={(e) => setEditing({ ...editing, due: e.target.value })} />
+            </Field>
+            <Field label="Note" hint="e.g. the circular that extends it">
+              <Input value={editing.note} maxLength={200} onChange={(e) => setEditing({ ...editing, note: e.target.value })} />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={!editing.due} onClick={() => save(false)}>Save for {year}</Button>
+              {editing.row.overridden && (
+                <Button variant="secondary" onClick={() => save(true)}>Use the standard date</Button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
   )
 }

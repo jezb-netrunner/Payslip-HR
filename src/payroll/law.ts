@@ -58,3 +58,33 @@ export const HOLIDAY_PAY = {
   /** retail and service establishments regularly employing fewer workers than this are exempt from holiday pay */
   exemptBelowWorkers: { value: 10, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 94(a); Omnibus Rules Book III, Rule IV, Sec. 1' },
 } satisfies Record<string, LegalValue>
+
+/**
+ * Filing and payment deadlines. Agencies extend them now and then: each
+ * client can replace a date for a year (filing_due_dates); a date that
+ * falls on a weekend or holiday is shown with a note, not moved.
+ */
+export const DEADLINES = {
+  /** 1601-C filed manually: day of the following month (January to November) */
+  bir1601cManualDay: { value: 10, effectiveFrom: '2018-01-01', source: 'BIR Form 1601-C (January 2018 ENCS) page' },
+  /** December's 1601-C filed manually: day of January */
+  bir1601cDecemberDay: { value: 15, effectiveFrom: '2018-01-01', source: 'BIR Form 1601-C (January 2018 ENCS) page' },
+  /** 1601-C on eFPS: days after the month's end for groups A to E */
+  bir1601cEfpsDays: { value: { A: 15, B: 14, C: 13, D: 12, E: 11 }, effectiveFrom: '2002-12-01', source: 'BIR Form 1601-C page; RR 26-2002' },
+  /** year-end refunds of over-withheld tax: day of January of the next year */
+  refundsJanuaryDay: { value: 25, effectiveFrom: '2018-01-01', source: 'NIRC Sec. 79(F)' },
+  /** BIR Form 2316 to employees: day of January (on separation, the last pay day) */
+  form2316EmployeesJanuaryDay: { value: 31, effectiveFrom: '2018-01-01', source: 'NIRC Sec. 83(A)' },
+  /** BIR Form 1604-C and the alphalist: day of January */
+  form1604cJanuaryDay: { value: 31, effectiveFrom: '2018-01-01', source: 'NIRC Sec. 83(B); BIR Form 1604-C (January 2018 ENCS) page' },
+  /** BIR copies of the 2316s and the Annex F list: day of February */
+  form2316BirFebruaryDay: { value: 28, effectiveFrom: '2018-01-01', source: 'RR 2-98 Sec. 2.83.1 as amended by RR 11-2018' },
+  /** SSS (regular employer): the last day of the month after the applicable month */
+  sssLastDayOfNextMonth: { value: true, effectiveFrom: '2019-01-01', source: 'SSS release citing SSS Circular 2019-012' },
+  /** PhilHealth: by the last digit of the employer number, windows in the following month */
+  philhealthWindows: {
+    value: [{ digits: [0, 1, 2, 3, 4], from: 11, to: 15 }, { digits: [5, 6, 7, 8, 9], from: 16, to: 20 }],
+    effectiveFrom: '2020-01-01',
+    source: 'PhilHealth employer payment schedule (pay_procedures page)',
+  },
+} satisfies Record<string, LegalValue<unknown>>
