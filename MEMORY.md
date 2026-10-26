@@ -392,8 +392,12 @@ migrations 0200/0500 fix old rows instead of relying on NOT VALID, and a
 
 **Applied live (same day, owner's approval):** the seven migrations
 through MCP, files renamed to the recorded versions; fingerprint, advisors
-and logs checked (see deployed state). A final independent review ran on
-the whole branch before the PR.
+and logs checked (see deployed state). A final independent review of the
+whole branch found four more defects, all fixed in code only with tests
+that fail on the old code (348 → 352). The year's tax now takes the pay
+before loans. Monthly de minimis ceilings count the payroll month. The
+payroll holding a separation date closes the month for a later 13th month.
+The ₱90,000 exemption left counts only benefits paid by the pay date.
 
 ---
 
@@ -575,8 +579,9 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   holiday on the rest day taxable by default (O1); hazard pay exempt only
   with a hazardous-assignment certification; supplementary pay withheld at
   the regular pay's bracket or on the cumulative average method (RR 2-98
-  Sec. 2.79(B)(3), (5)(a)); the year-end shortfall capped at the last pay,
-  the employer advancing the rest; de minimis ceilings of RR 29-2025 from
+  Sec. 2.79(B)(3), (5)(a)); the year-end shortfall capped at the last pay
+  after contributions (before loans and other deductions, which take what
+  is left), the employer advancing the rest; de minimis ceilings of RR 29-2025 from
   6 Jan 2026 (in `legal_parameters`, `verified_on` null: from the spec, the
   PDF unreachable); alphalist per RMC 160-2022.
 - **2026 holidays**: Proclamation 1006 (+1189 Eid'l Fitr Mar 20, +1264 Eid'l
@@ -1149,6 +1154,7 @@ bonuses were never withheld at all until December.
 
 The year to date is the tax year's payslips paid by this payroll's pay
 date, so a reopened March ignores June's commission and keeps its method.
+The same goes for the ₱90,000 exemption left.
 The period count n adds last year's periods paid this tax year: a Dec 16–31
 payroll released on Jan 5 is period 1, and Jan 1–15 is period 2. Why it
 mattered: one period short withheld ₱4,631 instead of ₱623 on a ₱18,525
@@ -1188,7 +1194,9 @@ deficiencies with 2%/month penalties) and over-deducts partial months.
 A 13th month that trues SSS up passes that SSS to its own
 re-annualization (the alphalist was ₱37.50 off), and the separation-month
 check reads the month's 13th-month payslip too (it reported a false
-over-deduction).
+over-deduction). The payroll holding the separation date closes the month
+like its last slot. Otherwise a 13th month paid after it took no SSS on
+itself (₱1,125 + ₱2,270 short on a ₱25,000 salary).
 
 ### Maternity leave is paid as the SSS benefit + salary differential, never as salary (confirmed approach)
 
@@ -1401,6 +1409,12 @@ old waiver would have blocked every payroll of its client.
 
 Why: the owner's rule "no legal numbers in logic"; `statutory_versions`
 can't take a mid-month start or a new kind without DROPping its CHECKs.
+
+A monthly de minimis ceiling counts the payroll month (`period_month`), the
+same month a monthly allowance is split over. Semester and year ceilings
+count by pay date (the tax year). A weekly payroll paid five days after the
+cutoff pays five times in some calendar months, and counting by pay month
+taxed a rice subsidy that was exactly at the ceiling.
 
 ### The owner's spec is the oracle when the official PDFs are unreachable
 
