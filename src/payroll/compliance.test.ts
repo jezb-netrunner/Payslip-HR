@@ -10,6 +10,7 @@ import { eachDate, endOfMonth } from '../lib/manila'
 import { remittances1601C } from './remittance'
 import { computeSss, computeWithholdingTax } from './statutory'
 import { periodsThisYear, periodWithholding } from './withholding'
+import { philhealthNgFor, philhealthNgProblem } from './philhealth'
 import { round2, type DayComputation, type DayType, type PayLine, type PayrollEmployeeInput, type PayrollSettingsInput, type PeriodInput } from './types'
 
 const settings: PayrollSettingsInput = {
@@ -528,5 +529,45 @@ describe('C6: maternity leave contributions, employee shares and the DOLE exempt
     expect(april.trace.warnings.some((w) => w.startsWith('Employee share to collect'))).toBe(true)
     const payout = pay('03', onLeave('03'), maternity('2026-03-01'), { ...ana, oneTimeEarnings: [{ label: 'SSS maternity benefit', amount: 70000, category: 'other_non_taxable', benefit: 'sss_maternity' }] }, exempt)
     expect(payout.deductions.find((l) => l.code === 'maternity_contributions')).toBeUndefined()
+  })
+})
+
+describe('C7: PhilHealth — the national government pays the employee half for solo parents and PWDs', () => {
+  const ana: PayrollEmployeeInput = { ...mwe, id: 'ana', isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 30000, dailyRate: 0 }
+  const monthlySettings = { ...settings, payFrequency: 'monthly' as const, workingDaysDivisor: 261 }
+  const run = (ng?: 'solo_parent' | 'pwd') =>
+    computePayslip({
+      employee: { ...ana, philhealthNg: ng }, settings: monthlySettings, period: { start: '2026-11-01', end: '2026-11-30', index: 1, count: 1 },
+      tables: DEFAULT_TABLES, days: [], runType: 'regular',
+    })
+  const soloParent = { ph_ng_type: 'solo_parent' as const, ph_ng_from_month: '2026-11-01', id_number: 'SPIC-2026-0099', id_valid_until: '2027-03-15' }
+
+  it('tagged month (premium 1,500): employee 0, employer 750, NG share 750 not deducted nor remitted', () => {
+    expect(philhealthNgFor(soloParent, '2026-11-01')).toBe('solo_parent')
+    const slip = run('solo_parent')
+    expect([slip.philhealthEe, slip.philhealthEr, slip.philhealthNg]).toEqual([0, 750, 750])
+    expect(slip.deductions.some((l) => l.code === 'philhealth')).toBe(false)
+  })
+
+  it('the month before ph_ng_from_month: 750 / 750', () => {
+    expect(philhealthNgFor(soloParent, '2026-10-01')).toBeUndefined()
+    const slip = run(undefined)
+    expect([slip.philhealthEe, slip.philhealthEr, slip.philhealthNg]).toEqual([750, 750, 0])
+  })
+
+  it('the ID expiry month: 750 / 750 (the last NG month is the month before)', () => {
+    expect(philhealthNgFor(soloParent, '2027-02-01')).toBe('solo_parent')
+    expect(philhealthNgFor(soloParent, '2027-03-01')).toBeUndefined()
+    // a renewed ID continues it
+    expect(philhealthNgFor({ ...soloParent, id_valid_until: '2028-03-15' }, '2027-03-01')).toBe('solo_parent')
+  })
+
+  it('a solo parent not before October 2026; a PWD from the month the requirements were submitted', () => {
+    expect(philhealthNgFor({ ...soloParent, ph_ng_from_month: '2026-09-01' }, '2026-09-01')).toBeUndefined()
+    expect(philhealthNgFor({ ph_ng_type: 'pwd', ph_ng_from_month: '2026-08-01', id_number: 'PWD-123', id_valid_until: null }, '2026-08-01')).toBe('pwd')
+    expect(philhealthNgProblem('solo_parent', '2026-09-01', 'SPIC-1', '2027-09-01')).toMatch(/not earlier than October 2026/)
+    expect(philhealthNgProblem('solo_parent', '2026-10-01', '', '2027-09-01')).toMatch(/Solo Parent ID/)
+    expect(philhealthNgProblem('solo_parent', '2026-10-01', 'SPIC-1', '')).toMatch(/valid until/)
+    expect(philhealthNgProblem('pwd', '2026-08-01', 'PWD-1', '')).toBe('')
   })
 })

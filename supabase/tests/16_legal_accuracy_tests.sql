@@ -110,13 +110,13 @@ select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, e
   values ('30000000-0000-0000-0000-0000000016f1', '20000000-0000-0000-0000-0000000016f1', 'earning', 'Unknown', 100, 'other_non_taxable', 'paternity')$$, '%payroll_adjustments_benefit_check%');
 commit;
 
-\echo '--- 16.6 PhilHealth waiver: a kind and its start date go together'
-select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'pwd' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_ee_waiver_dates%');
-select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'senior', philhealth_ee_waiver_from = '2026-10-01' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_ee_waiver_check%');
-select pg_temp.expect_error($$update employees set philhealth_ee_waiver = 'pwd', philhealth_ee_waiver_from = '2026-10-01', philhealth_ee_waiver_until = '2026-09-30' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_philhealth_ee_waiver_dates%');
-update employees set philhealth_ee_waiver = 'solo_parent', philhealth_ee_waiver_from = '2026-10-01', philhealth_ee_waiver_until = '2027-09-30'
+\echo '--- 16.6 PhilHealth NG share (renamed by the C7 migration): a kind and its first month go together'
+select pg_temp.expect_error($$update employees set ph_ng_type = 'pwd', id_number = 'PWD-1' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_ph_ng_dates%');
+select pg_temp.expect_error($$update employees set ph_ng_type = 'senior', ph_ng_from_month = '2026-10-01', id_number = 'X' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_ph_ng_type_check%');
+select pg_temp.expect_error($$update employees set ph_ng_type = 'pwd', ph_ng_from_month = '2026-10-01', id_number = 'PWD-1', id_valid_until = '2026-09-30' where id = '20000000-0000-0000-0000-0000000016f1'$$, '%employees_ph_ng_dates%');
+update employees set ph_ng_type = 'solo_parent', ph_ng_from_month = '2026-10-01', id_number = 'SPIC-1', id_valid_until = '2027-09-30'
   where id = '20000000-0000-0000-0000-0000000016f1';
-update employees set philhealth_ee_waiver = null, philhealth_ee_waiver_from = null, philhealth_ee_waiver_until = null
+update employees set ph_ng_type = null, ph_ng_from_month = null, id_number = '', id_valid_until = null
   where id = '20000000-0000-0000-0000-0000000016f1';
 
 \echo '--- 16.7 a change in the days before a period with a regular holiday stales that draft'

@@ -121,7 +121,7 @@ describe('maternity leave is paid as the maternity benefit, not as salary (RA 11
 describe('PhilHealth employee share paid by the national government', () => {
   it('drops the employee share for a PWD and keeps the employer share', () => {
     const base = pay(monthly, WORKDAYS)
-    const pwd = pay({ ...monthly, philhealthEeWaiver: 'pwd' }, WORKDAYS)
+    const pwd = pay({ ...monthly, philhealthNg: 'pwd' }, WORKDAYS)
     expect(base.philhealthEe).toBe(375)
     expect(pwd.philhealthEe).toBe(0)
     expect(pwd.philhealthEr).toBe(base.philhealthEr)
@@ -130,7 +130,7 @@ describe('PhilHealth employee share paid by the national government', () => {
   })
 
   it('does the same for a solo parent', () => {
-    const slip = pay({ ...monthly, philhealthEeWaiver: 'solo_parent' }, WORKDAYS)
+    const slip = pay({ ...monthly, philhealthNg: 'solo_parent' }, WORKDAYS)
     expect(slip.philhealthEe).toBe(0)
     expect(slip.trace.notes.some((n) => n.includes('PhilHealth Circular 2026-0015'))).toBe(true)
   })

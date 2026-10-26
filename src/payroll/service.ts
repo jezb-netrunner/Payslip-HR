@@ -24,6 +24,7 @@ import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
 import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet, type DeMinimisUsed, type MaternityContext, type MaternityMonth } from './engine'
 import { periodsThisYear, type TaxYearToDate } from './withholding'
+import { philhealthNgFor } from './philhealth'
 import { round2 } from './types'
 import type {
   BirBucket,
@@ -232,14 +233,6 @@ function separatedBy(e: Employee, run: PayrollRun): boolean {
   return !!e.separation_date && e.separation_date <= run.period_end
 }
 
-/** The PhilHealth employee-share waiver in force at the end of the run's period, if any. */
-function philhealthWaiverFor(e: Employee, run: PayrollRun): 'pwd' | 'solo_parent' | undefined {
-  const w = e.philhealth_ee_waiver
-  if (!w || !e.philhealth_ee_waiver_from || e.philhealth_ee_waiver_from > run.period_end) return undefined
-  if (e.philhealth_ee_waiver_until && e.philhealth_ee_waiver_until < run.period_end) return undefined
-  return w
-}
-
 /** Final pay released after the employee's last day: nothing worked to pay. */
 function extrasOnly(e: Employee, run: PayrollRun): boolean {
   return run.run_type === 'final_pay' && !!e.separation_date && e.separation_date < run.period_start
@@ -249,7 +242,7 @@ function extrasOnly(e: Employee, run: PayrollRun): boolean {
 const HOLIDAY_LOOKBACK_DAYS = 10
 
 const CONTRIBUTION_COLUMNS =
-  'sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_er, pagibig_er'
+  'sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_er, pagibig_er, philhealth_ng'
 
 type MonthSlip = Pick<
   Payslip,
@@ -265,6 +258,7 @@ type MonthSlip = Pick<
   | 'sss_ec_er'
   | 'philhealth_er'
   | 'pagibig_er'
+  | 'philhealth_ng'
 > & { payroll_runs?: { period_index?: number; periods_in_month?: number } | null }
 
 function sumContributions(slips: MonthSlip[]): ContributionSet {
@@ -279,6 +273,7 @@ function sumContributions(slips: MonthSlip[]): ContributionSet {
     sssEcEr: n((p) => p.sss_ec_er),
     philhealthEr: n((p) => p.philhealth_er),
     pagibigEr: n((p) => p.pagibig_er),
+    philhealthNg: n((p) => p.philhealth_ng),
   }
 }
 
@@ -710,7 +705,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         dailyRate: Number(emp.daily_rate),
         isMinimumWageEarner: emp.is_minimum_wage_earner,
         apprentice: emp.employment_status === 'apprentice',
-        philhealthEeWaiver: philhealthWaiverFor(emp, run),
+        philhealthNg: isThirteenth ? undefined : philhealthNgFor(emp, run.period_month),
         hazardCertificationRef: emp.hazard_certification_ref ?? '',
         schedule: emp.work_schedule,
         hireDate: emp.hire_date,
@@ -934,6 +929,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     sss_mpf_er: slip.sssMpfEr,
     philhealth_ee: slip.philhealthEe,
     philhealth_er: slip.philhealthEr,
+    philhealth_ng: slip.philhealthNg,
     pagibig_ee: slip.pagibigEe,
     pagibig_er: slip.pagibigEr,
     withholding_tax: slip.withholdingTax,

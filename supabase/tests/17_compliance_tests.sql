@@ -88,4 +88,14 @@ select pg_temp.expect_error($$update entities set maternity_differential_exempt 
 update entities set maternity_differential_exempt = true, dole_exemption_ref = 'DOLE-CAR-2026-0042', dole_exemption_valid_until = '2026-12-31'
   where id = '10000000-0000-0000-0000-0000000017f0';
 
+\echo '--- 17.5 C7: the PhilHealth NG share needs the ID; a solo parent''s ID has an expiry; payslips record the NG half'
+select pg_temp.expect_error($$update employees set ph_ng_type = 'solo_parent', ph_ng_from_month = '2026-11-01' where id = '20000000-0000-0000-0000-0000000017f1'$$, '%employees_ph_ng_documented%');
+select pg_temp.expect_error($$update employees set ph_ng_type = 'solo_parent', ph_ng_from_month = '2026-11-01', id_number = 'SPIC-2026-0099' where id = '20000000-0000-0000-0000-0000000017f1'$$, '%employees_ph_ng_documented%');
+select pg_temp.expect_error($$update employees set ph_ng_type = 'pwd', ph_ng_from_month = '2026-11-15', id_number = 'PWD-1' where id = '20000000-0000-0000-0000-0000000017f1'$$, '%employees_ph_ng_from_month_start%');
+update employees set ph_ng_type = 'solo_parent', ph_ng_from_month = '2026-11-01', id_number = 'SPIC-2026-0099', id_valid_until = '2027-03-15'
+  where id = '20000000-0000-0000-0000-0000000017f1';
+update employees set ph_ng_type = 'pwd', ph_ng_from_month = '2026-08-01', id_number = 'PWD-123', id_valid_until = null
+  where id = '20000000-0000-0000-0000-0000000017f1';
+select pg_temp.check((select column_default from information_schema.columns where table_name = 'payslips' and column_name = 'philhealth_ng') = '0', 'payslips.philhealth_ng defaults to 0');
+
 \echo 'PASSED 17'

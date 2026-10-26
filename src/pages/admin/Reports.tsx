@@ -746,7 +746,7 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
 
 type ContribSlip = Pick<
   Payslip,
-  'employee_id' | 'employee_snapshot' | 'sss_ee' | 'sss_mpf_ee' | 'sss_er' | 'sss_mpf_er' | 'sss_ec_er' | 'philhealth_ee' | 'philhealth_er' | 'pagibig_ee' | 'pagibig_er'
+  'employee_id' | 'employee_snapshot' | 'sss_ee' | 'sss_mpf_ee' | 'sss_er' | 'sss_mpf_er' | 'sss_ec_er' | 'philhealth_ee' | 'philhealth_er' | 'pagibig_ee' | 'pagibig_er' | 'philhealth_ng'
 >
 
 function Contributions({ entity, year }: { entity: Entity; year: number }) {
@@ -765,7 +765,7 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
     fetchAll<ContribSlip>((from, to) =>
       supabase
         .from('payslips')
-        .select('employee_id, employee_snapshot, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, pagibig_ee, pagibig_er, payroll_runs!inner(status)')
+        .select('employee_id, employee_snapshot, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, philhealth_ng, pagibig_ee, pagibig_er, payroll_runs!inner(status)')
         .eq('entity_id', entity.id)
         .eq('period_month', `${year}-${month}-01`)
         .in('payroll_runs.status', ['finalized', 'paid'])
@@ -787,18 +787,19 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
     const m = new Map<string, { name: string; no: string; sss: string; ph: string; hdmf: string; v: number[] }>()
     for (const s of slips ?? []) {
       const snap = s.employee_snapshot as Record<string, string>
-      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0] }
+      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0, 0] }
       const add = [
         Number(s.sss_ee) + Number(s.sss_mpf_ee), Number(s.sss_er) + Number(s.sss_mpf_er), Number(s.sss_ec_er),
-        Number(s.sss_mpf_ee) + Number(s.sss_mpf_er), Number(s.philhealth_ee), Number(s.philhealth_er), Number(s.pagibig_ee), Number(s.pagibig_er),
+        Number(s.sss_mpf_ee) + Number(s.sss_mpf_er), Number(s.philhealth_ee), Number(s.philhealth_er), Number(s.philhealth_ng ?? 0),
+        Number(s.pagibig_ee), Number(s.pagibig_er),
       ]
       cur.v = cur.v.map((x, i) => Math.round((x + add[i]) * 100) / 100)
       m.set(s.employee_id, cur)
     }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
   }, [slips])
-  const tot = rows.reduce((acc, r) => acc.map((x, i) => Math.round((x + r.v[i]) * 100) / 100), [0, 0, 0, 0, 0, 0, 0, 0])
-  const cols = ['SSS EE', 'SSS ER', 'EC', 'of which MPF', 'PhilHealth EE', 'PhilHealth ER', 'Pag-IBIG EE', 'Pag-IBIG ER']
+  const tot = rows.reduce((acc, r) => acc.map((x, i) => Math.round((x + r.v[i]) * 100) / 100), [0, 0, 0, 0, 0, 0, 0, 0, 0])
+  const cols = ['SSS EE', 'SSS ER', 'EC', 'of which MPF', 'PhilHealth EE', 'PhilHealth ER', 'PhilHealth NG (not remitted)', 'Pag-IBIG EE', 'Pag-IBIG ER']
 
   return (
     <Card
@@ -865,7 +866,8 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
       )}
       <p className="mt-3 text-[11px] text-slate-400">
         Totals per employee across every payroll of the month — the amounts to report and remit for SSS (incl.
-        MPF/WISP and EC), PhilHealth and Pag-IBIG.
+        MPF/WISP and EC), PhilHealth and Pag-IBIG. PhilHealth NG is the employee half the national government pays
+        for a solo parent or PWD: neither deducted nor remitted.
       </p>
     </Card>
   )

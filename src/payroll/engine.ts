@@ -163,6 +163,8 @@ export interface ContributionSet {
   sssEcEr: number
   philhealthEr: number
   pagibigEr: number
+  /** PhilHealth's employee half the national government paid (not deducted) */
+  philhealthNg?: number
 }
 
 /**
@@ -897,14 +899,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   if (!extrasOnly && allowancesMonthly > 0 && statutoryMonthlyBase < tables.pagibig.max_fund_salary) {
     notes.push(`Pag-IBIG on basic salary plus allowances: ₱${round2(statutoryMonthlyBase + allowancesMonthly).toLocaleString()} a month.`)
   }
-  // the national government pays a PWD's or solo parent's PhilHealth
-  // employee share (RA 11228; RA 11861, PhilHealth Circular 2026-0015)
-  const philhealthEeDue = employee.philhealthEeWaiver ? 0 : stat.philhealthEe
-  if (employee.philhealthEeWaiver && !extrasOnly && stat.philhealthEe > 0) {
+  // the national government pays a solo parent's or PWD's PhilHealth
+  // employee half: nothing deducted, the employer's half as usual, the NG
+  // half neither deducted nor remitted (PhilHealth Circular 2026-0015 Secs.
+  // V.C, V.E.5, V.F.2; Circular 2026-0017 Sec. V.H; RA 11228)
+  const philhealthEeDue = employee.philhealthNg ? 0 : stat.philhealthEe
+  if (employee.philhealthNg && !extrasOnly && stat.philhealthEe > 0) {
     notes.push(
-      employee.philhealthEeWaiver === 'pwd'
-        ? `PhilHealth employee share (₱${stat.philhealthEe.toLocaleString()} a month) is paid by the national government for an employed PWD (RA 11228); the employer share is unchanged.`
-        : `PhilHealth employee share (₱${stat.philhealthEe.toLocaleString()} a month) is paid by the national government for a solo parent (RA 11861; PhilHealth Circular 2026-0015); the employer share is unchanged.`,
+      `PhilHealth: the national government pays the employee half (₱${stat.philhealthEe.toLocaleString()} a month) for ${employee.philhealthNg === 'pwd' ? 'a person with disability (PhilHealth Circular 2026-0017; RA 11228)' : 'a solo parent (PhilHealth Circular 2026-0015)'}: "NG share – non-collectible", neither deducted nor remitted; the employer pays its usual half.`,
     )
   }
   // Maternity leave (RA 11210): each month of the leave contributes the usual
@@ -965,6 +967,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const philhealthEe = share(philhealthEeDue, mc?.already.philhealthEe)
   const pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
   const philhealthEr = share(stat.philhealthEr, mc?.already.philhealthEr)
+  const philhealthNg = employee.philhealthNg ? share(stat.philhealthEe, mc?.already.philhealthNg) : 0
   const pagibigEr = share(stat.pagibigEr, mc?.already.pagibigEr)
 
   if (extrasOnly) {
@@ -1261,6 +1264,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     sssMpfEr,
     philhealthEe,
     philhealthEr,
+    philhealthNg,
     pagibigEe,
     pagibigEr,
     withholdingTax,
@@ -1468,6 +1472,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     sssMpfEr: sss.mpfEr,
     philhealthEe: 0,
     philhealthEr: 0,
+    philhealthNg: 0,
     pagibigEe: 0,
     pagibigEr: 0,
     withholdingTax,

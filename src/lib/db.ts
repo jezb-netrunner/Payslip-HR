@@ -135,10 +135,16 @@ export interface Employee {
   is_minimum_wage_earner: boolean
   /** DOLE or allied agency certification of a hazardous assignment (an MWE's hazard pay is exempt only with it) */
   hazard_certification_ref?: string
-  /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent) */
-  philhealth_ee_waiver?: 'pwd' | 'solo_parent' | null
-  philhealth_ee_waiver_from?: string | null
-  philhealth_ee_waiver_until?: string | null
+  /**
+   * The national government pays the PhilHealth employee half (PhilHealth
+   * Circulars 2026-0015 and 2026-0017): from ph_ng_from_month through the
+   * month before the ID's expiry month.
+   */
+  ph_ng_type?: 'solo_parent' | 'pwd' | null
+  ph_ng_from_month?: string | null
+  /** Solo Parent ID (SPIC) or PWD ID */
+  id_number?: string
+  id_valid_until?: string | null
   payment_method: PaymentMethod
   work_schedule: WorkSchedule
   bank_name: string | null
@@ -380,6 +386,8 @@ export interface Payslip {
   sss_mpf_er: number
   philhealth_ee: number
   philhealth_er: number
+  /** PhilHealth's employee half paid by the national government: neither deducted nor remitted */
+  philhealth_ng: number
   pagibig_ee: number
   pagibig_er: number
   withholding_tax: number

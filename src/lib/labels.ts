@@ -148,20 +148,6 @@ export const RUN_TYPE_LABELS: Record<string, string> = {
   final_pay: 'Final pay',
 }
 
-/** The solo-parent PhilHealth rule's first day (PhilHealth Circular 2026-0015). */
-export const SOLO_PARENT_PHILHEALTH_FROM = '2026-09-26'
-
-/** Why a PhilHealth employee-share waiver can't be saved ('' = fine). */
-export function philhealthWaiverProblem(kind: string, from: string, until: string): string {
-  if (!kind) return ''
-  if (!from) return 'Enter the date the PhilHealth employee share stops being deducted.'
-  if (until && until < from) return 'The PhilHealth waiver ends before it starts.'
-  if (kind === 'solo_parent' && from < SOLO_PARENT_PHILHEALTH_FROM) {
-    return 'For solo parents the government pays the PhilHealth employee share from Sep 26, 2026 (PhilHealth Circular 2026-0015).'
-  }
-  return ''
-}
-
 /** Allowance categories that can be a reimbursement subject to liquidation (not SSS compensation). */
 export const LIQUIDATABLE_CATEGORIES: readonly string[] = ['representation', 'transportation', 'housing', 'other_taxable', 'other_non_taxable']
 

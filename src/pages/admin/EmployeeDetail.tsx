@@ -70,7 +70,6 @@ import {
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
   PAYMENT_METHOD_LABELS,
-  philhealthWaiverProblem,
   SEPARATION_REASON_LABELS,
   LIQUIDATABLE_CATEGORIES,
   PAY_ITEM_TYPE_LABELS,
@@ -85,6 +84,7 @@ import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
 import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, PayFrequency, PayItemType } from '../../payroll/types'
 import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
+import { philhealthNgProblem } from '../../payroll/philhealth'
 import { errorMessage } from '../../lib/errors'
 
 const eventLabels: Record<string, string> = {
@@ -587,9 +587,10 @@ function PayTab({
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
     bank_account_no: employee.bank_account_no ?? '',
-    ph_waiver: employee.philhealth_ee_waiver ?? '',
-    ph_waiver_from: employee.philhealth_ee_waiver_from ?? '',
-    ph_waiver_until: employee.philhealth_ee_waiver_until ?? '',
+    ph_ng_type: employee.ph_ng_type ?? '',
+    ph_ng_from_month: (employee.ph_ng_from_month ?? '').slice(0, 7),
+    id_number: employee.id_number ?? '',
+    id_valid_until: employee.id_valid_until ?? '',
   })
   const [busy, setBusy] = useState(false)
   const [listBusy, setListBusy] = useState(false)
@@ -606,9 +607,10 @@ function PayTab({
       toast('error', 'Days-per-year factor must be between 1 and 366 (or blank for the client default).')
       return
     }
-    const waiverProblem = philhealthWaiverProblem(f.ph_waiver, f.ph_waiver_from, f.ph_waiver_until)
-    if (waiverProblem) {
-      toast('error', waiverProblem)
+    const ngFrom = f.ph_ng_from_month ? `${f.ph_ng_from_month}-01` : ''
+    const ngProblem = philhealthNgProblem(f.ph_ng_type, ngFrom, f.id_number, f.id_valid_until)
+    if (ngProblem) {
+      toast('error', ngProblem)
       return
     }
     setBusy(true)
@@ -626,9 +628,10 @@ function PayTab({
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
           bank_account_no: f.bank_account_no || null,
-          philhealth_ee_waiver: f.ph_waiver || null,
-          philhealth_ee_waiver_from: f.ph_waiver ? f.ph_waiver_from : null,
-          philhealth_ee_waiver_until: f.ph_waiver ? f.ph_waiver_until || null : null,
+          ph_ng_type: f.ph_ng_type || null,
+          ph_ng_from_month: f.ph_ng_type ? ngFrom : null,
+          id_number: f.ph_ng_type ? f.id_number.trim() : '',
+          id_valid_until: f.ph_ng_type ? f.id_valid_until || null : null,
         })
         .eq('id', employee.id)
       if (error) throw error
@@ -805,22 +808,36 @@ function PayTab({
         </div>
         <div className="mt-4 space-y-3 rounded-lg bg-slate-50 p-3">
           <Field
-            label="PhilHealth employee share"
-            hint="The national government pays it for an employed PWD (RA 11228) and, from Sep 26, 2026, a solo parent (RA 11861; PhilHealth Circular 2026-0015). The employer share is unchanged. Keep a copy of the PWD or Solo Parent ID."
+            label="PhilHealth employee half"
+            hint="For a solo parent or a PWD the national government pays the employee half: nothing is deducted, the employer pays its usual half, and the government's half shows on the payslip as NG share – non-collectible (PhilHealth Circulars 2026-0015 and 2026-0017)."
           >
-            <Select value={f.ph_waiver} onChange={(e) => setF({ ...f, ph_waiver: e.target.value as typeof f.ph_waiver })}>
+            <Select value={f.ph_ng_type} onChange={(e) => setF({ ...f, ph_ng_type: e.target.value as typeof f.ph_ng_type })}>
               <option value="">Deducted from pay</option>
-              <option value="pwd">Paid by the government — person with disability</option>
               <option value="solo_parent">Paid by the government — solo parent</option>
+              <option value="pwd">Paid by the government — person with disability</option>
             </Select>
           </Field>
-          {f.ph_waiver && (
+          {f.ph_ng_type && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="From">
-                <Input type="date" value={f.ph_waiver_from} onChange={(e) => setF({ ...f, ph_waiver_from: e.target.value })} />
+              <Field
+                label="First month"
+                hint={
+                  f.ph_ng_type === 'solo_parent'
+                    ? 'The first month PhilHealth billing (SPA/EPRS) shows the solo-parent tag — not earlier than October 2026'
+                    : 'The month the complete requirements were submitted to PhilHealth'
+                }
+              >
+                <Input type="month" value={f.ph_ng_from_month} onChange={(e) => setF({ ...f, ph_ng_from_month: e.target.value })} />
               </Field>
-              <Field label="Until (optional)" hint="e.g. when the ID expires">
-                <Input type="date" value={f.ph_waiver_until} onChange={(e) => setF({ ...f, ph_waiver_until: e.target.value })} />
+              <Field label={f.ph_ng_type === 'solo_parent' ? 'Solo Parent ID (SPIC) no.' : 'PWD ID no.'}>
+                <Input value={f.id_number} onChange={(e) => setF({ ...f, id_number: e.target.value })} />
+              </Field>
+              <Field
+                label={f.ph_ng_type === 'solo_parent' ? 'ID valid until' : 'ID valid until (optional)'}
+                hint="The government share stops the month the ID expires; enter the renewed ID to continue it"
+                className="sm:col-span-2"
+              >
+                <Input type="date" value={f.id_valid_until} onChange={(e) => setF({ ...f, id_valid_until: e.target.value })} />
               </Field>
             </div>
           )}

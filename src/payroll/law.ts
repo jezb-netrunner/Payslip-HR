@@ -42,3 +42,13 @@ export const LEAVE = {
   /** an employer granting at least this many days of paid vacation leave a year is outside the service incentive leave */
   vacationLeaveOutsideSil: { value: 5, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 95(b)' },
 } satisfies Record<string, LegalValue>
+
+/** PhilHealth: the national government pays the employee half for solo parents and PWDs. */
+export const PHILHEALTH_NG = {
+  /** a solo parent's first month: the first month PhilHealth billing shows the tag, not earlier than this */
+  soloParentFromMonth: {
+    value: '2026-10-01',
+    effectiveFrom: '2026-09-26',
+    source: 'PhilHealth Circular 2026-0015 Secs. V.C, V.E.5, V.F.2 (effective 26 Sep 2026) and its Q&A; RA 11861',
+  },
+} satisfies Record<string, LegalValue<string>>

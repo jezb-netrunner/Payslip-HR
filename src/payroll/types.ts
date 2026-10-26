@@ -263,11 +263,12 @@ export interface PayrollEmployeeInput {
   /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
   apprentice?: boolean
   /**
-   * The national government pays the PhilHealth employee share for this
-   * period: employed PWDs (RA 11228) and solo parents (RA 11861, PhilHealth
-   * Circular 2026-0015). The employer share is unchanged.
+   * The national government pays the PhilHealth employee half this payroll
+   * month (solo parents, PWDs — PhilHealth Circulars 2026-0015, 2026-0017):
+   * nothing is deducted, the employer pays its usual half, and the NG half
+   * is shown, neither deducted nor remitted.
    */
-  philhealthEeWaiver?: 'pwd' | 'solo_parent'
+  philhealthNg?: 'pwd' | 'solo_parent'
   schedule: WorkSchedule
   allowances: AllowanceInput[]
   extraDeductions: ExtraDeductionInput[]
@@ -450,6 +451,8 @@ export interface PayslipComputation {
   sssMpfEr: number
   philhealthEe: number
   philhealthEr: number
+  /** PhilHealth's employee half paid by the national government: not deducted, not remitted */
+  philhealthNg: number
   pagibigEe: number
   pagibigEr: number
   withholdingTax: number
