@@ -358,6 +358,18 @@ export interface StatutoryComputation {
   periodFactor: number
 }
 
+/** How a payslip's withholding tax was computed. */
+export interface TaxTrace {
+  method: 'table' | 'supplementary' | 'cumulative_average' | 'annualized'
+  /** taxable regular and supplementary pay of the payroll */
+  regular: number
+  supplementary: number
+  /** cumulative average method: the year's taxable pay, its average a period, and the periods */
+  cumulative?: number
+  average?: number
+  periods?: number
+}
+
 export interface PayslipComputation {
   employeeId: string
   runType: RunType
@@ -398,6 +410,7 @@ export interface PayslipComputation {
     notes: string[]
     warnings: string[]
     days: DayComputation[]
+    tax?: TaxTrace
   }
 }
 

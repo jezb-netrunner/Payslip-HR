@@ -77,14 +77,20 @@ export function computePagibig(
   }
 }
 
-/** Progressive tax from a bracket table ({over, base, rate} rows, ascending). */
-export function taxFromBrackets(taxable: number, brackets: TaxBracket[]): number {
-  if (taxable <= 0) return 0
+/** The table row a taxable amount falls in ("over" its floor). */
+export function bracketOf(taxable: number, brackets: TaxBracket[]): TaxBracket {
   let b = brackets[0]
   for (const bracket of brackets) {
     if (taxable > bracket.over || bracket.over === 0) b = bracket
     else break
   }
+  return b
+}
+
+/** Progressive tax from a bracket table ({over, base, rate} rows, ascending). */
+export function taxFromBrackets(taxable: number, brackets: TaxBracket[]): number {
+  if (taxable <= 0) return 0
+  const b = bracketOf(taxable, brackets)
   return round2(b.base + b.rate * (taxable - b.over))
 }
 

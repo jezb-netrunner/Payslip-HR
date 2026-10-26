@@ -577,9 +577,11 @@ describe('13th month pay (PD 851)', () => {
     })
     expect(slip.grossPay).toBe(150000)
     expect(slip.taxableIncome).toBe(60000)
-    // marginal: tax(145,550 + 60,000) - tax(145,550) on the monthly table
-    expect(slip.withholdingTax).toBe(16944.15)
-    expect(slip.netPay).toBe(133055.85)
+    // supplementary pay (RR 2-98 Sec. 2.79(B)(3)): the 25% rate of the regular
+    // monthly pay's bracket (145,550), not the 30% the total would reach
+    expect(slip.withholdingTax).toBe(15000)
+    expect(slip.netPay).toBe(135000)
+    expect(slip.trace.tax).toMatchObject({ method: 'supplementary', regular: 145550, supplementary: 60000 })
   })
 })
 

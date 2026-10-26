@@ -2,9 +2,11 @@
 // The expected figures are the spec's test vectors.
 
 import { describe, expect, it } from 'vitest'
-import { summarizeYear } from './annual'
+import { annualizedWithholding, summarizeYear } from './annual'
 import { DEFAULT_TABLES } from './defaults'
 import { computePayslip } from './engine'
+import { computeWithholdingTax } from './statutory'
+import { periodsThisYear, periodWithholding } from './withholding'
 import type { DayComputation, DayType, PayLine, PayrollEmployeeInput, PayrollSettingsInput, PeriodInput } from './types'
 
 const settings: PayrollSettingsInput = {
@@ -133,5 +135,87 @@ describe('C1: an MWE pays tax on rest-day and special-day premiums', () => {
     )
     expect(year.mweHazard).toBe(0)
     expect(year.taxableHazard).toBe(500)
+  })
+})
+
+describe('C2: withholding on supplementary pay', () => {
+  const monthlyTable = DEFAULT_TABLES.bir_wht.monthly
+
+  it('WHT-1: the bracket of the regular pay applies to regular + supplementary', () => {
+    expect(periodWithholding({ regular: 60000, supplementary: 20000, brackets: monthlyTable })).toEqual({ tax: 11208.4, method: 'supplementary' })
+    // the old method ran the total through the table
+    expect(computeWithholdingTax(80000, 'monthly', DEFAULT_TABLES.bir_wht)).toBe(11875.05)
+  })
+
+  /** A year of monthly payrolls; returns each month's withholding. */
+  function year(months: { regular: number; supplementary?: number }[], prior = { taxable: 0, withheld: 0, from: 1 }) {
+    let taxableBefore = prior.taxable
+    let withheldBefore = prior.withheld
+    let cumulative = prior.taxable > 0
+    return months.map((m, i) => {
+      const r = periodWithholding({
+        regular: m.regular,
+        supplementary: m.supplementary ?? 0,
+        brackets: monthlyTable,
+        taxYear: { taxableBefore, withheldBefore, periods: prior.from + i, cumulative },
+      })
+      taxableBefore += m.regular + (m.supplementary ?? 0)
+      withheldBefore += r.tax
+      cumulative ||= r.method === 'cumulative_average'
+      return r.tax
+    })
+  }
+
+  it('WHT-2: zero-bracket regular pay with supplementary pay switches to the cumulative average for the year', () => {
+    const months = Array.from({ length: 11 }, (_, i) => ({ regular: 18000, supplementary: i === 5 ? 30000 : 0 }))
+    const taxes = year(months)
+    expect(taxes.slice(0, 5)).toEqual([0, 0, 0, 0, 0])
+    expect(taxes[5]).toBe(1950.3)
+    expect(taxes.slice(6)).toEqual([0, 0, 0, 0, 0])
+    // year-end: 246,000 taxable for the year owes no tax: the 1,950.30 is refunded
+    const facts = [...months, { regular: 18000, supplementary: 0 }].map((m, i) => ({
+      payMonth: `2026-${String(i + 1).padStart(2, '0')}-01`,
+      isMwe: false,
+      earnings: [{ amount: m.regular + m.supplementary, bir: 'basic' as const, taxable: true }],
+      contributionsEe: 0,
+      unionDues: 0,
+      withholdingTax: taxes[i] ?? 0,
+    }))
+    const { withholding, summary } = annualizedWithholding(facts.slice(0, 11), facts[11], DEFAULT_TABLES.bir_annual)
+    expect(summary.totalTaxable).toBe(246000)
+    expect(summary.taxDue).toBe(0)
+    expect(withholding).toBe(-1950.3)
+  })
+
+  it('WHT-3: supplementary pay at least the regular pay switches to the cumulative average', () => {
+    const taxes = year([{ regular: 25000 }, { regular: 25000 }, { regular: 25000, supplementary: 30000 }, { regular: 25000 }])
+    expect(taxes).toEqual([625.05, 625.05, 5375.1, 375])
+  })
+
+  it('WHT-4: an employee with an earlier employer this year is on the cumulative average from the start', () => {
+    const taxes = year([{ regular: 35000 }, { regular: 35000 }], { taxable: 180000, withheld: 8250.3, from: 7 })
+    expect(taxes).toEqual([2125.03, 2125.07])
+  })
+
+  it('counts the payroll periods from 1 January or the first employment this year', () => {
+    expect(periodsThisYear('monthly', '2026-01-01', '2026-07-31')).toBe(7)
+    expect(periodsThisYear('semi_monthly', '2026-01-01', '2026-06-15')).toBe(11)
+    expect(periodsThisYear('semi_monthly', '2026-03-16', '2026-03-31')).toBe(1)
+    expect(periodsThisYear('weekly', '2026-01-01', '2026-01-18')).toBe(3)
+  })
+
+  it('uses the method in the payslip: the default for a bonus beside regular pay, the trace says which', () => {
+    const employee: PayrollEmployeeInput = { ...mwe, isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 60000, dailyRate: 0, oneTimeEarnings: [{ label: 'Commission', amount: 20000, category: 'overtime' }] }
+    const slip = computePayslip({
+      employee,
+      settings: { ...settings, payFrequency: 'monthly', workingDaysDivisor: 261 },
+      period: { start: '2026-11-01', end: '2026-11-30', index: 1, count: 1 },
+      tables: DEFAULT_TABLES,
+      days: [],
+      runType: 'regular',
+      taxYear: { taxableBefore: 500000, withheldBefore: 90000, periods: 11, cumulative: false },
+    })
+    expect(slip.trace.tax).toMatchObject({ method: 'supplementary', supplementary: 20000 })
+    expect(slip.trace.tax?.regular).toBe(slip.taxableIncome - 20000)
   })
 })

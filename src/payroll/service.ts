@@ -23,6 +23,7 @@ import type { AnnualPayslipFact } from './annual'
 import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
 import { computePayslip, sssCompensation, type ContributionSet } from './engine'
+import { periodsThisYear, type TaxYearToDate } from './withholding'
 import { round2 } from './types'
 import type {
   BirBucket,
@@ -61,10 +62,15 @@ export type YearPayslip = Pick<
   | 'withholding_tax'
   | 'net_pay'
   | 'period_end'
-> & { payroll_runs?: { annualize?: boolean } | null }
+  | 'taxable_income'
+> & {
+  payroll_runs?: { annualize?: boolean } | null
+  /** how the payslip's withholding was computed (computation_trace.tax.method) */
+  wht_method?: string | null
+}
 
 const YEAR_PAYSLIP_COLUMNS =
-  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, net_pay, payroll_runs!inner(status, annualize)'
+  'employee_id, payroll_run_id, run_type, period_month, period_end, pay_date, is_minimum_wage_earner, earnings, basic_pay, gross_pay, taxable_income, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, union_dues, withholding_tax, net_pay, wht_method:computation_trace->tax->>method, payroll_runs!inner(status, annualize)'
 
 /**
  * Finalized payslips of one client whose payroll month falls in `year` —
@@ -101,6 +107,11 @@ export async function fetchFinalizedPayslipsForTaxYear(entityId: string, year: n
       .order('id')
       .range(from, to),
   )
+}
+
+/** How a finalized payslip's withholding was computed (the trace itself in the test double). */
+function whtMethodOf(p: YearPayslip): string | undefined {
+  return p.wht_method ?? (p as { computation_trace?: { tax?: { method?: string } } }).computation_trace?.tax?.method
 }
 
 export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
@@ -408,13 +419,12 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   // after the year was annualized re-annualizes.
   // A bonus or 13th month installment paid with a regular payroll: what the
   // tax year already paid decides how much of it is still exempt.
+  // Withholding builds on the year's taxable pay and tax withheld.
   const annualizes = (e: Employee) => !isThirteenth && (run.annualize || separatedBy(e, run))
   const isBenefit = (bucket: string) => bucket === 'thirteenth' || bucket === 'other_benefits'
-  const paysBenefits = new Set([
-    ...allowances.filter((a) => isBenefit(a.category)).map((a) => a.employee_id),
-    ...adjustments.filter((a) => a.kind === 'earning' && isBenefit(a.category)).map((a) => a.employee_id),
-  ])
-  const needsTaxYear = isThirteenth || employees.some((e) => annualizes(e) || paysBenefits.has(e.id))
+  // every payroll reads the tax year: the cumulative average method of
+  // withholding builds on the year's taxable pay and tax withheld
+  const needsTaxYear = employees.length > 0
   const [yearSlips, taxSlips, taxYears, monthSlips] = await Promise.all([
     isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
     needsTaxYear ? fetchFinalizedPayslipsForTaxYear(entity.id, taxYear) : Promise.resolve([] as YearPayslip[]),
@@ -528,8 +538,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         p.run_type !== 'thirteenth_month' &&
         (p.payroll_runs?.annualize || p.run_type === 'final_pay' || (!!emp.separation_date && (p.period_end ?? '') >= emp.separation_date)),
     )
-    const prior = priorFromTaxYear(taxYears.find((t) => t.employee_id === emp.id))
-    const peraCredit = Number(taxYears.find((t) => t.employee_id === emp.id)?.pera_tax_credit ?? 0)
+    const taxYearRow = taxYears.find((t) => t.employee_id === emp.id)
+    const prior = priorFromTaxYear(taxYearRow)
+    const peraCredit = Number(taxYearRow?.pera_tax_credit ?? 0)
     const linesSum = (bucket: BirBucket) =>
       empYear.reduce(
         (s, p) => s + p.earnings.filter((l) => l.bir === bucket).reduce((a, l) => a + Number(l.amount), 0),
@@ -540,6 +551,26 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       (s, p) => s + p.earnings.filter((l) => isBenefit(l.bir ?? '')).reduce((a, l) => a + Number(l.amount), 0),
       0,
     )
+
+    // The tax year so far for the cumulative average method (RR 2-98 Sec.
+    // 2.79(B)(5)(a)): taxable pay and tax withheld from 1 January, an
+    // earlier employer's included (its BIR Form 2316), and the payroll
+    // periods from 1 January or the first employment this year
+    const frequency = run.pay_frequency ?? emp.pay_frequency
+    const yearStart = `${taxYear}-01-01`
+    const earlierEmployerFrom = taxYearRow?.has_previous_employer ? (taxYearRow.prev_employment_from ?? yearStart) : null
+    const firstEmployment = [emp.hire_date, earlierEmployerFrom].filter((d): d is string => !!d).sort()[0]
+    const periodTo = isThirteenth ? run.pay_date : run.period_end
+    const clamp = (d: string) => (d < yearStart ? yearStart : d > `${taxYear}-12-31` ? `${taxYear}-12-31` : d)
+    const taxYearToDate: TaxYearToDate = {
+      taxableBefore: round2(
+        empTax.reduce((s, p) => s + Number(p.taxable_income ?? 0), 0) +
+          prior.taxableBasic + prior.taxable13thOtherBenefits + prior.taxableOther,
+      ),
+      withheldBefore: round2(empTax.reduce((s, p) => s + Number(p.withholding_tax), 0) + prior.taxWithheld),
+      periods: periodsThisYear(frequency, clamp(firstEmployment > yearStart ? firstEmployment : yearStart), clamp(periodTo)),
+      cumulative: !!taxYearRow?.has_previous_employer || empTax.some((p) => whtMethodOf(p) === 'cumulative_average'),
+    }
 
     const slip = computePayslip({
       employee: {
@@ -651,6 +682,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       benefitsExemptLeft: isThirteenth
         ? undefined
         : Math.max(0, tables.bir_annual.other_benefits_exemption_cap - prior.thirteenthOtherBenefitsExempt - taxYearBenefits),
+      taxYear: taxYearToDate,
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
     if (isThirteenth) {
