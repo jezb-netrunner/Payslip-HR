@@ -412,7 +412,6 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       .select(`employee_id, earnings, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status)`)
       .eq('employee_id', e.id)
       .eq('period_month', sepMonth)
-      .neq('run_type', 'thirteenth_month')
       .neq('payroll_run_id', run.id)
       .in('payroll_runs.status', ['finalized', 'paid'])
     if (sepErr) throw sepErr

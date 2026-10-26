@@ -1388,6 +1388,30 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     ? [{ code: 'thirteenth', label: '13th Month Pay', amount: gross13, taxable: false, bir: 'thirteenth' }]
     : []
 
+  // The 13th month pay is SSS compensation of its month (client setting,
+  // default on): the month's closing payroll settles SSS on it — or, when
+  // that payroll was already final, this one trues the month up (RA 11199
+  // Sec. 8(f); IRR Rule 12 Sec. 6).
+  const mc = params.monthContributions
+  let sss = { ee: 0, mpfEe: 0, er: 0, mpfEr: 0, ecEr: 0 }
+  if (mc?.closes && mc.compensationAlready !== undefined && gross13 > 0) {
+    const monthComp = round2(mc.compensationAlready + sssCompensation(earnings, settings))
+    const due = computeSss(monthComp, tables.sss)
+    const more = (d: number, done: number) => round2(Math.max(0, d - done))
+    sss = {
+      ee: more(due.ee, mc.already.sssEe),
+      mpfEe: more(due.mpfEe, mc.already.sssMpfEe),
+      er: more(due.er, mc.already.sssEr),
+      mpfEr: more(due.mpfEr, mc.already.sssMpfEr),
+      ecEr: more(due.ecEr, mc.already.sssEcEr),
+    }
+    if (sss.ee + sss.mpfEe + sss.er + sss.mpfEr + sss.ecEr > 0) {
+      notes.push(
+        `SSS on the month's compensation with this 13th month pay: ₱${monthComp.toLocaleString()} (MSC ₱${due.msc.toLocaleString()}), less what the month's payrolls deducted.`,
+      )
+    }
+  }
+
   let withholdingTax = 0
   let whtLabel = 'Withholding Tax (13th month excess)'
   let taxTrace: TaxTrace = { method: 'table', regular: 0, supplementary: taxable13 }
@@ -1401,7 +1425,8 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
         payMonth: params.annualization.payMonth,
         isMwe: employee.isMinimumWageEarner,
         earnings,
-        contributionsEe: 0,
+        // the SSS this payroll deducts counts in the year's contributions
+        contributionsEe: round2(sss.ee + sss.mpfEe),
         unionDues: 0,
         withholdingTax: 0,
       },
@@ -1444,30 +1469,6 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       taxTrace = { method: 'supplementary', regular: monthlyTaxable, supplementary: taxable13 }
       notes.push(
         `₱${taxable13.toLocaleString()} of the 13th month pay exceeds the exemption cap: taxed at ${Math.round(bracket.rate * 100)}%, the rate of the bracket of the regular monthly pay (RR 2-98 Sec. 2.79(B)(3)).`,
-      )
-    }
-  }
-
-  // The 13th month pay is SSS compensation of its month (client setting,
-  // default on): the month's closing payroll settles SSS on it — or, when
-  // that payroll was already final, this one trues the month up (RA 11199
-  // Sec. 8(f); IRR Rule 12 Sec. 6).
-  const mc = params.monthContributions
-  let sss = { ee: 0, mpfEe: 0, er: 0, mpfEr: 0, ecEr: 0 }
-  if (mc?.closes && mc.compensationAlready !== undefined && gross13 > 0) {
-    const monthComp = round2(mc.compensationAlready + sssCompensation(earnings, settings))
-    const due = computeSss(monthComp, tables.sss)
-    const more = (d: number, done: number) => round2(Math.max(0, d - done))
-    sss = {
-      ee: more(due.ee, mc.already.sssEe),
-      mpfEe: more(due.mpfEe, mc.already.sssMpfEe),
-      er: more(due.er, mc.already.sssEr),
-      mpfEr: more(due.mpfEr, mc.already.sssMpfEr),
-      ecEr: more(due.ecEr, mc.already.sssEcEr),
-    }
-    if (sss.ee + sss.mpfEe + sss.er + sss.mpfEr + sss.ecEr > 0) {
-      notes.push(
-        `SSS on the month's compensation with this 13th month pay: ₱${monthComp.toLocaleString()} (MSC ₱${due.msc.toLocaleString()}), less what the month's payrolls deducted.`,
       )
     }
   }
