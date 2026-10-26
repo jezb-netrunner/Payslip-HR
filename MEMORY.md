@@ -390,20 +390,26 @@ SSS counts in its re-annualization, the final-pay check reads the month's
 migrations 0200/0500 fix old rows instead of relying on NOT VALID, and a
 `legal_parameters` change marks drafts stale.
 
+**Applied live (same day, owner's approval):** the seven migrations
+through MCP, files renamed to the recorded versions; fingerprint, advisors
+and logs checked (see deployed state). A final independent review ran on
+the whole branch before the PR.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**2026-10-26: seven compliance migrations are in the repo but NOT live**
-(`20261026000100 mwe_premium_pay` … `20261026000700 filing_due_dates`,
-placeholder versions — rename each file to the version MCP records). The
-branch's front end needs them: merge only after applying them, and run the
-security advisors after. No DROP in them (MCP refuses), so the PhilHealth
-waiver columns are renamed, not dropped, and CHECKs that needed new values
-were only edited while still unapplied. Live has no old PhilHealth
-waivers, de minimis allowances or adjustments, payrolls paid before 6 Jan
-2026 or payslips with de minimis lines (checked 2026-10-26), so the
-old-row fixes in 0200/0500 change nothing there.
+**2026-10-26: the seven compliance migrations are live** (owner's
+approval), as `20261026084112 mwe_premium_pay` … `20261026084508
+filing_due_dates`. `fingerprint.sql` matches the local replica on all
+eight hashes; constraint validation and table grants match too. Security
+advisors are unchanged (same 10 intentional WARNs and the leaked-password
+setting), and the Postgres logs show no errors. Live data was untouched:
+no old PhilHealth waivers, de minimis rows, payrolls paid before 6 Jan
+2026 or draft payrolls existed. The PhilHealth waiver columns were renamed,
+not dropped (MCP refuses DROP). **Until the branch's PR deploys, the live
+site can't save an employee**: main's form still sends the old waiver
+column names. Payroll compute still works (it selects `*`).
 
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
