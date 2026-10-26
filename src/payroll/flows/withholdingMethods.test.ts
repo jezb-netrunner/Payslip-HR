@@ -62,4 +62,43 @@ describe('withholding methods across a year (C2)', () => {
     expect(slip.computation_trace.tax).toMatchObject({ method: 'cumulative_average', periods: 7 })
     expect(slip.computation_trace.tax.cumulative).toBeCloseTo(180000 + Number(slip.taxable_income), 2)
   })
+  it("counts a December payroll released in January as the tax year's first period", async () => {
+    const ent = addEntity({ default_pay_frequency: 'semi_monthly' })
+    const emp = addEmployee(ent, { pay_frequency: 'semi_monthly', monthly_rate: 40000 })
+    addAttendance(emp, '2025-12-01', '2026-02-28')
+    const periods: number[] = []
+    for (const [start, end, pay] of [['2025-12-16', '2025-12-31', '2026-01-05'], ['2026-01-01', '2026-01-15', '2026-01-20'], ['2026-01-16', '2026-01-31', '2026-02-05']]) {
+      const r = addRun(ent, { pay_frequency: 'semi_monthly', period_start: start, period_end: end, pay_date: pay })
+      if (start === '2025-12-16') {
+        db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: r.id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'Commission', amount: 30000, category: 'other_taxable', pay_item_type: 'commission' })
+      }
+      await computeRun(r as never, ent as never)
+      finalize(r.id)
+      periods.push(db.t.payslips.find((p) => p.payroll_run_id === r.id)!.computation_trace.tax.periods)
+    }
+    expect(periods).toEqual([1, 2, 3])
+  })
+
+  it('a payroll reopened after a later one switched methods keeps its own year to date', async () => {
+    const ent = addEntity({ default_pay_frequency: 'monthly' })
+    const emp = addEmployee(ent, { pay_frequency: 'monthly', monthly_rate: 40000 })
+    addAttendance(emp, '2026-01-01', '2026-07-31')
+    const runs: Record<string, Record<string, any>> = {}
+    for (const mm of ['01', '02', '03', '04', '05', '06', '07']) {
+      const start = `2026-${mm}-01`
+      runs[mm] = addRun(ent, { pay_frequency: 'monthly', period_start: start, period_end: endOfMonth(start), pay_date: endOfMonth(start) })
+      if (mm === '06') {
+        db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: runs[mm].id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'Commission', amount: 40000, category: 'other_taxable', pay_item_type: 'commission' })
+      }
+      await computeRun(runs[mm] as never, ent as never)
+      finalize(runs[mm].id)
+    }
+    const slip = () => db.t.payslips.find((p) => p.payroll_run_id === runs['03'].id)!
+    const before = slip().withholding_tax
+    expect(db.t.payslips.find((p) => p.payroll_run_id === runs['07'].id)!.computation_trace.tax.method).toBe('cumulative_average')
+    runs['03'].status = 'draft'
+    await computeRun(runs['03'] as never, ent as never)
+    expect(slip().computation_trace.tax.method).toBe('table')
+    expect(slip().withholding_tax).toBe(before)
+  })
 })

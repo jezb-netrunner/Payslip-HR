@@ -689,14 +689,19 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     const firstEmployment = [emp.hire_date, earlierEmployerFrom].filter((d): d is string => !!d).sort()[0]
     const periodTo = isThirteenth ? run.pay_date : run.period_end
     const clamp = (d: string) => (d < yearStart ? yearStart : d > `${taxYear}-12-31` ? `${taxYear}-12-31` : d)
+    // only what was paid by this payroll's pay date: a payroll reopened and
+    // recomputed ignores what later payrolls paid and withheld
+    const taxBefore = empTax.filter((p) => (p.pay_date ?? '') <= run.pay_date)
+    // payroll periods of last year paid this tax year (Dec 16–31 released in January)
+    const lagged = new Set(taxBefore.filter((p) => p.run_type === 'regular' && (p.period_end ?? '') < yearStart).map((p) => p.period_end)).size
     const taxYearToDate: TaxYearToDate = {
       taxableBefore: round2(
-        empTax.reduce((s, p) => s + Number(p.taxable_income ?? 0), 0) +
+        taxBefore.reduce((s, p) => s + Number(p.taxable_income ?? 0), 0) +
           prior.taxableBasic + prior.taxable13thOtherBenefits + prior.taxableOther,
       ),
-      withheldBefore: round2(empTax.reduce((s, p) => s + Number(p.withholding_tax), 0) + prior.taxWithheld),
-      periods: periodsThisYear(frequency, clamp(firstEmployment > yearStart ? firstEmployment : yearStart), clamp(periodTo)),
-      cumulative: !!taxYearRow?.has_previous_employer || empTax.some((p) => whtMethodOf(p) === 'cumulative_average'),
+      withheldBefore: round2(taxBefore.reduce((s, p) => s + Number(p.withholding_tax), 0) + prior.taxWithheld),
+      periods: lagged + periodsThisYear(frequency, clamp(firstEmployment > yearStart ? firstEmployment : yearStart), clamp(periodTo)),
+      cumulative: !!taxYearRow?.has_previous_employer || taxBefore.some((p) => whtMethodOf(p) === 'cumulative_average'),
     }
 
     const slip = computePayslip({
