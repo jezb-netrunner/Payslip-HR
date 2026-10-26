@@ -5,7 +5,8 @@ import { describe, expect, it } from 'vitest'
 import { annualizedWithholding, summarizeYear } from './annual'
 import { DEFAULT_TABLES } from './defaults'
 import { buildAlphalist } from './alphalist'
-import { capShortfall, computePayslip, sssCompensation } from './engine'
+import { capShortfall, computePayslip, sssCompensation, type MaternityContext } from './engine'
+import { eachDate, endOfMonth } from '../lib/manila'
 import { remittances1601C } from './remittance'
 import { computeSss, computeWithholdingTax } from './statutory'
 import { periodsThisYear, periodWithholding } from './withholding'
@@ -427,5 +428,105 @@ describe('C5: the SSS contribution base is all remuneration of the SSS month', (
     // a client that leaves the 13th month out of SSS compensation
     const without = december({ ...monthlySettings, sssInclude13thMonth: false })
     expect(without.trace.notes.some((n) => n.includes('compensation ₱25,000 (MSC ₱25,000'))).toBe(true)
+  })
+})
+
+describe('C6: maternity leave contributions, employee shares and the DOLE exemption', () => {
+  const ana: PayrollEmployeeInput = { ...mwe, id: 'ana', isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 30000, dailyRate: 0, schedule: { days: [1, 2, 3, 4, 5], start: '08:00', end: '17:00', break_minutes: 60 } }
+  const monthlySettings = { ...settings, payFrequency: 'monthly' as const, workingDaysDivisor: 261 }
+  const none = { sssEe: 0, sssMpfEe: 0, philhealthEe: 0, pagibigEe: 0, sssEr: 0, sssMpfEr: 0, sssEcEr: 0, philhealthEr: 0, pagibigEr: 0 }
+  const month = (mm: string) => ({ start: `2026-${mm}-01`, end: endOfMonth(`2026-${mm}-01`), index: 1, count: 1 })
+  const leave = { start: '2026-03-01', end: '2026-06-13' }
+  const leaveMonths = ['2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01']
+  /** every day of the month on maternity leave */
+  const onLeave = (mm: string): DayComputation[] =>
+    eachDate(`2026-${mm}-01`, endOfMonth(`2026-${mm}-01`)).map((d) => ({
+      ...workday(d, 'regular'),
+      scheduled: true,
+      workedMinutes: 0,
+      payableMinutes: 0,
+      onPaidLeave: true,
+      leaveCode: 'ML',
+      leaveStart: leave.start,
+    }))
+  const maternity = (thisMonth: string, over: Partial<MaternityContext> = {}): MaternityContext => ({
+    leaveStart: leave.start,
+    months: leaveMonths.map((m) => ({ month: m, charged: 0, fundedByPay: 0, prepaidUsed: 0, covered: 0 })),
+    thisMonth,
+    ...over,
+  })
+  const pay = (mm: string, days: DayComputation[], m?: MaternityContext, employee = ana, s: PayrollSettingsInput = monthlySettings) =>
+    computePayslip({
+      employee, settings: s, period: month(mm), tables: DEFAULT_TABLES, days, runType: 'regular',
+      monthContributions: { already: none, compensationAlready: 0, closes: true, opens: true },
+      maternity: m,
+    })
+  const contributions = (p: ReturnType<typeof pay>) => [p.sssEe, p.sssMpfEe, p.sssEr, p.sssMpfEr, p.sssEcEr, p.philhealthEe, p.philhealthEr, p.pagibigEe, p.pagibigEr]
+
+  it('MAT-1: a leave month without regular pay contributes the usual SSS, PhilHealth and Pag-IBIG', () => {
+    const february = pay('02', [])
+    const april = pay('04', onLeave('04'), maternity('2026-04-01'))
+    expect(april.grossPay).toBe(0)
+    expect(contributions(april)).toEqual(contributions(february))
+    // no maternity pay yet: the employee's share waits for it, net pay stays at zero
+    const ee = round2(april.sssEe + april.sssMpfEe + april.philhealthEe + april.pagibigEe)
+    expect(april.deductions.find((l) => l.code === 'ee_pending')).toMatchObject({ amount: -ee })
+    expect(april.netPay).toBe(0)
+  })
+
+  it('deducts the employee shares of all leave months from the maternity pay; the leave months then use them', () => {
+    const benefits = [
+      { label: 'SSS maternity benefit', amount: 70000, category: 'other_non_taxable' as const, benefit: 'sss_maternity' as const },
+      { label: 'Salary differential', amount: 35000, category: 'other_non_taxable' as const, benefit: 'maternity_differential' as const },
+    ]
+    // paid in February, before the leave: every leave month's share is held as prepaid
+    const february = pay('02', [], maternity('2026-02-01'), { ...ana, oneTimeEarnings: benefits })
+    const line = february.deductions.find((l) => l.code === 'maternity_contributions')
+    const usual = round2(february.sssEe + february.sssMpfEe + february.philhealthEe + february.pagibigEe)
+    expect(line?.covers).toEqual(leaveMonths.map((m) => ({ month: m, amount: usual })))
+    expect(line?.amount).toBe(round2(usual * 4))
+    // April then takes its share from what was prepaid
+    const april = pay('04', onLeave('04'), maternity('2026-04-01', {
+      months: leaveMonths.map((m) => ({ month: m, charged: 0, fundedByPay: 0, prepaidUsed: 0, covered: usual })),
+    }))
+    expect(april.deductions.find((l) => l.code === 'ee_prepaid')).toMatchObject({ amount: -usual, label: 'Employee contributions paid from the maternity pay' })
+    expect(april.netPay).toBe(0)
+  })
+
+  it('MAT-2: maternity pay is non-taxable, 2316 item 37, outside the ₱90,000 pool; the 13th month counts the differential only', () => {
+    const slip = pay('03', onLeave('03'), maternity('2026-03-01'), {
+      ...ana,
+      oneTimeEarnings: [
+        { label: 'SSS maternity benefit', amount: 70000, category: 'other_non_taxable', benefit: 'sss_maternity' },
+        { label: 'Salary differential', amount: 35000, category: 'other_non_taxable', benefit: 'maternity_differential' },
+      ],
+    })
+    expect(slip.taxableIncome).toBe(0)
+    const year = summarizeYear(
+      [{ payMonth: '2026-03-01', isMwe: false, earnings: slip.earnings, contributionsEe: 0, unionDues: 0, withholdingTax: 0 }],
+      DEFAULT_TABLES.bir_annual,
+    )
+    expect(year.otherNonTaxable).toBe(105000) // item 37
+    expect(year.thirteenthOtherBenefits).toBe(0) // the ₱90,000 pool is untouched
+    expect(slip.basicPay).toBe(35000) // 13th month base: the differential, not the SSS benefit
+  })
+
+  it('MAT-3: a DOLE exemption that ends before the leave starts does not apply; a warning says so', () => {
+    const exempt = { ...monthlySettings, maternityDifferentialExemption: { ref: 'DOLE-CAR-2026-0042', validUntil: '2026-12-31' } }
+    const january = computePayslip({
+      employee: ana, settings: exempt, period: { start: '2027-01-01', end: '2027-01-31', index: 1, count: 1 }, tables: DEFAULT_TABLES, days: [], runType: 'regular',
+      maternity: { leaveStart: '2027-01-05', months: [{ month: '2027-01-01', charged: 0, fundedByPay: 0, prepaidUsed: 0, covered: 0 }], thisMonth: '2027-01-01' },
+    })
+    expect(january.trace.warnings.some((w) => w.includes('valid until Dec 31, 2026') && w.includes('not exempt'))).toBe(true)
+  })
+
+  it('O3: a DOLE-exempt client computes the leave months’ shares but does not take them from the maternity pay', () => {
+    const exempt = { ...monthlySettings, maternityDifferentialExemption: { ref: 'DOLE-CAR-2026-0042', validUntil: '2026-12-31' } }
+    const april = pay('04', onLeave('04'), maternity('2026-04-01'), ana, exempt)
+    const ee = round2(april.sssEe + april.sssMpfEe + april.philhealthEe + april.pagibigEe)
+    expect(april.deductions.find((l) => l.code === 'ee_collect')).toMatchObject({ amount: -ee, label: 'Employee share to collect (advanced by the employer)' })
+    expect(april.trace.warnings.some((w) => w.startsWith('Employee share to collect'))).toBe(true)
+    const payout = pay('03', onLeave('03'), maternity('2026-03-01'), { ...ana, oneTimeEarnings: [{ label: 'SSS maternity benefit', amount: 70000, category: 'other_non_taxable', benefit: 'sss_maternity' }] }, exempt)
+    expect(payout.deductions.find((l) => l.code === 'maternity_contributions')).toBeUndefined()
   })
 })

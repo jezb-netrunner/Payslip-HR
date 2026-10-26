@@ -349,6 +349,8 @@ export interface PayrollSettingsInput {
   silConversionTaxable?: boolean
   /** The 13th month pay is SSS compensation of its month (client setting, default true, O2). */
   sssInclude13thMonth?: boolean
+  /** The client's DOLE exemption from the maternity salary differential, when it claims one. */
+  maternityDifferentialExemption?: { ref: string; validUntil: string }
 }
 
 export interface PeriodInput {
@@ -384,6 +386,8 @@ export interface PayLine {
   leaveDays?: number
   /** Earnings only: false = not SSS compensation (Christmas bonus, allowance subject to liquidation, maternity pay). */
   sss?: boolean
+  /** Deductions only: the maternity leave months a payout's contribution deduction covers. */
+  covers?: { month: string; amount: number }[]
   /**
    * Earnings only: true counts toward 13th month pay although not basic pay
    * (the maternity salary differential); false leaves basic pay out of it

@@ -243,6 +243,30 @@ export interface ComputePayslipParams {
    * pay month, half-year and tax year (pesos; days for monetized leave).
    */
   deMinimisUsed?: Partial<Record<DeMinimisKind, DeMinimisUsed>>
+  /** The employee's maternity leave this payroll's month falls in or pays for. */
+  maternity?: MaternityContext
+}
+
+/** One month a maternity leave touches, from the employee's finalized payslips. */
+export interface MaternityMonth {
+  /** YYYY-MM-01 */
+  month: string
+  /** employee contributions the month's payslips charged */
+  charged: number
+  /** the part of them the month's own pay covered */
+  fundedByPay: number
+  /** prepaid shares the month's payslips already used */
+  prepaidUsed: number
+  /** shares maternity payouts took for the month */
+  covered: number
+}
+
+/** The maternity leave around this payroll (RA 11210). */
+export interface MaternityContext {
+  leaveStart: string
+  months: MaternityMonth[]
+  /** this payroll's month (YYYY-MM-01) */
+  thisMonth: string
 }
 
 export interface DeMinimisUsed {
@@ -632,7 +656,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     const leaveStart = days.find((d) => d.leaveCode === MATERNITY_LEAVE_CODE)?.leaveStart ?? maternityDates[0]
     if (leaveStart >= period.start && !(employee.oneTimeEarnings ?? []).some((e) => e.benefit)) {
       warnings.push(
-        `Maternity leave from ${shortDate(leaveStart)}: add the SSS maternity benefit (advanced in full within 30 days of the leave application) and any salary differential up to full pay as adjustments — "SSS maternity benefit" and "Maternity salary differential". Retail and service businesses with 10 workers or fewer, micro-businesses and distressed establishments may be exempt from the differential.`,
+        `Maternity leave from ${shortDate(leaveStart)}: add the SSS maternity benefit (advanced in full within 30 days of the leave application) and any salary differential up to full pay as adjustments — "SSS maternity benefit" and "Salary differential (before employee contributions)"; the payroll paying them takes the employee's contributions for the leave months. Retail and service businesses with not more than 10 workers, micro-businesses and distressed establishments may be exempted by DOLE from the differential: record the exemption in Client Settings.`,
       )
     }
   }
@@ -730,7 +754,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       salaryLeft = round2(salaryLeft - taken)
       return taken
     }
-    const maternityDeduction = dock(maternityPayDays * daily)
+    // a period wholly on maternity leave pays no salary, whatever its number
+    // of workdays (the maternity benefit replaces it)
+    const wholePeriodOnLeave = days.length > 0 && days.every((d) => d.leaveCode === MATERNITY_LEAVE_CODE && d.workedMinutes <= 0)
+    const maternityDeduction = dock(wholePeriodOnLeave ? basicPay : maternityPayDays * daily)
     if (maternityDeduction > 0) {
       earn('maternity', `Maternity leave (${maternityDates.length} day/s, paid as the maternity benefit)`, -maternityDeduction, 'basic')
     }
@@ -880,6 +907,29 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         : `PhilHealth employee share (₱${stat.philhealthEe.toLocaleString()} a month) is paid by the national government for a solo parent (RA 11861; PhilHealth Circular 2026-0015); the employer share is unchanged.`,
     )
   }
+  // Maternity leave (RA 11210): each month of the leave contributes the usual
+  // monthly SSS, PhilHealth and Pag-IBIG on the regular monthly pay, with or
+  // without pay that month (IRR of RA 11199 Rule 12 Sec. 6(v); PhilHealth
+  // Circular 2018-0001 Sec. III; RA 9679)
+  const mat = params.maternity
+  const maternityMonth = !extrasOnly && !!mat?.months.some((m) => m.month === mat.thisMonth)
+  // A client DOLE exempted from the salary differential (RA 11210 Sec. 5(c);
+  // IRR Rule VI Sec. 5; DOLE DA 01-19) — only for a leave that starts while
+  // the exemption is valid
+  const dole = settings.maternityDifferentialExemption
+  const differentialExempt = !!dole && !!mat && mat.leaveStart <= dole.validUntil
+  if (dole && mat && !differentialExempt && (maternityMonth || (employee.oneTimeEarnings ?? []).some((e) => e.benefit))) {
+    warnings.push(
+      `The client's DOLE exemption from the maternity salary differential (${dole.ref}) was valid until ${longDate(dole.validUntil)}: this leave starts ${longDate(mat.leaveStart)}, after it, so the client is not exempt — the salary differential is due.`,
+    )
+  } else if (differentialExempt && maternityMonth) {
+    notes.push(
+      `The client is exempt from the maternity salary differential (DOLE ${dole?.ref}, valid until ${longDate(dole?.validUntil ?? '')}): the employee's contributions for the leave months are not taken from the maternity benefit.`,
+    )
+  }
+  if (maternityMonth) {
+    notes.push('Maternity leave month: SSS, PhilHealth and Pag-IBIG at the usual monthly amounts on the regular monthly pay.')
+  }
   const mc = params.monthContributions
   const share = (monthlyAmount: number, already: number | undefined) => {
     if (extrasOnly) return 0
@@ -898,11 +948,13 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // paid no compensation owes none.
   const exactSss = !extrasOnly && !!mc?.closes && mc.compensationAlready !== undefined
   const monthCompensation = exactSss ? round2((mc?.compensationAlready ?? 0) + sssCompensation(earnings, settings)) : 0
-  const sssMonth: SssComputation = exactSss ? (monthCompensation > 0 ? computeSss(monthCompensation, tables.sss) : NO_SSS) : stat.sss
+  const sssMonth: SssComputation = !exactSss || maternityMonth
+    ? stat.sss
+    : monthCompensation > 0 ? computeSss(monthCompensation, tables.sss) : NO_SSS
   const settle = (due: number, already: number | undefined) => round2(due - (already ?? 0))
   // a payroll that paid no compensation (a period on maternity or unpaid
   // leave) deducts no provisional SSS: the month's last payroll settles it
-  const noSssPay = !exactSss && !!mc && sssCompensation(earnings, settings) <= 0
+  const noSssPay = !exactSss && !!mc && !maternityMonth && sssCompensation(earnings, settings) <= 0
   const sssPart = (due: number, already: number | undefined, rate: number) =>
     exactSss ? settle(due, already) : noSssPay ? 0 : share(rate, already)
   const sssEe = sssPart(sssMonth.ee, mc?.already.sssEe, stat.sss.ee)
@@ -948,7 +1000,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   } else if (stat.periodFactor < 1) {
     notes.push(`Statutory contributions are split evenly across the ${period.count} payrolls of the month.`)
   }
-  if (exactSss) {
+  if (exactSss && maternityMonth) {
+    notes.push(`SSS on the regular monthly pay ₱${statutoryMonthlyBase.toLocaleString()} (MSC ₱${stat.sss.msc.toLocaleString()}), less what earlier payrolls this month deducted.`)
+  } else if (exactSss) {
     const earlier = round2(mc?.compensationAlready ?? 0)
     notes.push(
       monthCompensation > 0
@@ -973,6 +1027,47 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   }
   if (philhealthEe > 0) deductions.push({ code: 'philhealth', label: 'PhilHealth Premium', amount: philhealthEe })
   if (pagibigEe > 0) deductions.push({ code: 'pagibig', label: 'Pag-IBIG Contribution', amount: pagibigEe })
+
+  // Maternity leave: the employee's shares for the leave months come out of
+  // the maternity pay (RA 11210 Sec. 5(c); IRR Rule VI Sec. 5). A leave month
+  // uses what the maternity pay prepaid for it, then its own pay; what is
+  // left waits for the maternity pay — or, at a client exempt from the
+  // differential, the employer advances it as an employee share to collect (O3).
+  const maternityPay = round2(earnings.filter((l) => l.code === 'adjustment' && l.sss === false && l.bir === 'other_non_taxable').reduce((s, l) => s + l.amount, 0))
+  const eeHere = round2(sssEe + sssMpfEe + philhealthEe + pagibigEe)
+  if (maternityMonth && mat && eeHere > 0) {
+    const m = mat.months.find((x) => x.month === mat.thisMonth)
+    const fromPrepaid = round2(Math.min(eeHere, Math.max(0, (m?.covered ?? 0) - (m?.prepaidUsed ?? 0))))
+    if (fromPrepaid > 0) deductions.push({ code: 'ee_prepaid', label: 'Employee contributions paid from the maternity pay', amount: -fromPrepaid })
+    const rest = round2(eeHere - fromPrepaid)
+    const ownPay = Math.max(0, grossPay - (differentialExempt ? maternityPay : 0))
+    const short = round2(rest - Math.min(rest, ownPay))
+    if (short > 0 && differentialExempt) {
+      deductions.push({ code: 'ee_collect', label: 'Employee share to collect (advanced by the employer)', amount: -short })
+      warnings.push(
+        `Employee share to collect: ₱${plainAmount(short)} of the employee's SSS, PhilHealth and Pag-IBIG for this leave month is remitted by the employer and owed back by the employee — the client is exempt from the salary differential, so the maternity benefit is not reduced.`,
+      )
+    } else if (short > 0) {
+      deductions.push({ code: 'ee_pending', label: 'Employee contributions to be deducted from the maternity pay', amount: -short })
+    }
+  }
+  // the payroll paying the maternity pay takes the shares of the other leave
+  // months: owed by months already paid, prepaid for months to come
+  if (mat && maternityPay > 0 && !differentialExempt) {
+    const usual = round2(stat.sss.ee + stat.sss.mpfEe + philhealthEeDue + stat.pagibigEe)
+    const covers = mat.months
+      .filter((m) => m.month !== mat.thisMonth)
+      .map((m) => ({ month: m.month, amount: round2(Math.max(0, Math.max(usual, m.charged) - m.fundedByPay - m.covered)) }))
+      .filter((c) => c.amount > 0)
+    if (covers.length > 0) {
+      deductions.push({
+        code: 'maternity_contributions',
+        label: `Employee contributions for the maternity leave months (${covers.map((c) => monthName(c.month)).join(', ')}), from the maternity pay`,
+        amount: round2(covers.reduce((s, c) => s + c.amount, 0)),
+        covers,
+      })
+    }
+  }
 
   // ---- other deductions (needed first: union dues are tax-exempt) ----
   const otherLines: PayLine[] = []
@@ -1405,6 +1500,16 @@ function plainAmount(v: number): string {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** 2026-03-01 -> Mar 2026 */
+function monthName(iso: string): string {
+  return `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`
+}
+
+/** 2026-12-31 -> Dec 31, 2026 */
+function longDate(iso: string): string {
+  return `${shortDate(iso)}, ${iso.slice(0, 4)}`
+}
 
 /** 2026-10-06 -> Oct 6 (warnings name dates without depending on the browser's locale). */
 function shortDate(iso: string): string {

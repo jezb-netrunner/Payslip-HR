@@ -873,6 +873,7 @@ function AdvanceDetailModal({
 /** What a payroll line advanced for the employee, by its code. */
 const PAYROLL_ADVANCE_CODES: Record<string, string> = {
   tax_advance: 'Tax advanced by employer',
+  ee_collect: 'Employee share to collect (maternity leave month)',
 }
 
 type ReceivableSlip = Pick<Payslip, 'id' | 'employee_id' | 'pay_date' | 'deductions' | 'employee_snapshot'>
@@ -880,7 +881,9 @@ type ReceivableSlip = Pick<Payslip, 'id' | 'employee_id' | 'pay_date' | 'deducti
 /**
  * Amounts the employer paid for an employee inside a finalized payroll — the
  * year-end tax shortfall the last pay could not cover (RR 2-98 Sec.
- * 2.79(B)(5)(b)): receivables to collect, outside payroll or as an advance.
+ * 2.79(B)(5)(b)), and the contributions of maternity leave months at a client
+ * exempt from the salary differential (O3): receivables to collect, outside
+ * payroll or as an advance.
  */
 function PayrollReceivables({ entity, employeeId, onRecord }: { entity: Entity; employeeId: string | null; onRecord: (employeeId: string) => void }) {
   const [slips, setSlips] = useState<ReceivableSlip[] | null>(null)
@@ -924,7 +927,7 @@ function PayrollReceivables({ entity, employeeId, onRecord }: { entity: Entity; 
   if (rows.length === 0) {
     return (
       <Card>
-        <EmptyState title="Nothing advanced in payroll" sub="When a year-end tax shortfall is more than the last pay can bear, the employer pays the rest and it shows here as a receivable." />
+        <EmptyState title="Nothing advanced in payroll" sub="When a year-end tax shortfall is more than the last pay can bear, or a maternity leave month's employee contributions can't be deducted, the employer pays them and they show here as receivables." />
       </Card>
     )
   }

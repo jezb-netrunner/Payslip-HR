@@ -110,7 +110,7 @@ export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
 /** RA 11210 maternity pay, paid as one-time earnings (both tax-exempt, RMC 105-2019). */
 export const MATERNITY_BENEFIT_LABELS: Record<MaternityBenefit, string> = {
   sss_maternity: 'SSS maternity benefit (tax-exempt)',
-  maternity_differential: 'Maternity salary differential (tax-exempt, counts for 13th month)',
+  maternity_differential: 'Salary differential (before employee contributions; tax-exempt, counts for 13th month)',
 }
 
 /** Wage-board regions (for minimum wage and the MWE alphalist). */

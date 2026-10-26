@@ -82,4 +82,10 @@ insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, l
 values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Christmas bonus', 3000, 'other_benefits', 'christmas_bonus');
 select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category, pay_item_type) values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'deduction', 'Union dues', 300, 'union_dues', 'christmas_bonus')$$, '%payroll_adjustments_pay_item_type_category%');
 
+\echo '--- 17.4 C6: a DOLE exemption from the maternity differential is documented'
+select pg_temp.check(not (select maternity_differential_exempt from entities where id = '10000000-0000-0000-0000-0000000017f0'), 'not exempt by default');
+select pg_temp.expect_error($$update entities set maternity_differential_exempt = true where id = '10000000-0000-0000-0000-0000000017f0'$$, '%entities_dole_exemption_documented%');
+update entities set maternity_differential_exempt = true, dole_exemption_ref = 'DOLE-CAR-2026-0042', dole_exemption_valid_until = '2026-12-31'
+  where id = '10000000-0000-0000-0000-0000000017f0';
+
 \echo 'PASSED 17'

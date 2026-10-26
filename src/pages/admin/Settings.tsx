@@ -32,6 +32,8 @@ function settingsRangeProblem(s: Entity): string | null {
   if (!int(s.pay_date_lag_days) || n(s.pay_date_lag_days) < 0 || n(s.pay_date_lag_days) > 31)
     return 'Days from period end to pay date must be a whole number, 0–31.'
   if (!(n(s.paid_vl_days_per_year) >= 0 && n(s.paid_vl_days_per_year) <= 365)) return 'Paid vacation leave days must be between 0 and 365.'
+  if (s.maternity_differential_exempt && (!s.dole_exemption_ref.trim() || !s.dole_exemption_valid_until))
+    return "A DOLE exemption from the maternity salary differential needs the exemption's reference and the date it is valid until."
   return null
 }
 
@@ -90,6 +92,9 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           paid_vl_days_per_year: Number(s.paid_vl_days_per_year),
           sil_conversion_taxable: s.sil_conversion_taxable,
           sss_include_13th_month: s.sss_include_13th_month,
+          maternity_differential_exempt: s.maternity_differential_exempt,
+          dole_exemption_ref: s.maternity_differential_exempt ? s.dole_exemption_ref.trim() : '',
+          dole_exemption_valid_until: s.maternity_differential_exempt ? s.dole_exemption_valid_until || null : null,
         })
         .eq('id', s.id)
       if (error) throw error
@@ -290,6 +295,21 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 onChange={(v) => set('sil_conversion_taxable', v)}
                 label="Tax service incentive leave converted to cash (a client giving only the 5-day SIL)"
               />
+              <Toggle
+                checked={s.maternity_differential_exempt}
+                onChange={(v) => set('maternity_differential_exempt', v)}
+                label="DOLE exempted this client from the maternity salary differential"
+              />
+              {s.maternity_differential_exempt && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="DOLE exemption reference">
+                    <Input value={s.dole_exemption_ref} onChange={(e) => set('dole_exemption_ref', e.target.value)} />
+                  </Field>
+                  <Field label="Valid until" hint="A leave starting after it is not exempt">
+                    <Input type="date" value={s.dole_exemption_valid_until ?? ''} onChange={(e) => set('dole_exemption_valid_until', e.target.value)} />
+                  </Field>
+                </div>
+              )}
             </div>
           </Card>
           <Card title="Payslip" icon={<FileText />}>

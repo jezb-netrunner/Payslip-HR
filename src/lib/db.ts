@@ -65,6 +65,10 @@ export interface Entity {
   sil_conversion_taxable: boolean
   /** the 13th month pay is SSS compensation of its month */
   sss_include_13th_month: boolean
+  /** DOLE exemption from the maternity salary differential (RA 11210 Sec. 5(c); DOLE DA 01-19) */
+  maternity_differential_exempt: boolean
+  dole_exemption_ref: string
+  dole_exemption_valid_until: string | null
   is_active: boolean
   created_at: string
 }
@@ -337,6 +341,8 @@ export interface PayslipLine {
   /** the de minimis benefit the line is, and the leave days it converts */
   dm?: DeMinimisKind
   leaveDays?: number
+  /** a maternity payout's contribution deduction: the leave months it covers */
+  covers?: { month: string; amount: number }[]
 }
 
 export interface Payslip {

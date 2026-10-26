@@ -5,7 +5,7 @@
 import { getEntity, getHolidaysBetween, getStatutoryTables } from '../lib/api'
 import { fetchAll } from '../lib/fetchAll'
 import { fmtDate } from '../lib/format'
-import { addDays } from '../lib/manila'
+import { addDays, endOfMonth } from '../lib/manila'
 import { fetchScheduleRows, NO_SCHEDULE_ROWS, resolversFor } from '../lib/schedules'
 import { supabase } from '../lib/supabase'
 import type {
@@ -22,7 +22,7 @@ import type {
 import type { AnnualPayslipFact } from './annual'
 import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
-import { computePayslip, sssCompensation, type ContributionSet, type DeMinimisUsed } from './engine'
+import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet, type DeMinimisUsed, type MaternityContext, type MaternityMonth } from './engine'
 import { periodsThisYear, type TaxYearToDate } from './withholding'
 import { round2 } from './types'
 import type {
@@ -133,6 +133,55 @@ export function deMinimisPaid(slips: YearPayslip[], payDate: string): Partial<Re
     }
   }
   return used
+}
+
+/** Days around a payroll searched for a maternity leave it falls in or pays for. */
+const MATERNITY_WINDOW_DAYS = 200
+
+type MaternitySlip = Pick<Payslip, 'employee_id' | 'period_month' | 'deductions' | 'sss_ee' | 'sss_mpf_ee' | 'philhealth_ee' | 'pagibig_ee'>
+
+/** YYYY-MM-01 `n` months before `month`. */
+function monthsBefore(month: string, n: number): string {
+  const y = Number(month.slice(0, 4))
+  const m = Number(month.slice(5, 7)) - 1 - n
+  const d = new Date(Date.UTC(y, m, 1))
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * The months a maternity leave touches, each with what its finalized
+ * payslips charged and how it was funded: the month's own pay, prepaid
+ * shares used, and the shares maternity payouts took for it.
+ */
+export function maternityContext(
+  leave: { start_date: string; end_date: string },
+  slips: MaternitySlip[],
+  thisMonth: string,
+): MaternityContext {
+  const months: MaternityMonth[] = []
+  for (let m = `${leave.start_date.slice(0, 7)}-01`; m <= leave.end_date; m = `${addDays(endOfMonth(m), 1).slice(0, 7)}-01`) {
+    const own = slips.filter((p) => p.period_month === m)
+    const lines = (code: string) =>
+      own.reduce((s, p) => s + p.deductions.filter((l) => l.code === code).reduce((a, l) => a - Number(l.amount), 0), 0)
+    const charged = own.reduce((s, p) => s + Number(p.sss_ee) + Number(p.sss_mpf_ee) + Number(p.philhealth_ee) + Number(p.pagibig_ee), 0)
+    const prepaidUsed = lines('ee_prepaid')
+    const covered = slips.reduce(
+      (s, p) =>
+        s +
+        p.deductions
+          .filter((l) => l.code === 'maternity_contributions')
+          .reduce((a, l) => a + (l.covers ?? []).filter((c) => c.month === m).reduce((b, c) => b + Number(c.amount), 0), 0),
+      0,
+    )
+    months.push({
+      month: m,
+      charged: round2(charged),
+      fundedByPay: round2(charged - prepaidUsed - lines('ee_pending') - lines('ee_collect')),
+      prepaidUsed: round2(prepaidUsed),
+      covered: round2(covered),
+    })
+  }
+  return { leaveStart: leave.start_date, months, thisMonth }
 }
 
 /** How a finalized payslip's withholding was computed (the trace itself in the test double). */
@@ -474,6 +523,53 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     ),
   ])
 
+  // Maternity leaves around this payroll (RA 11210): the months they touch
+  // contribute the usual amounts, and the payroll paying the maternity pay
+  // takes the employee's shares for all of them. Read: the approved leaves,
+  // and the finalized payslips of those months and of the payouts.
+  const mlLeaves = isThirteenth
+    ? []
+    : await fetchAll<{ employee_id: string; start_date: string; end_date: string }>((from, to) =>
+        supabase
+          .from('leave_requests')
+          .select('employee_id, start_date, end_date, leave_types!inner(code)')
+          .eq('entity_id', entity.id)
+          .eq('status', 'approved')
+          .eq('leave_types.code', MATERNITY_LEAVE_CODE)
+          .lte('start_date', addDays(run.period_end, MATERNITY_WINDOW_DAYS))
+          .gte('end_date', addDays(run.period_start, -MATERNITY_WINDOW_DAYS))
+          .order('id')
+          .range(from, to),
+      )
+  const leaveFor = new Map<string, { start_date: string; end_date: string }>()
+  for (const e of employees) {
+    const own = mlLeaves.filter((l) => l.employee_id === e.id)
+    const monthStart = run.period_month
+    const monthEnd = endOfMonth(run.period_month)
+    // the leave in this payroll's month, else the next one (maternity pay
+    // advanced before the leave), else the last one (paid after it)
+    const pick =
+      own.find((l) => l.start_date <= monthEnd && l.end_date >= monthStart) ??
+      own.filter((l) => l.start_date > monthEnd).sort((a, b) => a.start_date.localeCompare(b.start_date))[0] ??
+      own.filter((l) => l.end_date < monthStart).sort((a, b) => b.end_date.localeCompare(a.end_date))[0]
+    if (pick) leaveFor.set(e.id, pick)
+  }
+  const matSlips =
+    leaveFor.size === 0
+      ? []
+      : await fetchAll<MaternitySlip>((from, to) =>
+          supabase
+            .from('payslips')
+            .select('employee_id, period_month, deductions, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, payroll_runs!inner(status)')
+            .eq('entity_id', entity.id)
+            .in('employee_id', [...leaveFor.keys()])
+            .neq('payroll_run_id', run.id)
+            .in('payroll_runs.status', ['finalized', 'paid'])
+            .gte('period_month', monthsBefore(run.period_month, 12))
+            .order('id')
+            .range(from, to),
+        )
+
   const groupBy = <T extends { employee_id: string }>(rows: T[]) => {
     const m = new Map<string, T[]>()
     for (const r of rows) {
@@ -512,6 +608,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       paidVlDaysPerYear: Number(entity.paid_vl_days_per_year ?? 0),
       silConversionTaxable: entity.sil_conversion_taxable !== false,
       sssInclude13thMonth: entity.sss_include_13th_month !== false,
+      ...(entity.maternity_differential_exempt && entity.dole_exemption_valid_until
+        ? { maternityDifferentialExemption: { ref: entity.dole_exemption_ref, validUntil: entity.dole_exemption_valid_until } }
+        : {}),
     }
 
     const leaveList: LeaveLite[] = (leavesBy.get(emp.id) ?? []).map((l) => ({
@@ -721,6 +820,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : Math.max(0, tables.bir_annual.other_benefits_exemption_cap - prior.thirteenthOtherBenefitsExempt - taxYearBenefits),
       taxYear: taxYearToDate,
       deMinimisUsed: deMinimisPaid(empTax, run.pay_date),
+      maternity: leaveFor.has(emp.id)
+        ? maternityContext(leaveFor.get(emp.id)!, matSlips.filter((p) => p.employee_id === emp.id), run.period_month)
+        : undefined,
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
     if (isThirteenth) {
