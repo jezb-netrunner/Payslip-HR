@@ -338,6 +338,16 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 onChange={(v) => set('maternity_differential_exempt', v)}
                 label="DOLE exempted this client from the maternity salary differential"
               />
+              {s.maternity_differential_exempt && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="DOLE exemption reference">
+                    <Input value={s.dole_exemption_ref} onChange={(e) => set('dole_exemption_ref', e.target.value)} />
+                  </Field>
+                  <Field label="Valid until" hint="A leave starting after it is not exempt">
+                    <Input type="date" value={s.dole_exemption_valid_until ?? ''} onChange={(e) => set('dole_exemption_valid_until', e.target.value)} />
+                  </Field>
+                </div>
+              )}
               <Toggle
                 checked={s.holiday_absence_rule}
                 onChange={(v) => set('holiday_absence_rule', v)}
@@ -358,16 +368,6 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 onChange={(v) => set('holiday_pay_exempt', v)}
                 label="Exempt from holiday pay (retail or service establishment regularly employing less than 10 workers, Art. 94)"
               />
-              {s.maternity_differential_exempt && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="DOLE exemption reference">
-                    <Input value={s.dole_exemption_ref} onChange={(e) => set('dole_exemption_ref', e.target.value)} />
-                  </Field>
-                  <Field label="Valid until" hint="A leave starting after it is not exempt">
-                    <Input type="date" value={s.dole_exemption_valid_until ?? ''} onChange={(e) => set('dole_exemption_valid_until', e.target.value)} />
-                  </Field>
-                </div>
-              )}
             </div>
           </Card>
           <Card title="Payslip" icon={<FileText />}>

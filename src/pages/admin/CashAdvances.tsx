@@ -898,7 +898,8 @@ function PayrollReceivables({ entity, employeeId, onRecord }: { entity: Entity; 
             .select('id, employee_id, pay_date, deductions, employee_snapshot, payroll_runs!inner(status)')
             .eq('entity_id', entity.id)
             .in('payroll_runs.status', ['finalized', 'paid'])
-            .contains('deductions', [{ code }])
+            // a jsonb containment filter takes the JSON text (an array would be sent as a Postgres array)
+            .contains('deductions', JSON.stringify([{ code }]))
             .order('pay_date', { ascending: false })
             .order('id')
             .range(from, to),
