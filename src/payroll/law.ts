@@ -88,3 +88,34 @@ export const DEADLINES = {
     source: 'PhilHealth employer payment schedule (pay_procedures page)',
   },
 } satisfies Record<string, LegalValue<unknown>>
+
+/** Hours of work (Labor Code Book III, Title I). */
+export const HOURS = {
+  /** normal hours of work a day; a longer day is a compressed-workweek shift */
+  normalHoursPerDay: { value: 8, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 83' },
+  /** night shift differential: at least 10% of the regular wage for each hour from 10pm to 6am */
+  nightDifferentialMinimum: { value: 0.1, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 86' },
+  nightShiftStartMinute: { value: 22 * 60, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 86' },
+  nightShiftHours: { value: 8, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 86 (10pm to 6am)' },
+  /** rest periods ("coffee breaks") of 5 to 20 minutes are hours worked */
+  compensableRestMinutes: { value: 20, effectiveFrom: LABOR_CODE, source: 'Omnibus Rules Book III, Rule I, Sec. 7' },
+  /** a compressed-workweek day: 12 hours of work at most */
+  compressedDayMinutes: { value: 12 * 60, effectiveFrom: '2004-12-02', source: 'DOLE Department Advisory 02-04' },
+  /** a compressed workweek: fewer than six workdays, 48 normal hours at most */
+  compressedWeekDays: { value: 5, effectiveFrom: '2004-12-02', source: 'DOLE Department Advisory 02-04' },
+  compressedWeekMinutes: { value: 48 * 60, effectiveFrom: '2004-12-02', source: 'DOLE Department Advisory 02-04' },
+} satisfies Record<string, LegalValue>
+
+/** Wages and employment. */
+export const EMPLOYMENT = {
+  /** apprentices and learners may be paid this share of the applicable minimum wage */
+  apprenticeShareOfMinimumWage: { value: 0.75, effectiveFrom: LABOR_CODE, source: 'Labor Code Arts. 61 and 73' },
+  /** probationary employment: six months, 180 days counted with the first day excluded */
+  probationDays: {
+    value: 180,
+    effectiveFrom: LABOR_CODE,
+    source: 'Labor Code Art. 296; Civil Code Art. 13; Mitsubishi Motors v. Chrysler Phils. Labor Union, G.R. 148738',
+  },
+  /** 13th month pay: one twelfth of the basic salary earned in the calendar year (the divisor) */
+  thirteenthMonthDivisor: { value: 12, effectiveFrom: '1975-12-16', source: 'PD 851 Sec. 1; Revised Guidelines on the Implementation of the 13th Month Pay Law' },
+} satisfies Record<string, LegalValue>

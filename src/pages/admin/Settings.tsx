@@ -10,6 +10,7 @@ import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { splitClientTin } from '../../lib/format'
 import { holidayPayExemptProblem } from '../../payroll/engine'
+import { HOURS } from '../../payroll/law'
 
 export default function Settings() {
   const { entity, reload } = useEntity()
@@ -25,10 +26,11 @@ function settingsRangeProblem(s: Entity): string | null {
   if (!(n(s.minimum_wage_daily) >= 0)) return 'Minimum wage cannot be negative.'
   if (!(n(s.working_days_divisor) > 0 && n(s.working_days_divisor) <= 366)) return 'Days-per-year factor must be between 1 and 366.'
   // normal hours of work are 8 a day at most (Labor Code Art. 83); longer days are compressed-workweek shifts
-  if (!(n(s.standard_hours_per_day) > 0 && n(s.standard_hours_per_day) <= 8)) return 'Standard hours per day must be above 0 and at most 8 (Labor Code Art. 83).'
+  if (!(n(s.standard_hours_per_day) > 0 && n(s.standard_hours_per_day) <= HOURS.normalHoursPerDay.value))
+    return `Standard hours per day must be above 0 and at most ${HOURS.normalHoursPerDay.value} (Labor Code Art. 83).`
   if (!int(s.grace_period_minutes) || n(s.grace_period_minutes) < 0 || n(s.grace_period_minutes) > 240)
     return 'Grace period must be a whole number of minutes, 0–240.'
-  if (!(n(s.night_diff_rate) >= 0.1 && n(s.night_diff_rate) <= 1))
+  if (!(n(s.night_diff_rate) >= HOURS.nightDifferentialMinimum.value && n(s.night_diff_rate) <= 1))
     return 'Night differential rate must be at least 0.10 (Labor Code Art. 86) and at most 1.'
   if (!int(s.pay_date_lag_days) || n(s.pay_date_lag_days) < 0 || n(s.pay_date_lag_days) > 31)
     return 'Days from period end to pay date must be a whole number, 0–31.'

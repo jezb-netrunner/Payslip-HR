@@ -5,6 +5,7 @@
 // employee's base schedule (employees.work_schedule).
 
 import { hhmmToMinutes, isoWeekday } from '../lib/manila'
+import { HOURS } from './law'
 import type { ScheduleResolver, ScheduleSource, Shift, WeekPattern, WorkSchedule } from './types'
 
 /** An employee's weekly pattern from a date on (employee_schedules). */
@@ -43,10 +44,10 @@ export function shiftWorkMinutes(s: Shift): number {
 }
 
 /** A compressed-workweek day may run 12 hours at most (DOLE Department Advisory 02-04). */
-export const MAX_COMPRESSED_MINUTES = 720
+export const MAX_COMPRESSED_MINUTES = HOURS.compressedDayMinutes.value
 /** A compressed workweek has fewer than six workdays and keeps to 48 normal hours (same advisory). */
-export const MAX_COMPRESSED_WEEK_DAYS = 5
-export const MAX_COMPRESSED_WEEK_MINUTES = 48 * 60
+export const MAX_COMPRESSED_WEEK_DAYS = HOURS.compressedWeekDays.value
+export const MAX_COMPRESSED_WEEK_MINUTES = HOURS.compressedWeekMinutes.value
 
 /** Why a weekly pattern can't be saved ('' = fine); mirrors the database's valid_week_pattern. */
 export function weekPatternProblem(p: WeekPattern): string {

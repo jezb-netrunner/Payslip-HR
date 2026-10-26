@@ -20,7 +20,7 @@
 
 import { annualizedWithholding, isTaxableBucket, type AnnualPayslipFact, type PriorEmployerInput } from './annual'
 import { bracketOf, computePagibig, computePhilHealth, computeSss } from './statutory'
-import { HOLIDAY_PAY, LEAVE, OVERTIME, PREMIUM } from './law'
+import { EMPLOYMENT, HOLIDAY_PAY, LEAVE, OVERTIME, PREMIUM } from './law'
 import { periodWithholding, REGULAR_COMPENSATION_BUCKETS, type PeriodTax, type TaxYearToDate } from './withholding'
 import {
   round2,
@@ -465,7 +465,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const isMwe = employee.isMinimumWageEarner
 
   // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
-  const wageFloor = settings.minimumWageDaily * (employee.apprentice ? 0.75 : 1)
+  const wageFloor = settings.minimumWageDaily * (employee.apprentice ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
   if (daily + 0.005 < wageFloor) {
     warnings.push(
       `Derived daily rate ₱${daily.toFixed(2)} is below ${employee.apprentice ? '75% of ' : ''}the configured minimum wage ₱${settings.minimumWageDaily.toFixed(2)}.`,
@@ -1371,7 +1371,7 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   const alreadyPaid = params.ytdThirteenthPaid ?? 0
   const otherBenefits = params.ytdOtherBenefits ?? 0
   const priorExempt = params.priorThirteenthOtherBenefitsExempt ?? 0
-  const gross13 = round2(Math.max(0, ytdBasic / 12 - alreadyPaid))
+  const gross13 = round2(Math.max(0, ytdBasic / EMPLOYMENT.thirteenthMonthDivisor.value - alreadyPaid))
   const cap = tables.bir_annual.other_benefits_exemption_cap
   const usedThisTaxYear = params.taxYearBenefitsPaid ?? otherBenefits + alreadyPaid
   const exemptRemaining = Math.max(0, cap - priorExempt - usedThisTaxYear)

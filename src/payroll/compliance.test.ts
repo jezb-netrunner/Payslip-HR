@@ -700,3 +700,17 @@ describe('C10: BIR outputs', () => {
     expect(String(csv[0][0])).toMatch(/Certified List of Employees Qualified for Substituted Filing/)
   })
 })
+
+describe('every legal value carries its effective date and source', () => {
+  it('law.ts', async () => {
+    const law = await import('./law')
+    const entries = Object.entries(law).flatMap(([group, values]) => Object.entries(values as Record<string, unknown>).map(([k, v]) => [`${group}.${k}`, v] as const))
+    expect(entries.length).toBeGreaterThan(20)
+    for (const [name, v] of entries) {
+      const lv = v as { value: unknown; effectiveFrom: string; source: string }
+      expect(lv.value, name).toBeDefined()
+      expect(lv.effectiveFrom, name).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+      expect(lv.source.length, name).toBeGreaterThan(5)
+    }
+  })
+})
