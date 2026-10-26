@@ -362,9 +362,35 @@ repeating; provisional SSS on zero-pay payrolls) plus a pre-existing one
 all fixed with tests. Tests 247 → 282, SQL suite 16 added; browser QA of
 every new control at 1280 and 390 px.
 
+### 2026-10-26 — Owner's compliance spec C1–C10 (branch `claude/affectionate-carson-hyuwes`, restarted from main after PR #6)
+
+**Asked:** the owner (CPA) answered the open accountant items with an
+implementation spec (C1–C11, open items O1–O9; chat only, not in the repo):
+MWE premiums taxable, withholding on supplementary pay, year-end shortfall
+cap and refunds, de minimis ceilings, SSS base, maternity contributions,
+PhilHealth NG share, holiday settings, due dates, BIR outputs, NCR wage.
+
+**Did:** one commit per change ID, tests first with the spec's vectors
+(`src/payroll/compliance.test.ts`, flows `withholdingMethods`, `maternity`;
+SQL suite 17). Seven migrations `20261026000100`–`…0700` (placeholders,
+NOT applied live — need the owner's approval). Legal constants moved to
+`src/payroll/law.ts` (value, effective date, source); de minimis ceilings
+are a new versioned table `legal_parameters`. C11 skipped: the only client
+is in CAR. Tests 282 → 340. The official PDFs in the spec's sources
+(bir-cdn, lawphil, philhealth) are unreachable from the cloud sandbox
+(proxy 403 / DNS), so no label or figure was checked against them.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-10-26: seven compliance migrations are in the repo but NOT live**
+(`20261026000100 mwe_premium_pay` … `20261026000700 filing_due_dates`,
+placeholder versions — rename each file to the version MCP records). The
+branch's front end needs them: merge only after applying them, and run the
+security advisors after. No DROP in them (MCP refuses), so the PhilHealth
+waiver columns are renamed, not dropped, and CHECKs that needed new values
+were only edited while still unapplied.
 
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
@@ -451,9 +477,10 @@ Known-open items (deliberate scope cuts, also in README disclaimers): BIR
 DAT file not generated (CSV for the BIR Alphalist module instead); no
 tax-only or reversal adjustment for correcting a paid payroll (see
 *Correcting a payroll after payday*); the SSS maternity benefit and salary
-differential are entered by the admin, not computed; whether an MWE's
-rest-day/special-day premiums are tax-exempt is unverified (the app
-exempts them — accountant's call).
+differential are entered by the admin, not computed. Settled by the owner's
+spec of 2026-10-25: an MWE's rest-day and special-day premiums are taxable.
+NCR-27 (suspended, in litigation) and its contingent top-up report were
+not built: no NCR client.
 
 ---
 
@@ -497,27 +524,42 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   (169/195/260/338%); ND +10% (22:00–06:00), stacks multiplicatively;
   premiums 130/150/200/260%; unworked regular holiday 100% if the employee
   worked or was on paid leave on the workday before it (IRR Book III Rule IV
-  Secs. 6, 10 — rest days passed over, successive holidays chain); special
+  Secs. 6, 10 — rest days passed over, successive holidays chain) — since
+  the owner's spec of 2026-10-25 only when the client turns on
+  `holiday_absence_rule` (default off: "may not be paid", O8); special
   days no-work-no-pay; 13th month = YTD basic ÷ 12, due Dec 24; apprentices
   and learners ≥ 75% of the minimum (Arts. 61, 73); final pay within 30
   days, COE within 3 days of request (Labor Advisory 06-20); deductions
   the law doesn't provide for need written authorization (Art. 113; DO
   195-18).
-- **Contributions' bases** (verified 2026-10-24): SSS on actual monthly
-  compensation — all remuneration incl. OT, COLA, allowances; not 13th
-  month/bonuses/reimbursements (RA 11199 Sec. 8(f)); PhilHealth on monthly
+- **Contributions' bases** (verified 2026-10-24, SSS revised by the owner's
+  spec 2026-10-25): SSS on all remuneration of the SSS month — OT, COLA,
+  allowances, de minimis, bonuses and the 13th month (client setting,
+  default on, O2); only a Christmas bonus and allowances subject to
+  liquidation are out (RA 11199 Secs. 8(f), 8(h); IRR Rule 12 Secs. 6,
+  8); maternity leave months at the usual amounts; PhilHealth on monthly
   basic salary; Pag-IBIG on basic + allowances up to ₱10,000 (secondary
-  sources only — circular text not reached). PhilHealth employee share is
-  paid by the national government for employed PWDs (RA 11228) and, from
-  Sep 26, 2026, solo parents (PhilHealth Circular 2026-0015). WISP is now
+  sources only — circular text not reached). PhilHealth employee half is
+  paid by the national government ("NG share – non-collectible", neither
+  deducted nor remitted) for PWDs from the month the requirements were
+  submitted (Circular 2026-0017) and solo parents from the first month
+  billing shows the tag, not before October 2026 (Circular 2026-0015),
+  through the month before the ID's expiry month. WISP is now
   "MySSS Pension Booster (Mandatory)".
 - **Tax** (verified 2026-10-24): 13th month + other benefits beyond ₱90,000
   are taxable compensation when paid — for MWEs too (Soriano v. Secretary
   of Finance, G.R. 184450, 2017); year-end adjustment on the last payroll
   paid in December, refunds by Jan 25 (RR 2-98 as amended); BIR 2316
-  items 26–28 = total withheld as adjusted, PERA credit, total.
-  Unverified, flagged to the owner: whether an MWE's rest-day/special-day
-  premiums are exempt like holiday pay (the app exempts them).
+  items 26–28 = total withheld as adjusted, PERA credit, total. Per the
+  owner's spec (2026-10-25): an MWE's rest-day/special-day premiums are
+  taxable (item 51 "Premium pay (MWE)"), the extra 30% of a regular
+  holiday on the rest day taxable by default (O1); hazard pay exempt only
+  with a hazardous-assignment certification; supplementary pay withheld at
+  the regular pay's bracket or on the cumulative average method (RR 2-98
+  Sec. 2.79(B)(3), (5)(a)); the year-end shortfall capped at the last pay,
+  the employer advancing the rest; de minimis ceilings of RR 29-2025 from
+  6 Jan 2026 (in `legal_parameters`, `verified_on` null: from the spec, the
+  PDF unreachable); alphalist per RMC 160-2022.
 - **2026 holidays**: Proclamation 1006 (+1189 Eid'l Fitr Mar 20, +1264 Eid'l
   Adha May 27) — 12 regular, 8 special non-working, Feb 25 special *working*.
   NCR only: Nov 16–18, 2026 special non-working (Proclamation 1447) — a
@@ -968,17 +1010,17 @@ PhilHealth/Pag-IBIG collected (`src/payroll/flows/contributionOrder.test.ts`).
 
 ### The alphalist previous-employer section has its own status, period and reason
 
-> Per the BIR 1604-C alphalist format (RMC 73-2019; read via search extracts of the BIR PDF on 2026-10-20 — the PDF itself was unreachable from the sandbox), the previous-employer block carries TIN, employment status, period of employment and reason of separation, besides the amounts. Stored in `employee_tax_years` and exported itemized.
+> Per the BIR 1604-C alphalist format (RMC 73-2019 then; the owner's spec of 2026-10-25 says to follow the revision of RMC 160-2022, with PERA data — read via search extracts on 2026-10-20, the PDFs themselves unreachable from the sandbox), the previous-employer block carries TIN, employment status, period of employment and reason of separation, besides the amounts. Stored in `employee_tax_years` and exported itemized.
 
 Re-verify the exact column order against the current BIR Alphalist Data
 Entry module before relying on the CSV column positions.
 
-### Remittance due dates are not verified facts — the dashboard doesn't state them
+### Due dates come from the owner's sourced table, each editable per year (revised 2026-10-26)
 
-> On 2026-10-20 the dashboard's "File 1601-C by the 10th", "SSS by month-end", "Pag-IBIG by the 10th–15th" hints turned out to be unverified and contradicted by current sources (BIR eFPS deadlines go by filing group; Pag-IBIG's window runs to month-end by the first letter of the employer's name; PhilHealth's goes by employer number). The tiles now only say "remit next month — check the agency's schedule".
+> The dashboard tiles still say only "remit next month". Exact dates now live in BIR & Reports → Due dates, from the owner's spec (C9) with a source per rule in `law.ts` DEADLINES: 1601-C 10th (December 15 Jan) or eFPS group A–E, SSS last day of the next month, PhilHealth by the employer number's last digit, Pag-IBIG entered by the client (O4, HDMF circular unread). Weekend/holiday dates get a note, never moved; extensions are per-year rows in `filing_due_dates`.
 
-Verify against each agency's own issuance before showing exact dates again
-(same rule as statutory figures: data from official sources, never memory).
+Why: on 2026-10-20 dates written from memory were wrong; dates are data
+from a named source, and agencies extend them.
 
 
 ### The look lives in theme tokens and ui.tsx primitives (confirmed approach)
@@ -1076,6 +1118,16 @@ returned hire + 179; the labor review caught it (`insights.ts`, test pins
 the case). Why it mattered: a day early tells HR to decide on
 regularization before the law's deadline is actually reached.
 
+### Supplementary pay is withheld at the regular pay's bracket, or on the cumulative average (owner's spec, 2026-10-25)
+
+> Taxable pay splits into regular (basic, fixed allowances: 2316 items 39–44) and supplementary (items 45–51); the bracket comes from the regular part only. The cumulative average method takes over (and stays for the year) when regular pay is in the zero bracket with supplementary pay, when supplementary ≥ regular, or with an earlier employer this year.
+
+Every payroll now reads the tax year's payslips (taxable income, tax
+withheld, `computation_trace.tax.method` for the sticky method). Why it
+mattered: running regular + bonus through the table taxed the bonus at the
+next bracket (WHT-1: 11,875.05 vs 11,208.40), and zero-bracket employees'
+bonuses were never withheld at all until December.
+
 ### Bonuses past the ₱90,000 exemption are taxed when paid (correction)
 
 Regular payrolls used to classify every 13th-month/other-benefits line as
@@ -1086,7 +1138,14 @@ loads whenever a payroll pays a benefit), for MWEs too. Why it mattered: a
 June bonus of ₱150k under-withheld ~₱16.8k until December, and an
 employee who left before December was never trued up on it.
 
-### SSS follows the month's actual compensation; the closing payroll settles it (confirmed approach)
+### SSS follows the month's actual compensation; the closing payroll settles it (confirmed approach, base widened 2026-10-25)
+
+Since the owner's spec (C5): the base is every pay item of the SSS month —
+13th month (client setting), bonuses, de minimis, leave conversions —
+except a Christmas bonus and an allowance subject to liquidation
+(`pay_item_type`); a 13th month run paid after the month's closing payroll
+trues SSS up itself. Maternity leave months contribute the usual amounts
+(next lesson), not the actual pay.
 
 RA 11199 Sec. 8(f): SSS compensation is all remuneration for the month
 (OT, COLA, allowances), not the rate. Earlier payrolls of a month deduct a
@@ -1094,8 +1153,8 @@ provisional share on the rate; the month's closing payroll (last slot, a
 separation, or any payroll computed after the closing one was final)
 deducts what the month's actual pay requires less what was already taken —
 a negative line refunds an over-deduction; a month with no compensation
-owes none, and a payroll that paid no compensation (a period on maternity
-or unpaid leave) takes no provisional share. PhilHealth stays on the basic rate, Pag-IBIG on basic +
+owes none, and a payroll that paid no compensation (a period on unpaid
+leave) takes no provisional share — maternity leave months excepted. PhilHealth stays on the basic rate, Pag-IBIG on basic +
 allowances. Flow tests that expected a full rate-based month for mid-month
 hires/absences were wrong and were changed. Why it mattered: rate-based
 SSS under-remits for anyone with OT or allowances (SSS assesses
@@ -1114,6 +1173,17 @@ RMC 105-2019); the differential counts toward 13th month
 leave starts in (`leaveStart`). Why it mattered: paying full salary for the leave
 days taxed exempt pay, overpaid exempt small employers who owe only the
 reimbursed SSS benefit, and missed the 30-day advance.
+
+Since the owner's spec (C6): every leave month contributes SSS, PhilHealth
+and Pag-IBIG at the usual amounts, paid or not; the payroll paying the
+maternity pay deducts the employee shares of the other leave months
+(`maternity_contributions` line with `covers` per month), and a leave
+month uses them (`ee_prepaid`) or waits for them (`ee_pending`). A client
+with a DOLE exemption (`maternity_differential_exempt` + reference +
+valid-until; a leave starting later isn't exempt) doesn't take them from
+the SSS benefit: `ee_collect`, a receivable listed on Cash Advances. A
+period wholly on maternity leave pays no salary (a 21-weekday month used
+to leave ₱1,034 of a ₱30,000 salary).
 
 ### Per-payroll deduction amounts are rows on the draft, not edits to the installment (confirmed approach)
 
@@ -1270,3 +1340,29 @@ Full reasoning, PH must-haves and sources: the owner's doc
 https://claude.ai/artifact/3DbHSdFJgJLhr3yd388fbv (Claude Docs). Open
 questions there (client's banks, SIL exemption, time capture, approvers,
 email) decide the order — ask before building the lower-right items.
+
+### Live CHECK constraints can't widen: add a typed column, or edit only unapplied migrations
+
+> The Supabase MCP refuses any statement with DROP (cloud sessions never see its confirmation), so a CHECK on a live column can't be replaced. New pay-item kinds became new columns (`de_minimis_kind`, `pay_item_type`, `leave_days`) with their own CHECKs; renamed columns use RENAME (the PhilHealth waiver → `ph_ng_*`).
+
+A CHECK in a migration that isn't live yet can still be edited in place
+(C10 widened C5's `pay_item_type` that way). Why it mattered: widening
+`payroll_adjustments.category` for commissions would have needed a DROP the
+tooling can't run.
+
+### Legal values: `law.ts` for rules, `legal_parameters` for agency ceilings (confirmed approach, 2026-10-26)
+
+> Every legal number the logic uses has a value, effective date and source: Labor Code and other fixed rules in `src/payroll/law.ts` (a test checks each entry), agency figures that change by issuance as versioned rows — `statutory_versions` (month-start dates) or `legal_parameters` (any start date, e.g. RR 29-2025 from 6 Jan 2026), read-only and frozen once used.
+
+Why: the owner's rule "no legal numbers in logic"; `statutory_versions`
+can't take a mid-month start or a new kind without DROPping its CHECKs.
+
+### The owner's spec is the oracle when the official PDFs are unreachable
+
+> From the cloud sandbox the BIR CDN, lawphil and PhilHealth hosts fail (proxy 403, DNS). Figures loaded from the owner's spec carry `verified_on` null and the report says so.
+
+Where the spec was silent (de minimis excess over a ceiling) the safe
+default was taken: taxed as supplementary pay. RR 2-98's last proviso of
+Sec. 2.78.1(A)(3) may instead put such excess in the ₱90,000 pool — asked
+the owner.
+
