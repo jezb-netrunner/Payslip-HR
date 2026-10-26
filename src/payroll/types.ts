@@ -190,7 +190,8 @@ export type RoundingMode = 'none' | 'round_up' | 'carry_forward'
  */
 export type BirBucket =
   | 'basic' //             basic salary / SMW, net of absence, tardiness, undertime lines
-  | 'holiday' //           holiday, special-day and rest-day premium pay
+  | 'holiday' //           holiday, special-day and rest-day premium pay (an MWE's: holiday pay only)
+  | 'premium' //           an MWE's rest-day and special-day premiums: taxable (2316 item 51)
   | 'overtime'
   | 'night_diff'
   | 'hazard'
@@ -238,6 +239,11 @@ export interface PayrollEmployeeInput {
   extraDeductions: ExtraDeductionInput[]
   /** One-time earnings for this run (payroll adjustments). */
   oneTimeEarnings?: OneTimeEarningInput[]
+  /**
+   * DOLE or allied agency certification of an actual assignment to a
+   * hazardous area or station: without it, an MWE's hazard pay is taxable.
+   */
+  hazardCertificationRef?: string
   /** Employment dates: days outside them are no one's missing time (warnings only; pay is unchanged). */
   hireDate?: string
   separationDate?: string | null
@@ -293,6 +299,8 @@ export interface PayrollSettingsInput {
   contributionTiming: ContributionTiming
   payFrequency: PayFrequency
   minimumWageDaily: number
+  /** An MWE's extra 30% for a regular holiday worked on the rest day is taxable (client setting, default true). */
+  mweRhRestdayPremiumTaxable?: boolean
 }
 
 export interface PeriodInput {
@@ -322,7 +330,11 @@ export interface PayLine {
   bir?: BirBucket
   hours?: number
   meta?: string
-  /** Earnings only: counts toward 13th month pay although not basic pay (the maternity salary differential). */
+  /**
+   * Earnings only: true counts toward 13th month pay although not basic pay
+   * (the maternity salary differential); false leaves basic pay out of it
+   * (an MWE's rest-day wage, paid on top of the monthly rate).
+   */
   thirteenthBasis?: boolean
 }
 

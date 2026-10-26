@@ -316,6 +316,7 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
         ['Hazard pay', s.taxableHazard],
         ['Overtime pay', s.taxableOvertime],
         ['Others (supplementary: holiday/premium pay, night differential)', s.taxableOtherSupplementary],
+        ['Others — Premium pay (MWE)', s.taxablePremiumMwe],
         ['Total taxable compensation (present employer)', s.totalTaxablePresent],
       ],
     ],

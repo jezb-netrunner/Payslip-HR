@@ -20,6 +20,7 @@
 
 import { annualizedWithholding, isTaxableBucket, type AnnualPayslipFact, type PriorEmployerInput } from './annual'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax, taxFromBrackets } from './statutory'
+import { OVERTIME, PREMIUM } from './law'
 import {
   round2,
   type BirBucket,
@@ -38,14 +39,26 @@ import {
   type StatutoryTables,
 } from './types'
 
-export const DAY_MULT: Record<DayType, number> = {
-  regular: 1,
-  rest_day: 1.3,
-  special_day: 1.3,
-  special_day_rest: 1.5,
-  regular_holiday: 2.0,
-  regular_holiday_rest: 2.6,
+/**
+ * A worked day's pay above its 100%: a regular holiday's extra 100% and the
+ * premium on top (rest day, special day, a regular holiday on the rest day).
+ */
+export const DAY_PARTS: Record<DayType, { holiday: number; premium: number }> = {
+  regular: { holiday: 0, premium: 0 },
+  rest_day: { holiday: 0, premium: PREMIUM.restDay.value },
+  special_day: { holiday: 0, premium: PREMIUM.specialDay.value },
+  special_day_rest: { holiday: 0, premium: PREMIUM.specialDayOnRestDay.value },
+  regular_holiday: { holiday: PREMIUM.regularHoliday.value, premium: 0 },
+  regular_holiday_rest: {
+    holiday: PREMIUM.regularHoliday.value,
+    premium: PREMIUM.regularHolidayOnRestDay.value * (1 + PREMIUM.regularHoliday.value),
+  },
 }
+
+/** Day multipliers: rest/special day 130%, special+rest 150%, regular holiday 200%, holiday+rest 260%. */
+export const DAY_MULT = Object.fromEntries(
+  Object.entries(DAY_PARTS).map(([t, p]) => [t, 1 + p.holiday + p.premium]),
+) as Record<DayType, number>
 
 /**
  * Portion of the day multiplier already covered by the monthly rate for
@@ -123,7 +136,7 @@ export function unworkedHolidaysPaid(
 }
 
 function otMultiplier(dayType: DayType): number {
-  return dayType === 'regular' ? 1.25 : DAY_MULT[dayType] * 1.3
+  return dayType === 'regular' ? 1 + OVERTIME.ordinaryDay.value : DAY_MULT[dayType] * (1 + OVERTIME.premiumDay.value)
 }
 
 export interface AnnualizationInput {
@@ -228,7 +241,7 @@ export interface ComputePayslipParams {
  * benefits among them).
  */
 export const SSS_COMPENSATION_BUCKETS: readonly BirBucket[] = [
-  'basic', 'holiday', 'overtime', 'night_diff', 'hazard', 'cola',
+  'basic', 'holiday', 'premium', 'overtime', 'night_diff', 'hazard', 'cola',
   'representation', 'transportation', 'housing', 'other_taxable',
 ]
 
@@ -431,10 +444,31 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   let specialDayPremium = 0
   let holidayPremium = 0
   let dailyBasic = 0 // daily-paid only
+  // minimum wage earners: only the minimum wage, holiday pay, overtime,
+  // night differential and qualifying hazard pay are exempt; rest-day and
+  // special-day premiums are taxable (NIRC Sec. 24(A)(2)(a) last proviso;
+  // RR 2-98 Secs. 2.78.1(B)(13) and 2.79(A) as amended by RR 11-2018)
+  let mweRestDayWage = 0 // monthly-paid: the 100% of rest-day work the rate doesn't cover
+  let mweRestDayPremium = 0
+  let mweSpecialPremium = 0
+  let mweHolidayRestPremium = 0 // the extra 30% of a regular holiday worked on the rest day
 
   const stdMin = settings.standardHoursPerDay * 60
   // the share of a standard day the date's shift schedules (1 when there is no shift)
   const dayShare = (d: DayComputation) => (d.scheduled ? (d.expectedMinutes ?? stdMin) / stdMin : 1)
+
+  // an MWE's worked day above its 100%: the regular holiday's extra 100% is
+  // exempt holiday pay, the premium on top is taxable — the extra 30% of a
+  // regular holiday on the rest day as the client sets it (default taxable)
+  const rhRestPremiumTaxable = settings.mweRhRestdayPremiumTaxable !== false
+  const mwePremium = (dayType: DayType, dayWage: number) => {
+    const p = DAY_PARTS[dayType]
+    holidayPremium += p.holiday * dayWage
+    if (dayType === 'rest_day') mweRestDayPremium += p.premium * dayWage
+    else if (dayType === 'special_day' || dayType === 'special_day_rest') mweSpecialPremium += p.premium * dayWage
+    else if (rhRestPremiumTaxable) mweHolidayRestPremium += p.premium * dayWage
+    else holidayPremium += p.premium * dayWage
+  }
 
   for (const d of days) {
     const worked = d.workedMinutes > 0
@@ -497,7 +531,11 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         }
         const extraMult = DAY_MULT[d.dayType] - builtIn
         const extra = extraMult * hourly * (d.payableMinutes / 60)
-        if (d.dayType === 'rest_day') restDayPay += extra
+        if (isMwe) {
+          const h = hourly * (d.payableMinutes / 60)
+          if (builtIn === 0) mweRestDayWage += h
+          mwePremium(d.dayType, h)
+        } else if (d.dayType === 'rest_day') restDayPay += extra
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += extra
         else if (isRegularHolidayType(d.dayType)) holidayPremium += extra
@@ -515,7 +553,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       if (worked) {
         dailyBasic += 1.0 * daily * fraction
         const premium = (DAY_MULT[d.dayType] - 1) * daily * fraction
-        if (d.dayType === 'rest_day') restDayPay += premium
+        if (isMwe) mwePremium(d.dayType, daily * fraction)
+        else if (d.dayType === 'rest_day') restDayPay += premium
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += premium
         else if (isRegularHolidayType(d.dayType)) holidayPremium += premium
@@ -560,6 +599,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const earnings: PayLine[] = []
   const earn = (code: string, label: string, amount: number, bir: BirBucket, extra: Partial<PayLine> = {}) =>
     earnings.push({ code, label, amount, bir, taxable: isTaxableBucket(bir, isMwe), ...extra })
+  // an MWE's hazard pay is exempt only for an actual assignment to a danger,
+  // strife-torn or disease-infested area or a distressed or isolated station,
+  // certified by DOLE or an allied agency (RR 2-98 Sec. 2.78.1(B)(13))
+  const uncertifiedHazard = (bucket: BirBucket) => isMwe && bucket === 'hazard' && !employee.hazardCertificationRef?.trim()
   let basicPay: number
 
   if (extrasOnly) {
@@ -629,7 +672,17 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   if (ndPay > 0) earn('nd', 'Night Differential', round2(ndPay), 'night_diff', { hours: round2(ndHours) })
   if (restDayPay > 0) earn('restday', 'Rest Day Pay', round2(restDayPay), 'holiday')
   if (specialDayPremium > 0) earn('special', 'Special Day Premium', round2(specialDayPremium), 'holiday')
+  // an MWE's rest-day work: the minimum wage for the day is exempt (not basic
+  // salary for the 13th month, as before), the premium is taxable
+  if (mweRestDayWage > 0) {
+    earn('restday_wage', 'Rest Day Work (minimum wage)', round2(mweRestDayWage), 'basic', { thirteenthBasis: false })
+  }
+  if (mweRestDayPremium > 0) earn('restday_premium', 'Rest Day Premium (taxable)', round2(mweRestDayPremium), 'premium')
+  if (mweSpecialPremium > 0) earn('special_premium', 'Special Day Premium (taxable)', round2(mweSpecialPremium), 'premium')
   if (holidayPremium > 0) earn('holiday', 'Holiday Pay', round2(holidayPremium), 'holiday')
+  if (mweHolidayRestPremium > 0) {
+    earn('holiday_premium', 'Holiday Rest Day Premium (taxable)', round2(mweHolidayRestPremium), 'premium')
+  }
 
   const paidDays = daysWorked + paidLeaveDays + paidUnworkedHolidays
   for (const a of extrasOnly ? [] : employee.allowances) {
@@ -644,8 +697,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       amt = allocateMonthly(a.amount, period.index, period.count)
     }
     if (amt === 0) continue
-    const taxable = isTaxableBucket(a.category, isMwe)
-    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, a.category)
+    const taxable = isTaxableBucket(a.category, isMwe) || uncertifiedHazard(a.category)
+    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, a.category, { taxable })
   }
   for (const e of employee.oneTimeEarnings ?? []) {
     const amt = round2(e.amount)
@@ -659,7 +712,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       })
       continue
     }
-    earn('adjustment', e.label, amt, e.category, { meta: e.id })
+    earn('adjustment', e.label, amt, e.category, { meta: e.id, ...(uncertifiedHazard(e.category) ? { taxable: true } : {}) })
+  }
+  if (earnings.some((l) => l.bir === 'hazard' && l.taxable && isMwe)) {
+    notes.push(
+      "Hazard pay is taxable for this minimum wage earner: it is exempt only with the DOLE or allied agency's certification of an actual assignment to a hazardous area or station on file (RR 2-98 Sec. 2.78.1(B)(13)).",
+    )
   }
 
   const grossPay = round2(earnings.reduce((s, l) => s + l.amount, 0))
@@ -911,7 +969,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // basic-pay adjustments). Stored as the payslip's basic_pay because PD
   // 851 counts only "basic salary earned" toward 13th month pay.
   const earnedBasic = round2(
-    earnings.filter((l) => l.bir === 'basic' || l.thirteenthBasis).reduce((s, l) => s + l.amount, 0),
+    earnings
+      .filter((l) => (l.bir === 'basic' && l.thirteenthBasis !== false) || l.thirteenthBasis === true)
+      .reduce((s, l) => s + l.amount, 0),
   )
 
   if (netExact < 0) warnings.push('Net pay is negative — review deductions for this employee.')

@@ -55,6 +55,8 @@ export interface Entity {
   rounding_scope: 'cash_only' | 'all'
   pay_date_lag_days: number
   payslip_footer_note: string
+  /** an MWE's extra 30% for a regular holiday worked on the rest day is taxable */
+  mwe_rh_restday_premium_taxable: boolean
   is_active: boolean
   created_at: string
 }
@@ -119,6 +121,8 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
+  /** DOLE or allied agency certification of a hazardous assignment (an MWE's hazard pay is exempt only with it) */
+  hazard_certification_ref?: string
   /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent) */
   philhealth_ee_waiver?: 'pwd' | 'solo_parent' | null
   philhealth_ee_waiver_from?: string | null

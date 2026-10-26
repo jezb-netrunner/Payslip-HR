@@ -91,6 +91,7 @@ export const ALLOWANCE_BASIS_LABELS: Record<AllowanceBasis, string> = {
 export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
   basic: 'Basic pay',
   holiday: 'Holiday / premium pay',
+  premium: 'Premium pay (MWE, taxable)',
   overtime: 'Overtime pay',
   night_diff: 'Night differential',
   hazard: 'Hazard pay',

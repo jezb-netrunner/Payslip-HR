@@ -471,6 +471,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       contributionTiming: entity.contribution_deduction_timing,
       payFrequency: run.pay_frequency ?? emp.pay_frequency,
       minimumWageDaily: Number(entity.minimum_wage_daily),
+      mweRhRestdayPremiumTaxable: entity.mwe_rh_restday_premium_taxable !== false,
     }
 
     const leaveList: LeaveLite[] = (leavesBy.get(emp.id) ?? []).map((l) => ({
@@ -550,6 +551,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         isMinimumWageEarner: emp.is_minimum_wage_earner,
         apprentice: emp.employment_status === 'apprentice',
         philhealthEeWaiver: philhealthWaiverFor(emp, run),
+        hazardCertificationRef: emp.hazard_certification_ref ?? '',
         schedule: emp.work_schedule,
         hireDate: emp.hire_date,
         separationDate: emp.separation_date,

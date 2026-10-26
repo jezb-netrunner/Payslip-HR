@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Banknote, Building2, Coins, FileText, Hash, SlidersHorizontal } from 'lucide-react'
+import { Banknote, Building2, Coins, FileText, Hash, Scale, SlidersHorizontal } from 'lucide-react'
 import { Button, Card, Field, Input, NoClient, PageHeader, Select, Textarea, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
@@ -85,6 +85,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           rounding_scope: s.rounding_scope,
           pay_date_lag_days: Number(s.pay_date_lag_days),
           payslip_footer_note: s.payslip_footer_note,
+          mwe_rh_restday_premium_taxable: s.mwe_rh_restday_premium_taxable,
         })
         .eq('id', s.id)
       if (error) throw error
@@ -255,6 +256,19 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 Statutory contributions and tax keep their exact centavos; only the cash handed over is rounded.
                 Rounding down is not offered: keeping an employee's centavos would be an unauthorized wage
                 deduction. Carried centavos are always paid out on the final pay.
+              </p>
+            </div>
+          </Card>
+          <Card title="Tax and labor rules" icon={<Scale />}>
+            <div className="space-y-3">
+              <Toggle
+                checked={s.mwe_rh_restday_premium_taxable}
+                onChange={(v) => set('mwe_rh_restday_premium_taxable', v)}
+                label="Tax a minimum wage earner's extra 30% for a regular holiday worked on the rest day"
+              />
+              <p className="text-xs text-slate-400">
+                A minimum wage earner's rest-day and special-day premiums are taxable; the minimum wage, holiday pay,
+                overtime, night differential and certified hazard pay stay exempt (NIRC Sec. 24(A)(2)).
               </p>
             </div>
           </Card>

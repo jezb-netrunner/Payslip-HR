@@ -247,7 +247,7 @@ export function whoOf(employeeId: string, snap: Record<string, unknown> | null |
 }
 
 const BASIC_CODES = new Set(['basic', 'absence', 'late', 'undertime', 'extra_hours'])
-const PREMIUM_CODES = new Set(['restday', 'special', 'holiday'])
+const PREMIUM_CODES = new Set(['restday', 'special', 'holiday', 'restday_wage', 'restday_premium', 'special_premium', 'holiday_premium'])
 const LOAN_CODES = new Set(['other:sss_loan', 'other:pagibig_loan', 'other:company_loan'])
 
 export function toSlipFact(r: SlipRow): SlipFact {

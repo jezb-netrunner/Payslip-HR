@@ -580,6 +580,7 @@ function PayTab({
     pay_frequency: employee.pay_frequency,
     days_per_year: employee.days_per_year === null ? '' : String(employee.days_per_year),
     is_mwe: employee.is_minimum_wage_earner,
+    hazard_ref: employee.hazard_certification_ref ?? '',
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
     bank_account_no: employee.bank_account_no ?? '',
@@ -614,6 +615,7 @@ function PayTab({
           pay_frequency: f.pay_frequency,
           days_per_year: f.days_per_year ? Number(f.days_per_year) : null,
           is_minimum_wage_earner: f.is_mwe,
+          hazard_certification_ref: f.hazard_ref.trim(),
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
           bank_account_no: f.bank_account_no || null,
@@ -766,8 +768,17 @@ function PayTab({
           />
           <p className="text-xs text-slate-500">
             Daily equivalent {money(daily)} vs client minimum {money(Number(entity.minimum_wage_daily))}
-            {entity.minimum_wage_region ? ` (${entity.minimum_wage_region})` : ''}.
+            {entity.minimum_wage_region ? ` (${entity.minimum_wage_region})` : ''}. Rest-day and special-day premiums
+            of a minimum wage earner are taxable.
           </p>
+          {f.is_mwe && (
+            <Field
+              label="Hazardous assignment certification (optional)"
+              hint="DOLE or allied agency certification of an actual assignment to a danger, strife-torn or disease-infested area, or a distressed or isolated station. Without it, hazard pay is taxable."
+            >
+              <Input value={f.hazard_ref} placeholder="Certification reference" onChange={(e) => setF({ ...f, hazard_ref: e.target.value })} />
+            </Field>
+          )}
           {Number(employee.rounding_balance) > 0 && (
             <p className="text-xs text-slate-500">
               Cash-rounding centavos owed to this employee: {money(Number(employee.rounding_balance))} (paid on the next payroll).
