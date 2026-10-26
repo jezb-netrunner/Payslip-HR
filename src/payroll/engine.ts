@@ -701,8 +701,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const earnings: PayLine[] = []
   const earn = (code: string, label: string, amount: number, bir: BirBucket, extra: Partial<PayLine> = {}) =>
     earnings.push({ code, label, amount, bir, taxable: isTaxableBucket(bir, isMwe), ...extra })
-  // a Christmas bonus and an allowance subject to liquidation are not SSS compensation
-  const notSss = (t: PayItemType | undefined) => (t ? ' (not SSS compensation)' : '')
+  // a Christmas bonus and an allowance subject to liquidation are not SSS
+  // compensation; commissions, profit sharing and fees have their own 2316 items
+  const notSss = (t: PayItemType | undefined) =>
+    t === 'christmas_bonus' || t === 'liquidated_allowance' ? ' (not SSS compensation)' : ''
+  const itemBucket = (category: BirBucket, t: PayItemType | undefined): BirBucket =>
+    t === 'commission' || t === 'profit_sharing' || t === 'fees' ? t : category
   // De minimis benefits are exempt up to their ceilings, and only those on
   // the list: any other benefit is taxable, and so is pay above a ceiling
   // (RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 29-2025 Sec. 1; RR 5-2011
@@ -875,10 +879,11 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       earnDeMinimis('allowance', `${a.label}${suffix}`, amt, a.deMinimisKind)
       continue
     }
-    const taxable = isTaxableBucket(a.category, isMwe) || uncertifiedHazard(a.category)
-    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}${notSss(a.payItemType)}`, amt, a.category, {
+    const bucket = itemBucket(a.category, a.payItemType)
+    const taxable = isTaxableBucket(bucket, isMwe) || uncertifiedHazard(bucket)
+    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}${notSss(a.payItemType)}`, amt, bucket, {
       taxable,
-      ...(a.payItemType ? { sss: false } : {}),
+      ...(notSss(a.payItemType) ? { sss: false } : {}),
     })
   }
   for (const e of employee.oneTimeEarnings ?? []) {
@@ -902,10 +907,11 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       earnDeMinimis('adjustment', e.label, amt, e.deMinimisKind, e.id)
       continue
     }
-    earn('adjustment', `${e.label}${notSss(e.payItemType)}`, amt, e.category, {
+    const bucket = itemBucket(e.category, e.payItemType)
+    earn('adjustment', `${e.label}${notSss(e.payItemType)}`, amt, bucket, {
       meta: e.id,
-      ...(uncertifiedHazard(e.category) ? { taxable: true } : {}),
-      ...(e.payItemType ? { sss: false } : {}),
+      ...(uncertifiedHazard(bucket) ? { taxable: true } : {}),
+      ...(notSss(e.payItemType) ? { sss: false } : {}),
     })
   }
   if (earnings.some((l) => l.bir === 'hazard' && l.taxable && isMwe)) {

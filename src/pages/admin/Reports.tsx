@@ -10,7 +10,7 @@ import { useEntity } from '../../lib/entity'
 import { fmtDate, fmtMonth, fmtTin, fullName, money, plural } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
-import { alphalistCsv, buildAlphalist, type AlphalistRow, type YearEndRate } from '../../payroll/alphalist'
+import { alphalistCsv, annexFCsv, buildAlphalist, form2316Items, FORM_2316_LABELS, type AlphalistRow, type Form2316Item, type YearEndRate } from '../../payroll/alphalist'
 import { remittances1601C, type RemittanceMonth } from '../../payroll/remittance'
 import { FILING_LABELS, filingCalendar, type DueDate, type DueDateOverride } from '../../payroll/dueDates'
 import { round2 } from '../../payroll/types'
@@ -290,7 +290,14 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
                       <Td className="text-right">{money(r.summary.totalNonTaxable)}</Td>
                       <Td className="text-right">{money(r.summary.totalTaxablePresent)}</Td>
                       <Td className="text-right">{money(r.summary.taxDue)}</Td>
-                      <Td className="text-right">{money(r.summary.withheldAsAdjusted + r.summary.prevTaxWithheld)}</Td>
+                      <Td className="text-right">
+                        {money(r.summary.withheldAsAdjusted + r.summary.prevTaxWithheld)}
+                        {(r.summary.withheldDec > 0 || r.summary.refunded > 0) && (
+                          <p className="text-[11px] text-slate-400">
+                            Dec {money(r.summary.withheldDec)}{r.summary.refunded > 0 ? ` · refunded ${money(r.summary.refunded)}` : ''}
+                          </p>
+                        )}
+                      </Td>
                       <Td className={`text-right font-semibold ${r.summary.variance === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {money(r.summary.variance)}
                       </Td>
@@ -307,10 +314,27 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
           </Card>
         )
       })}
+      <Card title="BIR Form 2316 — all employees" icon={<FileText />}>
+        <p className="text-sm text-amber-700">{FORM_2316_REMINDER}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => print2316(rows, entity, year)}>
+            <Printer className="size-4" /> Print all 2316 data sheets
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!rows.some((r) => r.substitutedFiling)}
+            onClick={() => downloadCsv(`annexF_substituted_filing_${entity.code}_${year}.csv`, annexFCsv(rows, entity, year))}
+          >
+            <Download className="size-4" /> Annex F list (substituted filing)
+          </Button>
+        </div>
+      </Card>
       <p className="text-[11px] text-slate-400">
-        Layout follows the 1604-C alphalist (RMC 73-2019): Schedule 1 employees, Schedule 2 minimum
-        wage earners, each figure as declared on BIR Form 2316. Key or import the CSV figures into the BIR Alphalist
-        Data Entry and Validation Module (it generates the DAT file for eSubmission). Balance = tax due − tax withheld.
+        Layout follows the 1604-C (January 2018 ENCS) alphalist as revised by RMC 160-2022 (with the PERA 5% tax
+        credit): Schedule 1 employees, Schedule 2 minimum wage earners, each figure as declared on BIR Form 2316
+        (September 2021 ENCS), with each employee's annualization (tax due, withheld January–November and December,
+        refunds, as adjusted). Key or import the CSV figures into the BIR Alphalist Data Entry and Validation Module (it
+        generates the DAT file for eSubmission). Balance = tax due − tax withheld.
       </p>
 
       {viewing && <Form2316Modal row={viewing} entity={entity} year={year} onClose={() => setViewing(null)} />}
@@ -318,10 +342,12 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
   )
 }
 
-function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; entity: Entity; year: number; onClose: () => void }) {
+/** The 2316 figures of one employee: Part IV-A summary, Part IV-B by item number (September 2021 ENCS). */
+function form2316Groups(row: AlphalistRow): [string, [string, number | string][]][] {
   const s = row.summary
-  const e = row.employee
-  const groups: [string, [string, number | string][]][] = [
+  const items = form2316Items(s)
+  const numbered = (keys: Form2316Item[]): [string, number][] => keys.map((k) => [`${k}. ${FORM_2316_LABELS[k]}`, items[k]])
+  return [
     [
       'Part IV-A — Summary',
       [
@@ -338,47 +364,24 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
         ['Total taxes withheld', s.withheldAsAdjusted + s.prevTaxWithheld + s.peraCredit],
       ],
     ],
-    [
-      'Part IV-B — Non-taxable / exempt compensation',
-      [
-        ['Basic salary / statutory minimum wage (MWE)', s.mweBasic],
-        ['Holiday pay (MWE)', s.mweHoliday],
-        ['Overtime pay (MWE)', s.mweOvertime],
-        ['Night shift differential (MWE)', s.mweNightDiff],
-        ['Hazard pay (MWE)', s.mweHazard],
-        ['13th month pay and other benefits', s.thirteenthOtherBenefitsExempt],
-        ['De minimis benefits', s.deMinimis],
-        ['SSS, GSIS, PHIC & Pag-IBIG contributions and union dues (employee share)', s.contributions],
-        ['Salaries and other forms of compensation', s.otherNonTaxable],
-        ['Total non-taxable / exempt compensation', s.totalNonTaxable],
-      ],
-    ],
-    [
-      'Part IV-B — Taxable compensation',
-      [
-        ['Basic salary', s.taxableBasic],
-        ['Representation', s.taxableRepresentation],
-        ['Transportation', s.taxableTransportation],
-        ['Cost of living allowance (COLA)', s.taxableCola],
-        ['Fixed housing allowance', s.taxableHousing],
-        ['Others (regular)', s.taxableOtherRegular],
-        ['Taxable 13th month benefits and other benefits', s.taxable13thOtherBenefits],
-        ['Hazard pay', s.taxableHazard],
-        ['Overtime pay', s.taxableOvertime],
-        ['Others (supplementary: holiday/premium pay, night differential)', s.taxableOtherSupplementary],
-        ['Others — Premium pay (MWE)', s.taxablePremiumMwe],
-        ['Total taxable compensation (present employer)', s.totalTaxablePresent],
-      ],
-    ],
+    ['Part IV-B — Non-taxable / exempt compensation income', numbered([29, 30, 31, 32, 33, 34, 35, 36, 37, 38])],
+    ['Part IV-B — Taxable compensation income', numbered([39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, '51A', '51B', 52])],
   ]
+}
 
-  function print() {
-    const w = window.open('', '_blank', 'width=760,height=900')
-    if (!w) return
-    const esc = (v: string) =>
-      v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
-    const val = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : esc(v))
-    const sections = groups
+const FORM_2316_REMINDER =
+  "BIR copies of the 2316 need the employee's signature and are submitted to the BIR as scanned soft copies, with the certified list of employees qualified for substituted filing (Annex F)."
+
+/** Printable 2316 data sheets, one per page. */
+function print2316(rows: AlphalistRow[], entity: Entity, year: number) {
+  const w = window.open('', '_blank', 'width=760,height=900')
+  if (!w) return
+  const esc = (v: string) =>
+    v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
+  const val = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : esc(v))
+  const sheet = (row: AlphalistRow) => {
+    const e = row.employee
+    const sections = form2316Groups(row)
       .map(
         ([title, items]) =>
           `<h3 style="margin:18px 0 6px;font-size:13px">${esc(title)}</h3><table style="width:100%;border-collapse:collapse;font-size:12px">${items
@@ -386,21 +389,25 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
             .join('')}</table>`,
       )
       .join('')
-    w.document.write(
-      `<html><head><title>BIR 2316 data — ${esc(fullName(e))}</title></head><body style="font-family:sans-serif;padding:24px;color:#0f172a">
+    return `<section style="page-break-after:always">
       <h2 style="margin:0">BIR Form 2316 figures — ${year}</h2>
-      <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2316 (Certificate of Compensation Payment / Tax Withheld).</p>
+      <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2316 (September 2021 ENCS). ${esc(FORM_2316_REMINDER)}</p>
       <p style="font-size:12px"><b>Employee:</b> ${esc(`${e.last_name}, ${e.first_name} ${e.middle_name ?? ''}`)} · TIN ${esc(e.tin ?? '—')} · Born ${esc(e.birth_date ?? '—')}<br/>
       <b>Address:</b> ${esc(e.address ?? '—')} ${esc(e.zip_code ?? '')} · <b>Period:</b> ${esc(row.from)} to ${esc(row.to)}${row.schedule === 2 ? ` · <b>MWE</b> ${esc(row.region)} SMW ₱${val(row.smwPerDay)}/day` : ''}<br/>
       ${row.issuedOn ? `<b>Date issued:</b> ${esc(row.issuedOn)} (last pay day of a separated employee)<br/>` : ''}
       <b>Employer:</b> ${esc(entity.name)} · TIN ${esc(fmtTin(entity.tin, entity.tin_branch_code))} · ${esc(entity.registered_address)} ${esc(entity.zip_code)}
       ${row.prevEmployerTin ? `<br/><b>Previous employer:</b> ${esc(row.prevEmployerName)} · TIN ${esc(row.prevEmployerTin)}` : ''}</p>
-      ${sections}</body></html>`,
-    )
-    w.document.close()
-    w.print()
+      ${sections}</section>`
   }
+  w.document.write(
+    `<html><head><title>BIR 2316 data — ${esc(entity.name)} ${year}</title></head><body style="font-family:sans-serif;padding:24px;color:#0f172a">${rows.map(sheet).join('')}</body></html>`,
+  )
+  w.document.close()
+  w.print()
+}
 
+function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; entity: Entity; year: number; onClose: () => void }) {
+  const e = row.employee
   return (
     <Modal open onClose={onClose} title={`BIR 2316 figures — ${fullName(e)} (${year})`} wide>
       <div className="space-y-4">
@@ -409,7 +416,7 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
           {row.schedule === 2 && ` · MWE (${row.region}) ₱${row.smwPerDay}/day × ${row.factor} days`}
           {row.issuedOn && ` · issued ${fmtDate(row.issuedOn)}, the last pay day (separated)`}
         </p>
-        {groups.map(([title, items]) => (
+        {form2316Groups(row).map(([title, items]) => (
           <div key={title}>
             <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">{title}</p>
             <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4">
@@ -422,7 +429,8 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
             </div>
           </div>
         ))}
-        <Button variant="secondary" onClick={print}>
+        <p className="text-xs text-amber-700">{FORM_2316_REMINDER}</p>
+        <Button variant="secondary" onClick={() => print2316([row], entity, year)}>
           <Printer className="size-4" /> Print
         </Button>
       </div>

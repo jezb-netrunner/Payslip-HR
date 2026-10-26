@@ -103,6 +103,9 @@ export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
   cola: 'COLA (wage order)',
   housing: 'Housing allowance',
   other_taxable: 'Other taxable',
+  commission: 'Commission',
+  profit_sharing: 'Profit sharing',
+  fees: 'Fees (directors’ fees included)',
   other_supplementary: 'Other taxable (supplementary)',
   other_non_taxable: 'Other non-taxable',
 }
@@ -154,4 +157,10 @@ export const LIQUIDATABLE_CATEGORIES: readonly string[] = ['representation', 'tr
 export const PAY_ITEM_TYPE_LABELS: Record<PayItemType, string> = {
   christmas_bonus: 'Christmas bonus (not SSS compensation)',
   liquidated_allowance: 'Subject to liquidation (not SSS compensation)',
+  commission: 'Commission',
+  profit_sharing: 'Profit sharing',
+  fees: 'Fees (directors’ fees included)',
 }
+
+/** Taxable supplementary pay-item types of the "Other taxable" classification (2316 items 45–47). */
+export const SUPPLEMENTARY_ITEM_TYPES = ['commission', 'profit_sharing', 'fees'] as const

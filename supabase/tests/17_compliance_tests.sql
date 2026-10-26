@@ -121,4 +121,9 @@ select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000089
 select pg_temp.check((select count(*) from filing_due_dates) = 0, 'another client''s admin sees none');
 commit;
 
+\echo '--- 17.8 C10: commissions, profit sharing and fees are typed on the Other taxable classification'
+insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category, pay_item_type)
+values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Sales commission', 5000, 'other_taxable', 'commission');
+select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category, pay_item_type) values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Fee', 900, 'overtime', 'fees')$$, '%payroll_adjustments_pay_item_type_category%');
+
 \echo 'PASSED 17'

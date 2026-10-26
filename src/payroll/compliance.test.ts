@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import { annualizedWithholding, summarizeYear } from './annual'
 import { DEFAULT_TABLES } from './defaults'
-import { buildAlphalist } from './alphalist'
+import { annexFCsv, buildAlphalist, form2316Items, FORM_2316_LABELS } from './alphalist'
 import { capShortfall, computePayslip, holidayPayExemptProblem, sssCompensation, type MaternityContext } from './engine'
 import { eachDate, endOfMonth } from '../lib/manila'
 import { remittances1601C } from './remittance'
@@ -654,5 +654,49 @@ describe('C9: filing due dates', () => {
     expect(due(rows, 'sss', '2026-10-01')).toMatchObject({ due: '2026-11-30', note: 'Falls on Bonifacio Day' })
     const extended = filingCalendar(2026, client, [], [{ filing: '1601c', period: '2026-03-01', due_date: '2026-04-20', note: 'RMC extension' }])
     expect(due(extended, '1601c', '2026-03-01')).toMatchObject({ due: '2026-04-20', overridden: true, note: 'RMC extension' })
+  })
+})
+
+describe('C10: BIR outputs', () => {
+  const line = (bir: PayLine['bir'], amount: number, taxable = true) => ({ amount, bir, taxable })
+  const year = (isMwe: boolean, earnings: { amount: number; bir?: PayLine['bir']; taxable?: boolean }[], contributionsEe = 0) =>
+    summarizeYear([{ payMonth: '2026-12-01', isMwe, earnings, contributionsEe, unionDues: 0, withholdingTax: 0 }], DEFAULT_TABLES.bir_annual)
+
+  it('maps every pay item to its 2316 (September 2021 ENCS) item', () => {
+    const s = year(false, [
+      line('basic', 300000), line('representation', 1000), line('transportation', 2000), line('cola', 3000), line('housing', 4000),
+      line('other_taxable', 5000), line('commission', 6000), line('profit_sharing', 7000), line('fees', 8000),
+      line('thirteenth', 100000, false), line('hazard', 9000), line('overtime', 10000), line('holiday', 11000), line('night_diff', 12000),
+      line('other_supplementary', 13000), line('de_minimis', 2500, false), line('other_non_taxable', 14000, false),
+    ], 20000)
+    const items = form2316Items(s)
+    expect(items[34]).toBe(90000)
+    expect(items[35]).toBe(2500)
+    expect(items[36]).toBe(20000)
+    expect(items[37]).toBe(14000)
+    expect(items[38]).toBe(126500)
+    expect([items[39], items[40], items[41], items[42], items[43], items[44]]).toEqual([280000, 1000, 2000, 3000, 4000, 5000])
+    expect([items[45], items[46], items[47], items[48], items[49], items[50]]).toEqual([6000, 7000, 8000, 10000, 9000, 10000])
+    expect(items['51B']).toBe(36000) // holiday + night differential + other supplementary
+    expect(items[52]).toBe(s.totalTaxablePresent)
+    expect(items[38] + items[52]).toBe(s.gross)
+  })
+
+  it('puts an MWE’s exempt pay in items 29–33 and the premium pay in 51A', () => {
+    const items = form2316Items(year(true, [line('basic', 180000, false), line('holiday', 5000, false), line('overtime', 4000, false), line('night_diff', 3000, false), line('hazard', 2000, false), line('premium', 1500)]))
+    expect([items[29], items[30], items[31], items[32], items[33]]).toEqual([180000, 5000, 4000, 3000, 2000])
+    expect(items['51A']).toBe(1500)
+    expect(FORM_2316_LABELS['51A']).toBe('Others: Premium pay (MWE)')
+  })
+
+  it('exports the certified list of employees qualified for substituted filing (Annex F)', () => {
+    const rows = [
+      { substitutedFiling: true, employee: { tin: '123-456-789', last_name: 'Cruz', first_name: 'Ana', middle_name: 'Reyes' } },
+      { substitutedFiling: false, employee: { tin: '987-654-321', last_name: 'Diaz', first_name: 'Ben', middle_name: null } },
+    ]
+    const csv = annexFCsv(rows as never, { name: 'Mu Store', tin: '000-111-222-00000' } as never, 2026)
+    const body = csv.slice(csv.findIndex((r) => r[0] === 'Seq') + 1)
+    expect(body).toEqual([[1, '123-456-789', 'Cruz', 'Ana', 'Reyes']])
+    expect(String(csv[0][0])).toMatch(/Certified List of Employees Qualified for Substituted Filing/)
   })
 })

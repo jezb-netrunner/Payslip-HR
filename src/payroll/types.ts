@@ -229,6 +229,9 @@ export type BirBucket =
   | 'cola'
   | 'housing'
   | 'other_taxable'
+  | 'commission' //        supplementary: commissions (2316 item 45)
+  | 'profit_sharing' //    supplementary: profit sharing (item 46)
+  | 'fees' //              supplementary: fees, directors' fees included (item 47)
   | 'other_supplementary' // other taxable supplementary pay: pay above a de minimis ceiling, leave converted to cash (2316 item 51)
   | 'other_non_taxable'
 
@@ -244,11 +247,12 @@ export type AllowanceCategory =
   | 'other_non_taxable'
 
 /**
- * Pay-item types that are not SSS compensation (RA 11199 Sec. 8(f)): a
- * bonus typed as the Christmas bonus, and an allowance subject to
- * liquidation (a reimbursement).
+ * Pay-item types that refine a classification: a bonus typed as the
+ * Christmas bonus and an allowance subject to liquidation (a reimbursement)
+ * are not SSS compensation (RA 11199 Sec. 8(f)); commissions, profit
+ * sharing and fees are taxable supplementary pay with their own 2316 items.
  */
-export type PayItemType = 'christmas_bonus' | 'liquidated_allowance'
+export type PayItemType = 'christmas_bonus' | 'liquidated_allowance' | 'commission' | 'profit_sharing' | 'fees'
 
 /** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
 export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'

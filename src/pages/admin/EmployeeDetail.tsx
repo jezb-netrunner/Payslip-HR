@@ -73,6 +73,7 @@ import {
   SEPARATION_REASON_LABELS,
   LIQUIDATABLE_CATEGORIES,
   PAY_ITEM_TYPE_LABELS,
+  SUPPLEMENTARY_ITEM_TYPES,
 } from '../../lib/labels'
 import { AUTHORIZED_DEDUCTIONS, DEDUCTION_CATEGORY_LABELS, repaymentText } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
@@ -1030,7 +1031,20 @@ function PayTab({
                 label="This is the Christmas bonus (not SSS compensation)"
               />
             )}
-            {LIQUIDATABLE_CATEGORIES.includes(editingAlw.category) && (
+            {editingAlw.category === 'other_taxable' && (
+              <Field label="Kind" hint="Commissions, profit sharing and fees are supplementary pay with their own BIR 2316 items">
+                <Select
+                  value={(SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(editingAlw.itemType) ? editingAlw.itemType : ''}
+                  onChange={(e) => setEditingAlw({ ...editingAlw, itemType: e.target.value as PayItemType | '' })}
+                >
+                  <option value="">Other taxable allowance (regular)</option>
+                  {SUPPLEMENTARY_ITEM_TYPES.map((t) => (
+                    <option key={t} value={t}>{PAY_ITEM_TYPE_LABELS[t]}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {LIQUIDATABLE_CATEGORIES.includes(editingAlw.category) && !(SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(editingAlw.itemType) && (
               <Toggle
                 checked={editingAlw.itemType === 'liquidated_allowance'}
                 onChange={(v) => setEditingAlw({ ...editingAlw, itemType: v ? 'liquidated_allowance' : '' })}
@@ -1111,6 +1125,7 @@ function PayTab({
 function itemTypeFor(category: string, t: PayItemType | ''): PayItemType | null {
   if (t === 'christmas_bonus' && category === 'other_benefits') return t
   if (t === 'liquidated_allowance' && LIQUIDATABLE_CATEGORIES.includes(category)) return t
+  if ((SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(t) && category === 'other_taxable') return t as PayItemType
   return null
 }
 

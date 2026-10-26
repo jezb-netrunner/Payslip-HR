@@ -50,7 +50,7 @@ import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib
 import { useEntity } from '../../lib/entity'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
-import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS, LIQUIDATABLE_CATEGORIES } from '../../lib/labels'
+import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS, LIQUIDATABLE_CATEGORIES, PAY_ITEM_TYPE_LABELS, SUPPLEMENTARY_ITEM_TYPES } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
@@ -952,7 +952,9 @@ function AdjustmentModal({
             ? 'christmas_bonus'
             : f.itemType === 'liquidated_allowance' && LIQUIDATABLE_CATEGORIES.includes(f.category)
               ? 'liquidated_allowance'
-              : null,
+              : (SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(f.itemType) && f.category === 'other_taxable'
+                ? f.itemType
+                : null,
       authorized_on: needsAuthorization ? f.authorized : null,
       created_by: userData.user?.id ?? null,
     })
@@ -1019,7 +1021,20 @@ function AdjustmentModal({
             label="This is the Christmas bonus (not SSS compensation)"
           />
         )}
-        {f.kind === 'earning' && LIQUIDATABLE_CATEGORIES.includes(f.category) && (
+        {f.kind === 'earning' && f.category === 'other_taxable' && (
+          <Field label="Kind" hint="Commissions, profit sharing and fees are supplementary pay with their own BIR 2316 items">
+            <Select
+              value={(SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(f.itemType) ? f.itemType : ''}
+              onChange={(e) => setF({ ...f, itemType: e.target.value as PayItemType | '' })}
+            >
+              <option value="">Other taxable (regular)</option>
+              {SUPPLEMENTARY_ITEM_TYPES.map((t) => (
+                <option key={t} value={t}>{PAY_ITEM_TYPE_LABELS[t]}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        {f.kind === 'earning' && LIQUIDATABLE_CATEGORIES.includes(f.category) && !(SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(f.itemType) && (
           <Toggle
             checked={f.itemType === 'liquidated_allowance'}
             onChange={(v) => setF({ ...f, itemType: v ? 'liquidated_allowance' : '' })}
