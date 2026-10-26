@@ -74,6 +74,31 @@ $$;
 create trigger legal_parameters_guard_change before update or delete on public.legal_parameters
   for each row execute function public.guard_legal_parameter();
 revoke execute on function public.guard_legal_parameter() from public, anon, authenticated;
+
+-- a new or corrected version: drafts paid on or after it compute again
+-- (like the statutory tables)
+create or replace function public.stale_drafts_on_legal_parameter()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_from date;
+begin
+  if tg_op = 'INSERT' then
+    v_from := new.effective_from;
+  elsif tg_op = 'DELETE' then
+    v_from := old.effective_from;
+  else
+    v_from := least(new.effective_from, old.effective_from);
+  end if;
+  update payroll_runs set totals = '{}'::jsonb
+    where status = 'draft' and totals <> '{}'::jsonb and pay_date >= v_from;
+  return coalesce(new, old);
+end
+$$;
+create trigger legal_parameters_stale after insert or update or delete on public.legal_parameters
+  for each row execute function public.stale_drafts_on_legal_parameter();
+revoke execute on function public.stale_drafts_on_legal_parameter() from public, anon, authenticated;
 revoke execute on function public.valid_legal_parameter(text, jsonb) from public, anon;
 
 insert into public.legal_parameters (key, effective_from, data, description, legal_basis, source_url)
@@ -102,10 +127,16 @@ alter table public.employee_allowances
     constraint employee_allowances_de_minimis_kind_check check (de_minimis_kind in
       ('medical_dependents','rice','uniform','medical_assistance','laundry','achievement_award',
        'christmas_gift','meal_ot','cba_productivity')),
-  -- NOT VALID: a de minimis allowance saved before this rule stays until it is
-  -- next edited (payroll taxes it meanwhile, with a warning)
   add constraint employee_allowances_de_minimis_named check (
     (category = 'de_minimis') = (de_minimis_kind is not null)) not valid;
+-- A recurring de minimis allowance saved before this rule names no benefit,
+-- so it is taxable compensation: it becomes "Other taxable allowance" (none
+-- on the live database) and the admin picks the benefit to exempt it again.
+-- A check left NOT VALID would still reject every later edit of the row.
+update public.employee_allowances
+  set category = 'other_taxable'
+  where category = 'de_minimis' and de_minimis_kind is null;
+alter table public.employee_allowances validate constraint employee_allowances_de_minimis_named;
 
 -- one-time items: the benefit, and for unused leave converted to cash the days
 alter table public.payroll_adjustments
@@ -115,6 +146,8 @@ alter table public.payroll_adjustments
        'christmas_gift','meal_ot','cba_productivity')),
   add column if not exists leave_days numeric(6,2)
     constraint payroll_adjustments_leave_days_check check (leave_days > 0 and leave_days <= 365),
+  -- NOT VALID: one-time items of payrolls already computed stay as they are
+  -- (no database function updates them, and editing one asks for the benefit)
   add constraint payroll_adjustments_de_minimis_named check (
     kind <> 'earning' or (category = 'de_minimis') = (de_minimis_kind is not null)) not valid,
   add constraint payroll_adjustments_leave_conversion check (

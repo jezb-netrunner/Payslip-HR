@@ -822,7 +822,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ? undefined
         : Math.max(0, tables.bir_annual.other_benefits_exemption_cap - prior.thirteenthOtherBenefitsExempt - taxYearBenefits),
       taxYear: taxYearToDate,
-      deMinimisUsed: deMinimisPaid(empTax, run.pay_date),
+      deMinimisUsed: deMinimisPaid(taxBefore, run.pay_date),
       maternity: leaveFor.has(emp.id)
         ? maternityContext(leaveFor.get(emp.id)!, matSlips.filter((p) => p.employee_id === emp.id), run.period_month)
         : undefined,

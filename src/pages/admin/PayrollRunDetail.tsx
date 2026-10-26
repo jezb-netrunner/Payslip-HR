@@ -916,8 +916,8 @@ function AdjustmentModal({
       toast('error', 'Pick the de minimis benefit: only the benefits on the BIR list are de minimis (any other benefit is taxable).')
       return
     }
-    if (leaveConversion && !(Number(f.leaveDays) > 0)) {
-      toast('error', 'Enter the number of unused leave days converted to cash.')
+    if (leaveConversion && !(Number(f.leaveDays) > 0 && Number(f.leaveDays) <= 365)) {
+      toast('error', 'Enter the number of unused leave days converted to cash (up to 365).')
       return
     }
     if (needsAuthorization && !f.authorized) {
@@ -1056,7 +1056,7 @@ function AdjustmentModal({
             label="Leave days converted"
             hint="A client granting 5 or more paid vacation leave days a year: de minimis up to the yearly days ceiling, the rest taxable. A client giving only the 5-day service incentive leave: taxable (Client Settings)."
           >
-            <Input type="number" min={0.5} step="0.5" value={f.leaveDays} onChange={(e) => setF({ ...f, leaveDays: e.target.value })} />
+            <Input type="number" min={0.5} max={365} step="0.5" value={f.leaveDays} onChange={(e) => setF({ ...f, leaveDays: e.target.value })} />
           </Field>
         )}
         {needsAuthorization && (
