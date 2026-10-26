@@ -260,7 +260,7 @@ type MonthSlip = Pick<
   | 'philhealth_er'
   | 'pagibig_er'
   | 'philhealth_ng'
-> & { payroll_runs?: { period_index?: number; periods_in_month?: number } | null }
+> & { payroll_runs?: { period_index?: number; periods_in_month?: number; period_start?: string; period_end?: string } | null }
 
 function sumContributions(slips: MonthSlip[]): ContributionSet {
   const n = (f: (p: MonthSlip) => unknown) => slips.reduce((s, p) => s + Number(f(p) ?? 0), 0)
@@ -509,7 +509,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     fetchAll<MonthSlip>((from, to) =>
       supabase
         .from('payslips')
-        .select(`employee_id, run_type, earnings, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status, period_index, periods_in_month)`)
+        .select(`employee_id, run_type, earnings, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status, period_index, periods_in_month, period_start, period_end)`)
         .eq('entity_id', entity.id)
         .eq('period_month', run.period_month)
         .neq('payroll_run_id', run.id)
@@ -798,14 +798,18 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         already: sumContributions(empMonth),
         compensationAlready: sssCompensation(empMonth.flatMap((p) => p.earnings ?? []), engineSettings),
         // the month's last slot, a separation, or a payroll for earlier
-        // days computed after the month's closing payroll was final (a 13th
-        // month pay then trues the month up)
+        // days computed after the month's closing payroll (the last slot,
+        // or the one holding the separation date) was final: a 13th month
+        // pay then trues the month up
         closes:
           (!isThirteenth && (run.period_index >= run.periods_in_month || separatedBy(emp, run))) ||
           empMonth.some(
             (p) =>
               p.run_type !== 'thirteenth_month' &&
-              (p.payroll_runs?.period_index ?? 0) >= (p.payroll_runs?.periods_in_month ?? Infinity),
+              ((p.payroll_runs?.period_index ?? 0) >= (p.payroll_runs?.periods_in_month ?? Infinity) ||
+                (!!emp.separation_date &&
+                  (p.payroll_runs?.period_start ?? '9999') <= emp.separation_date &&
+                  emp.separation_date <= (p.payroll_runs?.period_end ?? ''))),
           ),
         opens: !isThirteenth && !empMonth.some((p) => p.run_type !== 'thirteenth_month'),
       },
