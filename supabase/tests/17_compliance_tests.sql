@@ -126,4 +126,17 @@ insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, l
 values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Sales commission', 5000, 'other_taxable', 'commission');
 select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category, pay_item_type) values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Fee', 900, 'overtime', 'fees')$$, '%payroll_adjustments_pay_item_type_category%');
 
+\echo '--- 17.9 the new checks hold for every row; a new de minimis version sends drafts back for recompute'
+select pg_temp.check((select bool_and(convalidated) and count(*) = 2 from pg_constraint
+  where conname in ('employees_ph_ng_documented', 'employee_allowances_de_minimis_named')),
+  'NG and de minimis checks validated (an old row cannot block finalize or reopen)');
+begin;
+update payroll_runs set totals = '{"gross": 1}' where id = '30000000-0000-0000-0000-0000000017f1';
+insert into legal_parameters (key, effective_from, data, description, legal_basis, source_url)
+  select key, '2026-11-15', data, description, legal_basis, source_url from legal_parameters
+  where key = 'de_minimis' and effective_from = '2026-01-06';
+select pg_temp.check((select totals = '{}'::jsonb from payroll_runs where id = '30000000-0000-0000-0000-0000000017f1'),
+  'a draft paid on or after a new version computes again');
+rollback;
+
 \echo 'PASSED 17'

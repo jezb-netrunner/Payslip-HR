@@ -20,15 +20,23 @@ update public.employees
   set ph_ng_from_month = date_trunc('month', ph_ng_from_month)::date
   where ph_ng_from_month is not null and ph_ng_from_month <> date_trunc('month', ph_ng_from_month)::date;
 
--- the ID is required from now on (NOT VALID: an old waiver without it stays
--- until the record is next saved, and payroll deducts the share until then)
 alter table public.employees
   add column if not exists id_number text not null default ''
     constraint employees_id_number_length check (length(id_number) <= 60),
-  add constraint employees_ph_ng_from_month_start check (ph_ng_from_month = date_trunc('month', ph_ng_from_month)::date),
+  add constraint employees_ph_ng_from_month_start check (ph_ng_from_month = date_trunc('month', ph_ng_from_month)::date);
+
+-- the ID is required from now on. An old waiver has none (the column is new):
+-- it is cleared, and payroll deducts the share until the admin enters it
+-- again with the ID, as for any incomplete record (none on the live
+-- database). A check left NOT VALID would still reject every later update
+-- of the row, finalize and reopen included.
+update public.employees
+  set ph_ng_type = null, ph_ng_from_month = null, id_valid_until = null
+  where ph_ng_type is not null and length(btrim(id_number)) = 0;
+alter table public.employees
   add constraint employees_ph_ng_documented check (
     ph_ng_type is null
-    or (length(btrim(id_number)) > 0 and (ph_ng_type <> 'solo_parent' or id_valid_until is not null))) not valid;
+    or (length(btrim(id_number)) > 0 and (ph_ng_type <> 'solo_parent' or id_valid_until is not null)));
 
 -- the government's half on each payslip: shown, not deducted, not remitted
 alter table public.payslips

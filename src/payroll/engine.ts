@@ -1005,7 +1005,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const sssEr = sssPart(sssMonth.er, mc?.already.sssEr, stat.sss.er)
   const sssMpfEr = sssPart(sssMonth.mpfEr, mc?.already.sssMpfEr, stat.sss.mpfEr)
   const sssEcEr = sssPart(sssMonth.ecEr, mc?.already.sssEcEr, stat.sss.ecEr)
-  const philhealthEe = share(philhealthEeDue, mc?.already.philhealthEe)
+  // under the NG share the month owes no employee half: the closing payroll
+  // refunds what a payroll deducted before the share was recorded
+  const philhealthEe =
+    employee.philhealthNg && mc?.closes && !extrasOnly
+      ? round2(0 - mc.already.philhealthEe)
+      : share(philhealthEeDue, mc?.already.philhealthEe)
   const pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
   const philhealthEr = share(stat.philhealthEr, mc?.already.philhealthEr)
   const philhealthNg = employee.philhealthNg ? share(stat.philhealthEe, mc?.already.philhealthNg) : 0
@@ -1069,7 +1074,13 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   if (sssMpfEe !== 0) {
     deductions.push({ code: 'sss_mpf', label: sssMpfEe < 0 ? 'SSS MySSS Pension Booster (MPF) refund' : 'SSS MySSS Pension Booster (MPF)', amount: sssMpfEe })
   }
-  if (philhealthEe > 0) deductions.push({ code: 'philhealth', label: 'PhilHealth Premium', amount: philhealthEe })
+  if (philhealthEe !== 0) {
+    deductions.push({
+      code: 'philhealth',
+      label: philhealthEe < 0 ? 'PhilHealth Premium refund (the national government pays the employee half)' : 'PhilHealth Premium',
+      amount: philhealthEe,
+    })
+  }
   if (pagibigEe > 0) deductions.push({ code: 'pagibig', label: 'Pag-IBIG Contribution', amount: pagibigEe })
 
   // Maternity leave: the employee's shares for the leave months come out of

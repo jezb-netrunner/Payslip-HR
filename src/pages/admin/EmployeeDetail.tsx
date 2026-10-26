@@ -831,7 +831,7 @@ function PayTab({
                 <Input type="month" value={f.ph_ng_from_month} onChange={(e) => setF({ ...f, ph_ng_from_month: e.target.value })} />
               </Field>
               <Field label={f.ph_ng_type === 'solo_parent' ? 'Solo Parent ID (SPIC) no.' : 'PWD ID no.'}>
-                <Input value={f.id_number} onChange={(e) => setF({ ...f, id_number: e.target.value })} />
+                <Input value={f.id_number} maxLength={60} onChange={(e) => setF({ ...f, id_number: e.target.value })} />
               </Field>
               <Field
                 label={f.ph_ng_type === 'solo_parent' ? 'ID valid until' : 'ID valid until (optional)'}
