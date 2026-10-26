@@ -101,4 +101,25 @@ describe('withholding methods across a year (C2)', () => {
     expect(slip().computation_trace.tax.method).toBe('table')
     expect(slip().withholding_tax).toBe(before)
   })
+  it("a reopened payroll's bonus exemption ignores bonuses paid after it", async () => {
+    const ent = addEntity({ default_pay_frequency: 'monthly' })
+    const emp = addEmployee(ent, { pay_frequency: 'monthly', monthly_rate: 50000 })
+    addAttendance(emp, '2026-06-01', '2026-11-30')
+    const runs: Record<string, Record<string, any>> = {}
+    for (const mm of ['06', '07', '08', '09', '10', '11']) {
+      const start = `2026-${mm}-01`
+      runs[mm] = addRun(ent, { pay_frequency: 'monthly', period_start: start, period_end: endOfMonth(start), pay_date: endOfMonth(start) })
+      const bonus = mm === '06' ? 60000 : mm === '11' ? 50000 : 0
+      if (bonus) {
+        db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: runs[mm].id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'Bonus', amount: bonus, category: 'other_benefits' })
+      }
+      await computeRun(runs[mm] as never, ent as never)
+      finalize(runs[mm].id)
+    }
+    const june = () => db.t.payslips.find((p) => p.payroll_run_id === runs['06'].id)!
+    const before = [june().taxable_income, june().withholding_tax]
+    runs['06'].status = 'draft'
+    await computeRun(runs['06'] as never, ent as never)
+    expect([june().taxable_income, june().withholding_tax]).toEqual(before)
+  })
 })

@@ -672,8 +672,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         (s, p) => s + p.earnings.filter((l) => l.bir === bucket).reduce((a, l) => a + Number(l.amount), 0),
         0,
       )
+    // only what was paid by this payroll's pay date: a payroll reopened and
+    // recomputed ignores what later payrolls paid and withheld
+    const taxBefore = empTax.filter((p) => (p.pay_date ?? '') <= run.pay_date)
     // 13th month pay and other benefits already paid in the tax year
-    const taxYearBenefits = empTax.reduce(
+    const taxYearBenefits = taxBefore.reduce(
       (s, p) => s + p.earnings.filter((l) => isBenefit(l.bir ?? '')).reduce((a, l) => a + Number(l.amount), 0),
       0,
     )
@@ -688,9 +691,6 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     const firstEmployment = [emp.hire_date, earlierEmployerFrom].filter((d): d is string => !!d).sort()[0]
     const periodTo = isThirteenth ? run.pay_date : run.period_end
     const clamp = (d: string) => (d < yearStart ? yearStart : d > `${taxYear}-12-31` ? `${taxYear}-12-31` : d)
-    // only what was paid by this payroll's pay date: a payroll reopened and
-    // recomputed ignores what later payrolls paid and withheld
-    const taxBefore = empTax.filter((p) => (p.pay_date ?? '') <= run.pay_date)
     // payroll periods of last year paid this tax year (Dec 16–31 released in January)
     const lagged = new Set(taxBefore.filter((p) => p.run_type === 'regular' && (p.period_end ?? '') < yearStart).map((p) => p.period_end)).size
     const taxYearToDate: TaxYearToDate = {
