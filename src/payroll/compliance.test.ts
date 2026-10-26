@@ -261,6 +261,38 @@ describe('C3: year-end adjustment, refunds, separations', () => {
     expect(slip.trace.warnings.some((w) => w.includes('Tax advanced by employer'))).toBe(true)
   })
 
+  it('YEA-1 with a loan installment: the tax takes the pay first, the installment waits', () => {
+    const ytd = Array.from({ length: 11 }, (_, i) => ({
+      payMonth: `2026-${String(i + 1).padStart(2, '0')}-01`,
+      isMwe: false,
+      earnings: [{ amount: 600000 / 11, bir: 'basic' as const, taxable: true }],
+      contributionsEe: 0,
+      unionDues: 0,
+      withholdingTax: 0,
+    }))
+    const december = (loan: number) =>
+      computePayslip({
+        employee: {
+          ...mwe, isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 20000, dailyRate: 0,
+          extraDeductions: loan ? [{ id: 'loan-1', label: 'Company loan', category: 'company_loan', amount: loan, balance: 20000 }] : [],
+        },
+        settings: { ...settings, payFrequency: 'monthly', workingDaysDivisor: 261 },
+        period: { start: '2026-12-01', end: '2026-12-31', index: 1, count: 1 },
+        tables: DEFAULT_TABLES,
+        days: [],
+        runType: 'regular',
+        annualization: { payMonth: '2026-12-01', ytd },
+      })
+    const advance = (slip: ReturnType<typeof december>) => slip.deductions.find((l) => l.code === 'tax_advance')?.amount
+    const withLoan = december(5000)
+    // up to the pay after contributions, as without the loan
+    expect(advance(withLoan)).toBe(advance(december(0)))
+    expect(withLoan.deductions.some((l) => l.code === 'other:company_loan')).toBe(false)
+    expect(withLoan.otherDeductionsTotal).toBe(0)
+    expect(withLoan.netPay).toBe(0)
+    expect(withLoan.trace.warnings.some((w) => w.startsWith('Company loan: ₱5,000.00 could not be deducted') && w.includes('stays in the balance'))).toBe(true)
+  })
+
   it('YEA-2: a refund reduces the 1601-C of the month it is paid; the unused part carries to later months', () => {
     const months = remittances1601C([
       { month: '2027-01-01', withheld: 800, refunds: 1200 },

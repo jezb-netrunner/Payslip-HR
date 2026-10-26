@@ -1238,16 +1238,35 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     notes.push(...withholdingNotes(r, regularTaxable, supplementaryTaxable, params.taxYear, settings.payFrequency, tables))
   }
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
-  deductions.push(...otherLines)
   if (params.annualization) {
-    // what this pay holds for the tax after contributions and the other deductions
-    const available = round2(grossPay - deductions.filter((l) => l.code !== 'wht').reduce((s, l) => s + l.amount, 0))
-    const { advanced } = capShortfall(withholdingTax, available)
+    // The year's tax comes before the other deductions: withheld up to the
+    // pay after contributions (union dues too: they reduce the taxable pay),
+    // the employer advances the rest, and the other deductions take what is
+    // left (C3, YEA-1)
+    const available = round2(grossPay - deductions.filter((l) => l.code !== 'wht').reduce((s, l) => s + l.amount, 0) - unionDues)
+    const { withheld, advanced } = capShortfall(withholdingTax, available)
     if (advanced > 0) {
       deductions.push({ code: 'tax_advance', label: 'Tax advanced by employer (receivable)', amount: -advanced })
       warnings.push(taxAdvanceWarning(advanced))
     }
+    let leftCents = Math.round((available - withheld) * 100)
+    for (const l of otherLines) {
+      if (l.code.endsWith(':union_dues')) continue
+      const dueCents = Math.round(l.amount * 100)
+      const takeCents = Math.min(dueCents, Math.max(0, leftCents))
+      leftCents -= takeCents
+      if (takeCents < dueCents) {
+        const short = (dueCents - takeCents) / 100
+        const d = employee.extraDeductions.find((x) => x.id === l.meta)
+        warnings.push(
+          `${l.label}: ₱${plainAmount(short)} could not be deducted — the year's tax takes the pay first${d?.balance !== undefined && !d.settlement ? '; it stays in the balance for later payrolls.' : '. Collect it outside payroll.'}`,
+        )
+        l.amount = takeCents / 100
+        otherDeductionsTotal = round2(otherDeductionsTotal - short)
+      }
+    }
   }
+  deductions.push(...otherLines.filter((l) => l.amount > 0))
 
   // ---- cash advances: repaid from what is left, never past zero net pay ----
   // They don't touch taxable pay; an installment net pay can't cover stays
