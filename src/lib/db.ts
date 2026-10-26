@@ -9,6 +9,7 @@ import type {
   DeMinimisKind,
   MaternityBenefit,
   PayFrequency,
+  PayItemType,
   RoundingMode,
   WorkSchedule,
 } from '../payroll/types'
@@ -62,6 +63,8 @@ export interface Entity {
   paid_vl_days_per_year: number
   /** a SIL-only client's leave converted to cash is taxable */
   sil_conversion_taxable: boolean
+  /** the 13th month pay is SSS compensation of its month */
+  sss_include_13th_month: boolean
   is_active: boolean
   created_at: string
 }
@@ -169,6 +172,8 @@ export interface EmployeeAllowance {
   basis: AllowanceBasis
   /** which de minimis benefit (category de_minimis) */
   de_minimis_kind?: DeMinimisKind | null
+  /** not SSS compensation: an allowance subject to liquidation, a Christmas bonus */
+  pay_item_type?: PayItemType | null
   active: boolean
 }
 
@@ -410,6 +415,8 @@ export interface PayrollAdjustment {
   de_minimis_kind?: DeMinimisKind | null
   /** unused leave converted to cash: the days converted */
   leave_days?: number | null
+  /** not SSS compensation: a Christmas bonus, an allowance subject to liquidation */
+  pay_item_type?: PayItemType | null
   created_at: string
 }
 

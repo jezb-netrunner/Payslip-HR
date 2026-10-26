@@ -5,11 +5,11 @@ import { describe, expect, it } from 'vitest'
 import { annualizedWithholding, summarizeYear } from './annual'
 import { DEFAULT_TABLES } from './defaults'
 import { buildAlphalist } from './alphalist'
-import { capShortfall, computePayslip } from './engine'
+import { capShortfall, computePayslip, sssCompensation } from './engine'
 import { remittances1601C } from './remittance'
-import { computeWithholdingTax } from './statutory'
+import { computeSss, computeWithholdingTax } from './statutory'
 import { periodsThisYear, periodWithholding } from './withholding'
-import type { DayComputation, DayType, PayLine, PayrollEmployeeInput, PayrollSettingsInput, PeriodInput } from './types'
+import { round2, type DayComputation, type DayType, type PayLine, type PayrollEmployeeInput, type PayrollSettingsInput, type PeriodInput } from './types'
 
 const settings: PayrollSettingsInput = {
   standardHoursPerDay: 8,
@@ -352,5 +352,80 @@ describe('C4: de minimis ceilings (RR 29-2025) and leave converted to cash', () 
     const day = workday('2026-11-04', 'regular', 120)
     const slip = computePayslip({ employee: { ...employee, ...meal }, settings: monthly, period: november, tables: DEFAULT_TABLES, days: [day], runType: 'regular' })
     expect(split(slip)).toEqual({ exempt: 210, excess: 90 }) // one overtime day × 30% × 700
+  })
+})
+
+describe('C5: the SSS contribution base is all remuneration of the SSS month', () => {
+  const monthlySettings = { ...settings, payFrequency: 'monthly' as const, workingDaysDivisor: 261 }
+  const none = { sssEe: 0, sssMpfEe: 0, philhealthEe: 0, pagibigEe: 0, sssEr: 0, sssMpfEr: 0, sssEcEr: 0, philhealthEr: 0, pagibigEr: 0 }
+
+  it('SSS-1: includes OT, de minimis and bonuses; excludes the Christmas bonus and allowances subject to liquidation', () => {
+    const employee: PayrollEmployeeInput = {
+      ...mwe,
+      isMinimumWageEarner: false,
+      payType: 'monthly',
+      monthlyRate: 20000,
+      dailyRate: 0,
+      allowances: [
+        { label: 'Rice subsidy (cash)', amount: 2500, category: 'de_minimis', basis: 'monthly', deMinimisKind: 'rice' },
+        { label: 'Transport reimbursement', amount: 3000, category: 'transportation', basis: 'monthly', payItemType: 'liquidated_allowance' },
+      ],
+      oneTimeEarnings: [
+        { label: 'Overtime', amount: 1500, category: 'overtime' },
+        { label: 'Performance bonus', amount: 5000, category: 'other_benefits' },
+        { label: 'Christmas bonus', amount: 3000, category: 'other_benefits', payItemType: 'christmas_bonus' },
+      ],
+    }
+    const slip = computePayslip({
+      employee,
+      settings: monthlySettings,
+      period: { start: '2026-11-01', end: '2026-11-30', index: 1, count: 1 },
+      tables: DEFAULT_TABLES,
+      days: [],
+      runType: 'regular',
+      monthContributions: { already: none, compensationAlready: 0, closes: true, opens: true },
+    })
+    expect(sssCompensation(slip.earnings)).toBe(29000)
+    expect(slip.trace.notes.some((n) => n.includes('compensation ₱29,000 (MSC ₱29,000'))).toBe(true)
+    expect(slip.sssEe + slip.sssMpfEe).toBe(1450)
+  })
+
+  it('SSS-2: semi-monthly 14,500 + 14,500: one MSC on 29,000; the month’s deductions add up to the schedule share', () => {
+    const employee: PayrollEmployeeInput = { ...mwe, isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 29000, dailyRate: 0 }
+    const semi = { ...monthlySettings, payFrequency: 'semi_monthly' as const }
+    const first = computePayslip({
+      employee, settings: semi, period: { start: '2026-11-01', end: '2026-11-15', index: 1, count: 2 }, tables: DEFAULT_TABLES, days: [], runType: 'regular',
+      monthContributions: { already: none, compensationAlready: 0, closes: false, opens: true },
+    })
+    const second = computePayslip({
+      employee, settings: semi, period: { start: '2026-11-16', end: '2026-11-30', index: 2, count: 2 }, tables: DEFAULT_TABLES, days: [], runType: 'regular',
+      monthContributions: {
+        already: { ...none, sssEe: first.sssEe, sssMpfEe: first.sssMpfEe, sssEr: first.sssEr, sssMpfEr: first.sssMpfEr, sssEcEr: first.sssEcEr },
+        compensationAlready: sssCompensation(first.earnings),
+        closes: true,
+        opens: false,
+      },
+    })
+    const msc = computeSss(29000, DEFAULT_TABLES.sss)
+    expect(sssCompensation(first.earnings) + sssCompensation(second.earnings)).toBe(29000)
+    expect(round2(first.sssEe + first.sssMpfEe + second.sssEe + second.sssMpfEe)).toBe(round2(msc.ee + msc.mpfEe))
+    expect(round2(first.sssEr + first.sssMpfEr + second.sssEr + second.sssMpfEr)).toBe(round2(msc.er + msc.mpfEr))
+  })
+
+  it('SSS-3: December basic 25,000 + 13th month 25,000: base 50,000 → the schedule maximum (O2, default on)', () => {
+    const employee: PayrollEmployeeInput = { ...mwe, isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 25000, dailyRate: 0 }
+    const thirteenth = [{ code: 'thirteenth', label: '13th Month Pay', amount: 25000, bir: 'thirteenth' as const, taxable: false }]
+    const december = (s: PayrollSettingsInput) =>
+      computePayslip({
+        employee, settings: s, period: { start: '2026-12-01', end: '2026-12-31', index: 1, count: 1 }, tables: DEFAULT_TABLES, days: [], runType: 'regular',
+        monthContributions: { already: none, compensationAlready: sssCompensation(thirteenth, s), closes: true, opens: false },
+      })
+    const max = computeSss(DEFAULT_TABLES.sss.msc_max, DEFAULT_TABLES.sss)
+    const withThirteenth = december(monthlySettings)
+    expect(withThirteenth.trace.notes.some((n) => n.includes('compensation ₱50,000 (MSC ₱35,000'))).toBe(true)
+    expect(withThirteenth.sssEe + withThirteenth.sssMpfEe).toBe(round2(max.ee + max.mpfEe))
+    // a client that leaves the 13th month out of SSS compensation
+    const without = december({ ...monthlySettings, sssInclude13thMonth: false })
+    expect(without.trace.notes.some((n) => n.includes('compensation ₱25,000 (MSC ₱25,000'))).toBe(true)
   })
 })

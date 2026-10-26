@@ -39,6 +39,7 @@ import {
   TableShell,
   Td,
   Th,
+  Toggle,
 } from '../../components/ui'
 import { fetchAll } from '../../lib/fetchAll'
 import { useToast } from '../../components/toast'
@@ -49,12 +50,12 @@ import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib
 import { useEntity } from '../../lib/entity'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
-import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS } from '../../lib/labels'
+import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS, LIQUIDATABLE_CATEGORIES } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
-import { round2, type DeMinimisKind, type MaternityBenefit } from '../../payroll/types'
+import { round2, type DeMinimisKind, type MaternityBenefit, type PayItemType } from '../../payroll/types'
 import { ALLOWANCE_DE_MINIMIS, DE_MINIMIS_LABELS } from '../../lib/deMinimis'
 
 // Categorical chart colours in fixed order (validated: lightness, chroma,
@@ -896,6 +897,7 @@ function AdjustmentModal({
     authorized: '',
     dm: '' as DeMinimisKind | '',
     leaveDays: '',
+    itemType: '' as PayItemType | '',
   })
   const [busy, setBusy] = useState(false)
   // maternity pay is picked like a classification: other non-taxable, marked with which one
@@ -943,6 +945,14 @@ function AdjustmentModal({
       benefit,
       de_minimis_kind: leaveConversion ? 'monetized_vl' : deMinimis ? f.dm : null,
       leave_days: leaveConversion ? Number(f.leaveDays) : null,
+      pay_item_type:
+        f.kind !== 'earning'
+          ? null
+          : f.itemType === 'christmas_bonus' && f.category === 'other_benefits'
+            ? 'christmas_bonus'
+            : f.itemType === 'liquidated_allowance' && LIQUIDATABLE_CATEGORIES.includes(f.category)
+              ? 'liquidated_allowance'
+              : null,
       authorized_on: needsAuthorization ? f.authorized : null,
       created_by: userData.user?.id ?? null,
     })
@@ -1002,6 +1012,20 @@ function AdjustmentModal({
             )}
           </Select>
         </Field>
+        {f.kind === 'earning' && f.category === 'other_benefits' && (
+          <Toggle
+            checked={f.itemType === 'christmas_bonus'}
+            onChange={(v) => setF({ ...f, itemType: v ? 'christmas_bonus' : '' })}
+            label="This is the Christmas bonus (not SSS compensation)"
+          />
+        )}
+        {f.kind === 'earning' && LIQUIDATABLE_CATEGORIES.includes(f.category) && (
+          <Toggle
+            checked={f.itemType === 'liquidated_allowance'}
+            onChange={(v) => setF({ ...f, itemType: v ? 'liquidated_allowance' : '' })}
+            label="Subject to liquidation: a reimbursement of expenses (not SSS compensation)"
+          />
+        )}
         {deMinimis && (
           <Field label="De minimis benefit" hint="Non-taxable up to its BIR ceiling (counting what earlier payrolls paid); anything above is taxable.">
             <Select value={f.dm} onChange={(e) => setF({ ...f, dm: e.target.value as DeMinimisKind | '' })}>

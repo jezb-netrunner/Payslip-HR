@@ -89,6 +89,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           mwe_rh_restday_premium_taxable: s.mwe_rh_restday_premium_taxable,
           paid_vl_days_per_year: Number(s.paid_vl_days_per_year),
           sil_conversion_taxable: s.sil_conversion_taxable,
+          sss_include_13th_month: s.sss_include_13th_month,
         })
         .eq('id', s.id)
       if (error) throw error
@@ -279,6 +280,11 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
               >
                 <Input type="number" min={0} max={365} value={s.paid_vl_days_per_year} onChange={(e) => set('paid_vl_days_per_year', e.target.value as unknown as number)} />
               </Field>
+              <Toggle
+                checked={s.sss_include_13th_month}
+                onChange={(v) => set('sss_include_13th_month', v)}
+                label="Count the 13th month pay as SSS compensation of its month"
+              />
               <Toggle
                 checked={s.sil_conversion_taxable}
                 onChange={(v) => set('sil_conversion_taxable', v)}

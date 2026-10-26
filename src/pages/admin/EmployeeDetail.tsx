@@ -72,6 +72,8 @@ import {
   PAYMENT_METHOD_LABELS,
   philhealthWaiverProblem,
   SEPARATION_REASON_LABELS,
+  LIQUIDATABLE_CATEGORIES,
+  PAY_ITEM_TYPE_LABELS,
 } from '../../lib/labels'
 import { AUTHORIZED_DEDUCTIONS, DEDUCTION_CATEGORY_LABELS, repaymentText } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
@@ -81,7 +83,7 @@ import { ScheduleTab } from './EmployeeSchedule'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
-import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, PayFrequency } from '../../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, PayFrequency, PayItemType } from '../../payroll/types'
 import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
 import { errorMessage } from '../../lib/errors'
 
@@ -673,6 +675,7 @@ function PayTab({
       category: a.category,
       basis: a.basis,
       de_minimis_kind: a.category === 'de_minimis' ? a.dm || null : null,
+      pay_item_type: itemTypeFor(a.category, a.itemType),
     }
     const done = await listWrite(
       () =>
@@ -831,7 +834,7 @@ function PayTab({
         title="Allowances and benefits"
         icon={<Gift />}
         actions={
-          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly', dm: 'rice' })}>
+          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly', dm: 'rice', itemType: '' })}>
             <Plus className="size-4" /> Add
           </Button>
         }
@@ -845,13 +848,14 @@ function PayTab({
                 <p className="text-xs text-slate-400">
                   {money(Number(a.amount))} {ALLOWANCE_BASIS_LABELS[a.basis]} · {ALLOWANCE_CATEGORY_LABELS[a.category]}
                   {a.de_minimis_kind && ` · ${DE_MINIMIS_LABELS[a.de_minimis_kind]} (up to ${ceilingText(deMinimis?.ceilings[a.de_minimis_kind])})`}
+                  {a.pay_item_type && ` · ${PAY_ITEM_TYPE_LABELS[a.pay_item_type]}`}
                   {!a.active && ' · inactive'}
                 </p>
               </div>
               <div className="flex shrink-0 gap-3">
                 <button
                   type="button"
-                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis, dm: a.de_minimis_kind ?? '' })}
+                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis, dm: a.de_minimis_kind ?? '', itemType: a.pay_item_type ?? '' })}
                   className="text-xs font-semibold text-brand-600"
                 >
                   Edit
@@ -1002,6 +1006,20 @@ function PayTab({
                 ))}
               </Select>
             </Field>
+            {editingAlw.category === 'other_benefits' && (
+              <Toggle
+                checked={editingAlw.itemType === 'christmas_bonus'}
+                onChange={(v) => setEditingAlw({ ...editingAlw, itemType: v ? 'christmas_bonus' : '' })}
+                label="This is the Christmas bonus (not SSS compensation)"
+              />
+            )}
+            {LIQUIDATABLE_CATEGORIES.includes(editingAlw.category) && (
+              <Toggle
+                checked={editingAlw.itemType === 'liquidated_allowance'}
+                onChange={(v) => setEditingAlw({ ...editingAlw, itemType: v ? 'liquidated_allowance' : '' })}
+                label="Subject to liquidation: a reimbursement of expenses (not SSS compensation)"
+              />
+            )}
             {editingAlw.category === 'de_minimis' && (
               <Field
                 label="De minimis benefit"
@@ -1072,6 +1090,13 @@ function PayTab({
   )
 }
 
+/** The pay-item type to store: only one that fits the classification. */
+function itemTypeFor(category: string, t: PayItemType | ''): PayItemType | null {
+  if (t === 'christmas_bonus' && category === 'other_benefits') return t
+  if (t === 'liquidated_allowance' && LIQUIDATABLE_CATEGORIES.includes(category)) return t
+  return null
+}
+
 interface AllowanceForm {
   id?: string
   label: string
@@ -1080,6 +1105,8 @@ interface AllowanceForm {
   basis: AllowanceBasis
   /** which de minimis benefit (category de_minimis) */
   dm: DeMinimisKind | ''
+  /** not SSS compensation: the Christmas bonus, an allowance subject to liquidation */
+  itemType: PayItemType | ''
 }
 
 interface DeductionForm {

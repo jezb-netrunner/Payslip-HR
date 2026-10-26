@@ -1,7 +1,7 @@
 // Display labels and BIR codes shared across pages.
 
 import type { EmploymentStatus, PaymentMethod, SeparationReason } from './db'
-import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, RoundingMode } from '../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, PayItemType, RoundingMode } from '../payroll/types'
 
 export const FREQUENCY_LABELS: Record<PayFrequency, string> = {
   weekly: 'Weekly',
@@ -160,4 +160,12 @@ export function philhealthWaiverProblem(kind: string, from: string, until: strin
     return 'For solo parents the government pays the PhilHealth employee share from Sep 26, 2026 (PhilHealth Circular 2026-0015).'
   }
   return ''
+}
+
+/** Allowance categories that can be a reimbursement subject to liquidation (not SSS compensation). */
+export const LIQUIDATABLE_CATEGORIES: readonly string[] = ['representation', 'transportation', 'housing', 'other_taxable', 'other_non_taxable']
+
+export const PAY_ITEM_TYPE_LABELS: Record<PayItemType, string> = {
+  christmas_bonus: 'Christmas bonus (not SSS compensation)',
+  liquidated_allowance: 'Subject to liquidation (not SSS compensation)',
 }

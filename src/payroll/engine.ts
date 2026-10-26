@@ -29,6 +29,7 @@ import {
   type DayComputation,
   type DayType,
   type DeMinimisKind,
+  type PayItemType,
   type PayLine,
   type PayrollEmployeeInput,
   type PayrollSettingsInput,
@@ -253,18 +254,24 @@ export interface DeMinimisUsed {
 }
 
 /**
- * Earnings that are SSS compensation — "all actual remuneration for
- * employment", allowances included (RA 11199 Sec. 8(f)) — but not the 13th
- * month, bonuses, de minimis benefits or other non-taxable pay (maternity
- * benefits among them).
+ * SSS compensation of a month: all actual remuneration for employment,
+ * mandated COLA included — pay for work and leave, holiday pay, overtime,
+ * premiums, night differential, hazard pay, commissions, bonuses,
+ * allowances (taxable or de minimis), leave converted to cash and the 13th
+ * month pay (client setting, default on) — except a pay item typed as the
+ * Christmas bonus and an allowance subject to liquidation. Maternity pay is
+ * left out: the leave months contribute at the usual amounts.
+ * Basis: RA 11199 Secs. 8(f), 8(h), 18, 19(a); IRR of RA 11199 Rule 12 Secs. 6, 8.
  */
-export const SSS_COMPENSATION_BUCKETS: readonly BirBucket[] = [
-  'basic', 'holiday', 'premium', 'overtime', 'night_diff', 'hazard', 'cola',
-  'representation', 'transportation', 'housing', 'other_taxable',
-]
-
-export function sssCompensation(lines: readonly Pick<PayLine, 'amount' | 'bir'>[]): number {
-  return round2(lines.filter((l) => l.bir && SSS_COMPENSATION_BUCKETS.includes(l.bir)).reduce((s, l) => s + Number(l.amount), 0))
+export function sssCompensation(
+  lines: readonly Pick<PayLine, 'amount' | 'bir' | 'sss'>[],
+  opts: { sssInclude13thMonth?: boolean } = {},
+): number {
+  return round2(
+    lines
+      .filter((l) => l.sss !== false && (l.bir !== 'thirteenth' || opts.sssInclude13thMonth !== false))
+      .reduce((s, l) => s + Number(l.amount), 0),
+  )
 }
 
 const NO_SSS: SssComputation = { msc: 0, ee: 0, er: 0, ecEr: 0, mpfEe: 0, mpfEr: 0 }
@@ -634,6 +641,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const earnings: PayLine[] = []
   const earn = (code: string, label: string, amount: number, bir: BirBucket, extra: Partial<PayLine> = {}) =>
     earnings.push({ code, label, amount, bir, taxable: isTaxableBucket(bir, isMwe), ...extra })
+  // a Christmas bonus and an allowance subject to liquidation are not SSS compensation
+  const notSss = (t: PayItemType | undefined) => (t ? ' (not SSS compensation)' : '')
   // De minimis benefits are exempt up to their ceilings, and only those on
   // the list: any other benefit is taxable, and so is pay above a ceiling
   // (RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 29-2025 Sec. 1; RR 5-2011
@@ -804,7 +813,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       continue
     }
     const taxable = isTaxableBucket(a.category, isMwe) || uncertifiedHazard(a.category)
-    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, a.category, { taxable })
+    earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}${notSss(a.payItemType)}`, amt, a.category, {
+      taxable,
+      ...(a.payItemType ? { sss: false } : {}),
+    })
   }
   for (const e of employee.oneTimeEarnings ?? []) {
     const amt = round2(e.amount)
@@ -814,6 +826,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       // counts toward the 13th month, the SSS benefit does not
       earn('adjustment', e.label, amt, 'other_non_taxable', {
         meta: e.id,
+        sss: false,
         ...(e.benefit === 'maternity_differential' ? { thirteenthBasis: true } : {}),
       })
       continue
@@ -826,7 +839,11 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       earnDeMinimis('adjustment', e.label, amt, e.deMinimisKind, e.id)
       continue
     }
-    earn('adjustment', e.label, amt, e.category, { meta: e.id, ...(uncertifiedHazard(e.category) ? { taxable: true } : {}) })
+    earn('adjustment', `${e.label}${notSss(e.payItemType)}`, amt, e.category, {
+      meta: e.id,
+      ...(uncertifiedHazard(e.category) ? { taxable: true } : {}),
+      ...(e.payItemType ? { sss: false } : {}),
+    })
   }
   if (earnings.some((l) => l.bir === 'hazard' && l.taxable && isMwe)) {
     notes.push(
@@ -880,12 +897,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // earlier payrolls deduct a provisional share on the rate. A month that
   // paid no compensation owes none.
   const exactSss = !extrasOnly && !!mc?.closes && mc.compensationAlready !== undefined
-  const monthCompensation = exactSss ? round2((mc?.compensationAlready ?? 0) + sssCompensation(earnings)) : 0
+  const monthCompensation = exactSss ? round2((mc?.compensationAlready ?? 0) + sssCompensation(earnings, settings)) : 0
   const sssMonth: SssComputation = exactSss ? (monthCompensation > 0 ? computeSss(monthCompensation, tables.sss) : NO_SSS) : stat.sss
   const settle = (due: number, already: number | undefined) => round2(due - (already ?? 0))
   // a payroll that paid no compensation (a period on maternity or unpaid
   // leave) deducts no provisional SSS: the month's last payroll settles it
-  const noSssPay = !exactSss && !!mc && sssCompensation(earnings) <= 0
+  const noSssPay = !exactSss && !!mc && sssCompensation(earnings, settings) <= 0
   const sssPart = (due: number, already: number | undefined, rate: number) =>
     exactSss ? settle(due, already) : noSssPay ? 0 : share(rate, already)
   const sssEe = sssPart(sssMonth.ee, mc?.already.sssEe, stat.sss.ee)
@@ -1292,9 +1309,35 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     }
   }
 
+  // The 13th month pay is SSS compensation of its month (client setting,
+  // default on): the month's closing payroll settles SSS on it — or, when
+  // that payroll was already final, this one trues the month up (RA 11199
+  // Sec. 8(f); IRR Rule 12 Sec. 6).
+  const mc = params.monthContributions
+  let sss = { ee: 0, mpfEe: 0, er: 0, mpfEr: 0, ecEr: 0 }
+  if (mc?.closes && mc.compensationAlready !== undefined && gross13 > 0) {
+    const monthComp = round2(mc.compensationAlready + sssCompensation(earnings, settings))
+    const due = computeSss(monthComp, tables.sss)
+    const more = (d: number, done: number) => round2(Math.max(0, d - done))
+    sss = {
+      ee: more(due.ee, mc.already.sssEe),
+      mpfEe: more(due.mpfEe, mc.already.sssMpfEe),
+      er: more(due.er, mc.already.sssEr),
+      mpfEr: more(due.mpfEr, mc.already.sssMpfEr),
+      ecEr: more(due.ecEr, mc.already.sssEcEr),
+    }
+    if (sss.ee + sss.mpfEe + sss.er + sss.mpfEr + sss.ecEr > 0) {
+      notes.push(
+        `SSS on the month's compensation with this 13th month pay: ₱${monthComp.toLocaleString()} (MSC ₱${due.msc.toLocaleString()}), less what the month's payrolls deducted.`,
+      )
+    }
+  }
+
   const deductions: PayLine[] = []
+  if (sss.ee > 0) deductions.push({ code: 'sss', label: 'SSS Contribution (13th month pay)', amount: sss.ee })
+  if (sss.mpfEe > 0) deductions.push({ code: 'sss_mpf', label: 'SSS MySSS Pension Booster (MPF, 13th month pay)', amount: sss.mpfEe })
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
-  const { advanced } = capShortfall(withholdingTax, gross13)
+  const { advanced } = capShortfall(withholdingTax, round2(gross13 - sss.ee - sss.mpfEe))
   if (params.annualization && advanced > 0) {
     deductions.push({ code: 'tax_advance', label: 'Tax advanced by employer (receivable)', amount: -advanced })
     warnings.push(taxAdvanceWarning(advanced))
@@ -1323,11 +1366,11 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
     basicPay: 0,
     grossPay: gross13,
     taxableIncome: taxable13,
-    sssEe: 0,
-    sssEr: 0,
-    sssEcEr: 0,
-    sssMpfEe: 0,
-    sssMpfEr: 0,
+    sssEe: sss.ee,
+    sssEr: sss.er,
+    sssEcEr: sss.ecEr,
+    sssMpfEe: sss.mpfEe,
+    sssMpfEr: sss.mpfEr,
     philhealthEe: 0,
     philhealthEr: 0,
     pagibigEe: 0,

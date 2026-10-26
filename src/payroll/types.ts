@@ -243,6 +243,13 @@ export type AllowanceCategory =
   | 'other_taxable'
   | 'other_non_taxable'
 
+/**
+ * Pay-item types that are not SSS compensation (RA 11199 Sec. 8(f)): a
+ * bonus typed as the Christmas bonus, and an allowance subject to
+ * liquidation (a reimbursement).
+ */
+export type PayItemType = 'christmas_bonus' | 'liquidated_allowance'
+
 /** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
 export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'
 
@@ -283,6 +290,7 @@ export interface AllowanceInput {
   basis: AllowanceBasis
   /** which de minimis benefit (category de_minimis): none = not on the list, taxable */
   deMinimisKind?: DeMinimisKind
+  payItemType?: PayItemType
 }
 
 /**
@@ -302,6 +310,7 @@ export interface OneTimeEarningInput {
   deMinimisKind?: DeMinimisKind
   /** unused leave converted to cash: the days converted */
   leaveDays?: number
+  payItemType?: PayItemType
 }
 
 export interface ExtraDeductionInput {
@@ -338,6 +347,8 @@ export interface PayrollSettingsInput {
   paidVlDaysPerYear?: number
   /** A SIL-only client's leave converted to cash is taxable (default true, O7). */
   silConversionTaxable?: boolean
+  /** The 13th month pay is SSS compensation of its month (client setting, default true, O2). */
+  sssInclude13thMonth?: boolean
 }
 
 export interface PeriodInput {
@@ -371,6 +382,8 @@ export interface PayLine {
   dm?: DeMinimisKind
   /** Earnings only: days of leave converted to cash this line pays. */
   leaveDays?: number
+  /** Earnings only: false = not SSS compensation (Christmas bonus, allowance subject to liquidation, maternity pay). */
+  sss?: boolean
   /**
    * Earnings only: true counts toward 13th month pay although not basic pay
    * (the maternity salary differential); false leaves basic pay out of it

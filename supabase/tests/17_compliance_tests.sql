@@ -73,4 +73,13 @@ values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000
 select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category, de_minimis_kind) values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Unused VL', 9800, 'de_minimis', 'monetized_vl')$$, '%payroll_adjustments_leave_conversion%');
 select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category) values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Gift', 900, 'de_minimis')$$, '%payroll_adjustments_de_minimis_named%');
 
+\echo '--- 17.3 C5: the 13th month is SSS compensation by default, the Christmas bonus and liquidated allowances are typed'
+select pg_temp.check((select sss_include_13th_month from entities where id = '10000000-0000-0000-0000-0000000017f0'), 'default include (O2)');
+insert into employee_allowances (employee_id, label, amount, category, basis, pay_item_type)
+values ('20000000-0000-0000-0000-0000000017f1', 'Transport reimbursement', 3000, 'transportation', 'monthly', 'liquidated_allowance');
+select pg_temp.expect_error($$insert into employee_allowances (employee_id, label, amount, category, basis, pay_item_type) values ('20000000-0000-0000-0000-0000000017f1', 'Bonus', 3000, 'transportation', 'monthly', 'christmas_bonus')$$, '%employee_allowances_pay_item_type_category%');
+insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category, pay_item_type)
+values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'earning', 'Christmas bonus', 3000, 'other_benefits', 'christmas_bonus');
+select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, employee_id, entity_id, kind, label, amount, category, pay_item_type) values ('30000000-0000-0000-0000-0000000017f1', '20000000-0000-0000-0000-0000000017f1', '10000000-0000-0000-0000-0000000017f0', 'deduction', 'Union dues', 300, 'union_dues', 'christmas_bonus')$$, '%payroll_adjustments_pay_item_type_category%');
+
 \echo 'PASSED 17'

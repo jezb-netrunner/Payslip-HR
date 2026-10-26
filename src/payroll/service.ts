@@ -205,6 +205,7 @@ const CONTRIBUTION_COLUMNS =
 type MonthSlip = Pick<
   Payslip,
   | 'employee_id'
+  | 'run_type'
   | 'earnings'
   | 'sss_ee'
   | 'sss_mpf_ee'
@@ -374,7 +375,9 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       separationMonth.set(e.id, {
         label: new Date(`${sepMonth}T00:00:00`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }),
         already: sumContributions(sepSlips as unknown as MonthSlip[]),
-        compensation: sssCompensation((sepSlips as unknown as MonthSlip[]).flatMap((p) => p.earnings ?? [])),
+        compensation: sssCompensation((sepSlips as unknown as MonthSlip[]).flatMap((p) => p.earnings ?? []), {
+          sssInclude13thMonth: entity.sss_include_13th_month !== false,
+        }),
       })
     }
   }
@@ -456,22 +459,19 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
     needsTaxYear ? fetchFinalizedPayslipsForTaxYear(entity.id, taxYear) : Promise.resolve([] as YearPayslip[]),
     needsTaxYear ? fetchTaxYears(entity.id, taxYear) : Promise.resolve([] as EmployeeTaxYear[]),
-    // contributions already deducted this payroll month (completing months
-    // around hires and separations)
-    isThirteenth
-      ? Promise.resolve([] as MonthSlip[])
-      : fetchAll<MonthSlip>((from, to) =>
-          supabase
-            .from('payslips')
-            .select(`employee_id, earnings, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status, period_index, periods_in_month)`)
-            .eq('entity_id', entity.id)
-            .eq('period_month', run.period_month)
-            .neq('payroll_run_id', run.id)
-            .neq('run_type', 'thirteenth_month')
-            .in('payroll_runs.status', ['finalized', 'paid'])
-            .order('id')
-            .range(from, to),
-        ),
+    // contributions already deducted this payroll month, and the SSS
+    // compensation already paid (a 13th month pay counts in its month)
+    fetchAll<MonthSlip>((from, to) =>
+      supabase
+        .from('payslips')
+        .select(`employee_id, run_type, earnings, ${CONTRIBUTION_COLUMNS}, payroll_runs!inner(status, period_index, periods_in_month)`)
+        .eq('entity_id', entity.id)
+        .eq('period_month', run.period_month)
+        .neq('payroll_run_id', run.id)
+        .in('payroll_runs.status', ['finalized', 'paid'])
+        .order('id')
+        .range(from, to),
+    ),
   ])
 
   const groupBy = <T extends { employee_id: string }>(rows: T[]) => {
@@ -511,6 +511,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       mweRhRestdayPremiumTaxable: entity.mwe_rh_restday_premium_taxable !== false,
       paidVlDaysPerYear: Number(entity.paid_vl_days_per_year ?? 0),
       silConversionTaxable: entity.sil_conversion_taxable !== false,
+      sssInclude13thMonth: entity.sss_include_13th_month !== false,
     }
 
     const leaveList: LeaveLite[] = (leavesBy.get(emp.id) ?? []).map((l) => ({
@@ -621,6 +622,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
           category: a.category,
           basis: a.basis,
           ...(a.de_minimis_kind ? { deMinimisKind: a.de_minimis_kind } : {}),
+          ...(a.pay_item_type ? { payItemType: a.pay_item_type } : {}),
         })),
         extraDeductions: isThirteenth
           ? []
@@ -664,6 +666,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             ...(a.benefit ? { benefit: a.benefit } : {}),
             ...(a.de_minimis_kind ? { deMinimisKind: a.de_minimis_kind } : {}),
             ...(a.leave_days ? { leaveDays: Number(a.leave_days) } : {}),
+            ...(a.pay_item_type ? { payItemType: a.pay_item_type } : {}),
           })),
       },
       settings: engineSettings,
@@ -689,19 +692,21 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       extrasOnly: extrasOnly(emp, run),
       daysBefore,
       separationMonth: separationMonth.get(emp.id),
-      monthContributions: isThirteenth
-        ? undefined
-        : {
-            already: sumContributions(empMonth),
-            compensationAlready: sssCompensation(empMonth.flatMap((p) => p.earnings ?? [])),
-            // the month's last slot, a separation, or a payroll for earlier
-            // days computed after the month's closing payroll was final
-            closes:
-              run.period_index >= run.periods_in_month ||
-              separatedBy(emp, run) ||
-              empMonth.some((p) => (p.payroll_runs?.period_index ?? 0) >= (p.payroll_runs?.periods_in_month ?? Infinity)),
-            opens: empMonth.length === 0,
-          },
+      monthContributions: {
+        already: sumContributions(empMonth),
+        compensationAlready: sssCompensation(empMonth.flatMap((p) => p.earnings ?? []), engineSettings),
+        // the month's last slot, a separation, or a payroll for earlier
+        // days computed after the month's closing payroll was final (a 13th
+        // month pay then trues the month up)
+        closes:
+          (!isThirteenth && (run.period_index >= run.periods_in_month || separatedBy(emp, run))) ||
+          empMonth.some(
+            (p) =>
+              p.run_type !== 'thirteenth_month' &&
+              (p.payroll_runs?.period_index ?? 0) >= (p.payroll_runs?.periods_in_month ?? Infinity),
+          ),
+        opens: !isThirteenth && !empMonth.some((p) => p.run_type !== 'thirteenth_month'),
+      },
       ytdBasicPay: empYear
         .filter((p) => p.run_type !== 'thirteenth_month')
         .reduce((s, p) => s + Number(p.basic_pay), 0),
