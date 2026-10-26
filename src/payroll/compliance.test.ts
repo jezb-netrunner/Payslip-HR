@@ -295,3 +295,62 @@ describe('C3: year-end adjustment, refunds, separations', () => {
     expect(row.summary.variance).toBe(0)
   })
 })
+
+describe('C4: de minimis ceilings (RR 29-2025) and leave converted to cash', () => {
+  const employee: PayrollEmployeeInput = { ...mwe, isMinimumWageEarner: false, payType: 'monthly', monthlyRate: 30000, dailyRate: 0 }
+  const monthly = { ...settings, payFrequency: 'monthly' as const, workingDaysDivisor: 261 }
+  const november = { start: '2026-11-01', end: '2026-11-30', index: 1, count: 1 }
+  const run = (over: Partial<PayrollEmployeeInput>, s = monthly, deMinimisUsed?: Parameters<typeof computePayslip>[0]['deMinimisUsed']) =>
+    computePayslip({ employee: { ...employee, ...over }, settings: s, period: november, tables: DEFAULT_TABLES, days: [], runType: 'regular', deMinimisUsed })
+  const rice = (amount: number) => ({ allowances: [{ label: 'Rice subsidy', amount, category: 'de_minimis' as const, basis: 'monthly' as const, deMinimisKind: 'rice' as const }] })
+  const split = (slip: ReturnType<typeof run>) => ({
+    exempt: sum(slip.earnings.filter((l) => l.bir === 'de_minimis')),
+    excess: sum(slip.earnings.filter((l) => l.code === 'de_minimis_excess')),
+  })
+
+  it('rice subsidy 2,500 in a month: exempt 2,500', () => {
+    expect(split(run(rice(2500)))).toEqual({ exempt: 2500, excess: 0 })
+  })
+
+  it('rice subsidy 2,700: exempt 2,500, the 200 above the ceiling is taxable', () => {
+    const slip = run(rice(2700))
+    expect(split(slip)).toEqual({ exempt: 2500, excess: 200 })
+    expect(slip.earnings.find((l) => l.code === 'de_minimis_excess')).toMatchObject({ taxable: true, bir: 'other_supplementary' })
+  })
+
+  it('counts what earlier payrolls of the month already paid under the same ceiling', () => {
+    expect(split(run(rice(1500), monthly, { rice: { month: 1500, semester: 1500, year: 1500 } }))).toEqual({ exempt: 1000, excess: 500 })
+  })
+
+  it('a client granting 15 VL days: 14 unused days converted → 12 days de minimis, 2 taxable', () => {
+    const conversion = { oneTimeEarnings: [{ label: 'Unused VL converted (14 days)', amount: 14 * 1149.43, category: 'de_minimis' as const, leaveDays: 14 }] }
+    const slip = run(conversion, { ...monthly, paidVlDaysPerYear: 15 })
+    const dm = slip.earnings.find((l) => l.bir === 'de_minimis')
+    const taxable = slip.earnings.find((l) => l.code === 'de_minimis_excess')
+    expect(dm).toMatchObject({ leaveDays: 12, amount: 13793.16 })
+    expect(taxable).toMatchObject({ leaveDays: 2, amount: 2298.86, taxable: true })
+  })
+
+  it('a SIL-only client: 5 SIL days converted to cash are all taxable (O7)', () => {
+    const conversion = { oneTimeEarnings: [{ label: 'Unused SIL converted (5 days)', amount: 5747.15, category: 'de_minimis' as const, leaveDays: 5 }] }
+    const slip = run(conversion, { ...monthly, paidVlDaysPerYear: 0 })
+    expect(slip.earnings.filter((l) => l.bir === 'de_minimis')).toHaveLength(0)
+    expect(slip.earnings.find((l) => l.code === 'leave_conversion')).toMatchObject({ amount: 5747.15, taxable: true, leaveDays: 5 })
+    // the client may treat SIL conversions like VL instead
+    const lenient = run(conversion, { ...monthly, paidVlDaysPerYear: 0, silConversionTaxable: false })
+    expect(lenient.earnings.find((l) => l.bir === 'de_minimis')).toMatchObject({ amount: 5747.15, leaveDays: 5 })
+  })
+
+  it('a benefit not on the de minimis list is taxable', () => {
+    const slip = run({ allowances: [{ label: 'Gym allowance', amount: 1000, category: 'de_minimis', basis: 'monthly' }] })
+    expect(slip.earnings.find((l) => l.label.startsWith('Gym allowance'))).toMatchObject({ taxable: true, bir: 'other_supplementary' })
+    expect(slip.trace.warnings.some((w) => w.includes('not on the de minimis list'))).toBe(true)
+  })
+
+  it('caps the overtime meal allowance at 30% of the regional minimum wage per overtime day', () => {
+    const meal = { allowances: [{ label: 'OT meal allowance', amount: 300, category: 'de_minimis' as const, basis: 'per_period' as const, deMinimisKind: 'meal_ot' as const }] }
+    const day = workday('2026-11-04', 'regular', 120)
+    const slip = computePayslip({ employee: { ...employee, ...meal }, settings: monthly, period: november, tables: DEFAULT_TABLES, days: [day], runType: 'regular' })
+    expect(split(slip)).toEqual({ exempt: 210, excess: 90 }) // one overtime day × 30% × 700
+  })
+})

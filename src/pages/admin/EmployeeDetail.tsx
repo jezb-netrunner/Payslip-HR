@@ -81,7 +81,8 @@ import { ScheduleTab } from './EmployeeSchedule'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
-import type { AllowanceBasis, AllowanceCategory, PayFrequency } from '../../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, PayFrequency } from '../../payroll/types'
+import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
 import { errorMessage } from '../../lib/errors'
 
 const eventLabels: Record<string, string> = {
@@ -591,6 +592,10 @@ function PayTab({
   const [busy, setBusy] = useState(false)
   const [listBusy, setListBusy] = useState(false)
   const [editingAlw, setEditingAlw] = useState<AllowanceForm | null>(null)
+  const [deMinimis, setDeMinimis] = useState<DeMinimisData | null>(null)
+  useEffect(() => {
+    fetchDeMinimis(todayManila()).then(setDeMinimis, () => setDeMinimis(null))
+  }, [])
   const [editingDed, setEditingDed] = useState<DeductionForm | null>(null)
 
   async function savePay() {
@@ -658,7 +663,17 @@ function PayTab({
       toast('error', 'Enter a label and an amount above zero.')
       return
     }
-    const row = { label: a.label.trim(), amount, category: a.category, basis: a.basis }
+    if (a.category === 'de_minimis' && !a.dm) {
+      toast('error', 'Pick the de minimis benefit: only the benefits on the BIR list are de minimis (any other benefit is taxable).')
+      return
+    }
+    const row = {
+      label: a.label.trim(),
+      amount,
+      category: a.category,
+      basis: a.basis,
+      de_minimis_kind: a.category === 'de_minimis' ? a.dm || null : null,
+    }
     const done = await listWrite(
       () =>
         a.id
@@ -816,7 +831,7 @@ function PayTab({
         title="Allowances and benefits"
         icon={<Gift />}
         actions={
-          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly' })}>
+          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly', dm: 'rice' })}>
             <Plus className="size-4" /> Add
           </Button>
         }
@@ -829,13 +844,14 @@ function PayTab({
                 <p className="break-words text-sm font-semibold text-slate-700">{a.label}</p>
                 <p className="text-xs text-slate-400">
                   {money(Number(a.amount))} {ALLOWANCE_BASIS_LABELS[a.basis]} · {ALLOWANCE_CATEGORY_LABELS[a.category]}
+                  {a.de_minimis_kind && ` · ${DE_MINIMIS_LABELS[a.de_minimis_kind]} (up to ${ceilingText(deMinimis?.ceilings[a.de_minimis_kind])})`}
                   {!a.active && ' · inactive'}
                 </p>
               </div>
               <div className="flex shrink-0 gap-3">
                 <button
                   type="button"
-                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis })}
+                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis, dm: a.de_minimis_kind ?? '' })}
                   className="text-xs font-semibold text-brand-600"
                 >
                   Edit
@@ -858,9 +874,9 @@ function PayTab({
           ))}
         </div>
         <p className="mt-2 text-[11px] text-slate-400">
-          De minimis benefits within BIR ceilings (RR 29-2025 for 2026: rice ₱2,500/mo, uniform ₱8,000/yr,
-          laundry ₱400/mo, etc.) are non-taxable; bonuses share the ₱90,000 cap with the 13th month pay.
-          COLA is exempt for minimum wage earners.
+          De minimis benefits are non-taxable up to their BIR ceilings (RR 29-2025); the list is exclusive, so any other
+          benefit, and pay above a ceiling, is taxable. Bonuses share the ₱90,000 cap with the 13th month pay. COLA is
+          exempt for minimum wage earners.
         </p>
       </Card>
 
@@ -986,6 +1002,19 @@ function PayTab({
                 ))}
               </Select>
             </Field>
+            {editingAlw.category === 'de_minimis' && (
+              <Field
+                label="De minimis benefit"
+                hint={editingAlw.dm ? `Non-taxable up to ${ceilingText(deMinimis?.ceilings[editingAlw.dm])}; anything above is taxable.` : undefined}
+              >
+                <Select value={editingAlw.dm} onChange={(e) => setEditingAlw({ ...editingAlw, dm: e.target.value as DeMinimisKind | '' })}>
+                  <option value="">Pick the benefit…</option>
+                  {ALLOWANCE_DE_MINIMIS.map((k) => (
+                    <option key={k} value={k}>{DE_MINIMIS_LABELS[k]}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Button className="w-full" disabled={listBusy} onClick={() => saveAllowance(editingAlw)}>
               {listBusy ? 'Saving…' : 'Save'}
             </Button>
@@ -1049,6 +1078,8 @@ interface AllowanceForm {
   amount: string
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** which de minimis benefit (category de_minimis) */
+  dm: DeMinimisKind | ''
 }
 
 interface DeductionForm {

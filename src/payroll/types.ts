@@ -58,12 +58,38 @@ export interface BirAnnualData {
   other_benefits_exemption_cap: number
 }
 
+/** The de minimis benefits (RR 2-98 Sec. 2.78.1(A)(3) as amended): the list is exclusive. */
+export type DeMinimisKind =
+  | 'monetized_vl'
+  | 'medical_dependents'
+  | 'rice'
+  | 'uniform'
+  | 'medical_assistance'
+  | 'laundry'
+  | 'achievement_award'
+  | 'christmas_gift'
+  | 'meal_ot'
+  | 'cba_productivity'
+
+export interface DeMinimisCeiling {
+  /** pesos, or days (monetized leave), or a share of the regional minimum wage (overtime meals) */
+  limit: number
+  per: 'month' | 'semester' | 'year' | 'days_year' | 'ot_day_of_minimum_wage'
+}
+
+/** De minimis ceilings in force (legal_parameters 'de_minimis'). */
+export interface DeMinimisData {
+  ceilings: Record<DeMinimisKind, DeMinimisCeiling>
+}
+
 export interface StatutoryTables {
   sss: SssTableData
   philhealth: PhilHealthData
   pagibig: PagibigData
   bir_wht: BirWhtData
   bir_annual: BirAnnualData
+  /** by pay date; missing = no ceilings in force (de minimis benefits are then taxable) */
+  de_minimis?: DeMinimisData
 }
 
 // ---------- attendance ----------
@@ -203,6 +229,7 @@ export type BirBucket =
   | 'cola'
   | 'housing'
   | 'other_taxable'
+  | 'other_supplementary' // other taxable supplementary pay: pay above a de minimis ceiling, leave converted to cash (2316 item 51)
   | 'other_non_taxable'
 
 export type AllowanceCategory =
@@ -254,6 +281,8 @@ export interface AllowanceInput {
   amount: number
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** which de minimis benefit (category de_minimis): none = not on the list, taxable */
+  deMinimisKind?: DeMinimisKind
 }
 
 /**
@@ -269,6 +298,10 @@ export interface OneTimeEarningInput {
   amount: number
   category: BirBucket
   benefit?: MaternityBenefit
+  /** which de minimis benefit (category de_minimis) */
+  deMinimisKind?: DeMinimisKind
+  /** unused leave converted to cash: the days converted */
+  leaveDays?: number
 }
 
 export interface ExtraDeductionInput {
@@ -301,6 +334,10 @@ export interface PayrollSettingsInput {
   minimumWageDaily: number
   /** An MWE's extra 30% for a regular holiday worked on the rest day is taxable (client setting, default true). */
   mweRhRestdayPremiumTaxable?: boolean
+  /** Paid vacation leave days the client grants a year (5 or more: outside SIL, Labor Code Art. 95(b)). */
+  paidVlDaysPerYear?: number
+  /** A SIL-only client's leave converted to cash is taxable (default true, O7). */
+  silConversionTaxable?: boolean
 }
 
 export interface PeriodInput {
@@ -330,6 +367,10 @@ export interface PayLine {
   bir?: BirBucket
   hours?: number
   meta?: string
+  /** Earnings only: the de minimis benefit the line is (its ceiling applies). */
+  dm?: DeMinimisKind
+  /** Earnings only: days of leave converted to cash this line pays. */
+  leaveDays?: number
   /**
    * Earnings only: true counts toward 13th month pay although not basic pay
    * (the maternity salary differential); false leaves basic pay out of it

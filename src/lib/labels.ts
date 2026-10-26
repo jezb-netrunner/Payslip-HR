@@ -103,6 +103,7 @@ export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
   cola: 'COLA (wage order)',
   housing: 'Housing allowance',
   other_taxable: 'Other taxable',
+  other_supplementary: 'Other taxable (supplementary)',
   other_non_taxable: 'Other non-taxable',
 }
 

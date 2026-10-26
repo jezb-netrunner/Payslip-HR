@@ -216,7 +216,7 @@ describe('allowance bases and BIR categories', () => {
     employee: {
       ...employee,
       allowances: [
-        { label: 'Rice subsidy', amount: 2000, category: 'de_minimis', basis: 'monthly' },
+        { label: 'Rice subsidy', amount: 2000, category: 'de_minimis', basis: 'monthly', deMinimisKind: 'rice' },
         { label: 'Transportation', amount: 500, category: 'transportation', basis: 'per_period' },
         { label: 'COLA', amount: 50, category: 'cola', basis: 'per_day' },
       ],

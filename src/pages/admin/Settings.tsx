@@ -31,6 +31,7 @@ function settingsRangeProblem(s: Entity): string | null {
     return 'Night differential rate must be at least 0.10 (Labor Code Art. 86) and at most 1.'
   if (!int(s.pay_date_lag_days) || n(s.pay_date_lag_days) < 0 || n(s.pay_date_lag_days) > 31)
     return 'Days from period end to pay date must be a whole number, 0–31.'
+  if (!(n(s.paid_vl_days_per_year) >= 0 && n(s.paid_vl_days_per_year) <= 365)) return 'Paid vacation leave days must be between 0 and 365.'
   return null
 }
 
@@ -86,6 +87,8 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           pay_date_lag_days: Number(s.pay_date_lag_days),
           payslip_footer_note: s.payslip_footer_note,
           mwe_rh_restday_premium_taxable: s.mwe_rh_restday_premium_taxable,
+          paid_vl_days_per_year: Number(s.paid_vl_days_per_year),
+          sil_conversion_taxable: s.sil_conversion_taxable,
         })
         .eq('id', s.id)
       if (error) throw error
@@ -270,6 +273,17 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 A minimum wage earner's rest-day and special-day premiums are taxable; the minimum wage, holiday pay,
                 overtime, night differential and certified hazard pay stay exempt (NIRC Sec. 24(A)(2)).
               </p>
+              <Field
+                label="Paid vacation leave days a year"
+                hint="5 or more: the client is outside the service incentive leave (Art. 95(b)), and unused VL converted to cash is de minimis up to the yearly ceiling"
+              >
+                <Input type="number" min={0} max={365} value={s.paid_vl_days_per_year} onChange={(e) => set('paid_vl_days_per_year', e.target.value as unknown as number)} />
+              </Field>
+              <Toggle
+                checked={s.sil_conversion_taxable}
+                onChange={(v) => set('sil_conversion_taxable', v)}
+                label="Tax service incentive leave converted to cash (a client giving only the 5-day SIL)"
+              />
             </div>
           </Card>
           <Card title="Payslip" icon={<FileText />}>

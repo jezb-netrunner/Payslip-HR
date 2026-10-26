@@ -36,3 +36,9 @@ export const OVERTIME = {
   /** rest days, special days and holidays: 30% of the hourly rate on that day */
   premiumDay: { value: 0.3, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 87' },
 } satisfies Record<string, LegalValue>
+
+/** Leave rules the payroll applies. */
+export const LEAVE = {
+  /** an employer granting at least this many days of paid vacation leave a year is outside the service incentive leave */
+  vacationLeaveOutsideSil: { value: 5, effectiveFrom: LABOR_CODE, source: 'Labor Code Art. 95(b)' },
+} satisfies Record<string, LegalValue>

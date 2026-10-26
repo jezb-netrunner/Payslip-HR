@@ -22,11 +22,12 @@ import type {
 import type { AnnualPayslipFact } from './annual'
 import { priorFromTaxYear } from './alphalist'
 import { computeAttendance } from './attendance'
-import { computePayslip, sssCompensation, type ContributionSet } from './engine'
+import { computePayslip, sssCompensation, type ContributionSet, type DeMinimisUsed } from './engine'
 import { periodsThisYear, type TaxYearToDate } from './withholding'
 import { round2 } from './types'
 import type {
   BirBucket,
+  DeMinimisKind,
   HolidayLite,
   LeaveLite,
   PayrollSettingsInput,
@@ -107,6 +108,31 @@ export async function fetchFinalizedPayslipsForTaxYear(entityId: string, year: n
       .order('id')
       .range(from, to),
   )
+}
+
+/**
+ * De minimis benefits the tax year's payslips already paid, per benefit, for
+ * their ceilings: in the pay month, half-year and year of `payDate` (pesos;
+ * days for monetized leave).
+ */
+export function deMinimisPaid(slips: YearPayslip[], payDate: string): Partial<Record<DeMinimisKind, DeMinimisUsed>> {
+  const used: Partial<Record<DeMinimisKind, DeMinimisUsed>> = {}
+  const half = (d: string) => (Number(d.slice(5, 7)) <= 6 ? 1 : 2)
+  for (const p of slips) {
+    const d = p.pay_date ?? ''
+    if (d.slice(0, 4) !== payDate.slice(0, 4)) continue
+    for (const l of p.earnings) {
+      if (!l.dm || l.bir !== 'de_minimis') continue
+      const v = l.dm === 'monetized_vl' ? Number(l.leaveDays ?? 0) : Number(l.amount)
+      const u = used[l.dm] ?? { month: 0, semester: 0, year: 0 }
+      used[l.dm] = {
+        month: round2(u.month + (d.slice(0, 7) === payDate.slice(0, 7) ? v : 0)),
+        semester: round2(u.semester + (half(d) === half(payDate) ? v : 0)),
+        year: round2(u.year + v),
+      }
+    }
+  }
+  return used
 }
 
 /** How a finalized payslip's withholding was computed (the trace itself in the test double). */
@@ -248,7 +274,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     run.pay_date === run.period_end ? null : getStatutoryTables(run.pay_date),
   ])
   const tables = payTables
-    ? { ...periodTables, bir_wht: payTables.bir_wht, bir_annual: payTables.bir_annual }
+    ? { ...periodTables, bir_wht: payTables.bir_wht, bir_annual: payTables.bir_annual, de_minimis: payTables.de_minimis }
     : periodTables
   // A regular holiday is paid after work or paid leave on the workday before
   // it, which for a holiday early in the period lies in the days before it
@@ -483,6 +509,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       payFrequency: run.pay_frequency ?? emp.pay_frequency,
       minimumWageDaily: Number(entity.minimum_wage_daily),
       mweRhRestdayPremiumTaxable: entity.mwe_rh_restday_premium_taxable !== false,
+      paidVlDaysPerYear: Number(entity.paid_vl_days_per_year ?? 0),
+      silConversionTaxable: entity.sil_conversion_taxable !== false,
     }
 
     const leaveList: LeaveLite[] = (leavesBy.get(emp.id) ?? []).map((l) => ({
@@ -592,6 +620,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
           amount: Number(a.amount),
           category: a.category,
           basis: a.basis,
+          ...(a.de_minimis_kind ? { deMinimisKind: a.de_minimis_kind } : {}),
         })),
         extraDeductions: isThirteenth
           ? []
@@ -633,6 +662,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             amount: Number(a.amount),
             category: a.category as BirBucket,
             ...(a.benefit ? { benefit: a.benefit } : {}),
+            ...(a.de_minimis_kind ? { deMinimisKind: a.de_minimis_kind } : {}),
+            ...(a.leave_days ? { leaveDays: Number(a.leave_days) } : {}),
           })),
       },
       settings: engineSettings,
@@ -684,6 +715,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ? undefined
         : Math.max(0, tables.bir_annual.other_benefits_exemption_cap - prior.thirteenthOtherBenefitsExempt - taxYearBenefits),
       taxYear: taxYearToDate,
+      deMinimisUsed: deMinimisPaid(empTax, run.pay_date),
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
     if (isThirteenth) {

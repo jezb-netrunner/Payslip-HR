@@ -54,7 +54,8 @@ import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputatio
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
-import { round2, type MaternityBenefit } from '../../payroll/types'
+import { round2, type DeMinimisKind, type MaternityBenefit } from '../../payroll/types'
+import { ALLOWANCE_DE_MINIMIS, DE_MINIMIS_LABELS } from '../../lib/deMinimis'
 
 // Categorical chart colours in fixed order (validated: lightness, chroma,
 // colour-blind and normal-vision separation; yellow sits below 3:1, so every
@@ -893,15 +894,28 @@ function AdjustmentModal({
     amount: '',
     category: initialKind === 'earning' ? 'other_taxable' : 'other',
     authorized: '',
+    dm: '' as DeMinimisKind | '',
+    leaveDays: '',
   })
   const [busy, setBusy] = useState(false)
   // maternity pay is picked like a classification: other non-taxable, marked with which one
   const benefit = f.kind === 'earning' && f.category.startsWith('benefit:') ? (f.category.slice(8) as MaternityBenefit) : null
   const needsAuthorization = f.kind === 'deduction' && f.category === 'other'
+  // unused leave converted to cash: de minimis up to the yearly days ceiling, or taxable (client settings)
+  const leaveConversion = f.kind === 'earning' && f.category === 'leave:conversion'
+  const deMinimis = f.kind === 'earning' && f.category === 'de_minimis'
 
   async function save() {
     if (!employees.some((e) => e.id === f.employee_id) || !f.label.trim() || !(Number(f.amount) > 0)) {
       toast('error', 'Employee, label and a positive amount are required.')
+      return
+    }
+    if (deMinimis && !f.dm) {
+      toast('error', 'Pick the de minimis benefit: only the benefits on the BIR list are de minimis (any other benefit is taxable).')
+      return
+    }
+    if (leaveConversion && !(Number(f.leaveDays) > 0)) {
+      toast('error', 'Enter the number of unused leave days converted to cash.')
       return
     }
     if (needsAuthorization && !f.authorized) {
@@ -916,8 +930,19 @@ function AdjustmentModal({
       kind: f.kind,
       label: f.label.trim(),
       amount: Number(f.amount),
-      category: f.kind === 'earning' ? (benefit ? 'other_non_taxable' : f.category) : f.category === 'union_dues' ? 'union_dues' : 'other',
+      category:
+        f.kind === 'earning'
+          ? benefit
+            ? 'other_non_taxable'
+            : leaveConversion
+              ? 'de_minimis'
+              : f.category
+          : f.category === 'union_dues'
+            ? 'union_dues'
+            : 'other',
       benefit,
+      de_minimis_kind: leaveConversion ? 'monetized_vl' : deMinimis ? f.dm : null,
+      leave_days: leaveConversion ? Number(f.leaveDays) : null,
       authorized_on: needsAuthorization ? f.authorized : null,
       created_by: userData.user?.id ?? null,
     })
@@ -960,6 +985,9 @@ function AdjustmentModal({
                 {EARNING_CATEGORIES.map((c) => (
                   <option key={c} value={c}>{BIR_BUCKET_LABELS[c]}</option>
                 ))}
+                <optgroup label="Leave">
+                  <option value="leave:conversion">Unused leave converted to cash</option>
+                </optgroup>
                 <optgroup label="Maternity leave (RA 11210)">
                   {(Object.keys(MATERNITY_BENEFIT_LABELS) as MaternityBenefit[]).map((b) => (
                     <option key={b} value={`benefit:${b}`}>{MATERNITY_BENEFIT_LABELS[b]}</option>
@@ -974,6 +1002,24 @@ function AdjustmentModal({
             )}
           </Select>
         </Field>
+        {deMinimis && (
+          <Field label="De minimis benefit" hint="Non-taxable up to its BIR ceiling (counting what earlier payrolls paid); anything above is taxable.">
+            <Select value={f.dm} onChange={(e) => setF({ ...f, dm: e.target.value as DeMinimisKind | '' })}>
+              <option value="">Pick the benefit…</option>
+              {ALLOWANCE_DE_MINIMIS.map((k) => (
+                <option key={k} value={k}>{DE_MINIMIS_LABELS[k]}</option>
+              ))}
+            </Select>
+          </Field>
+        )}
+        {leaveConversion && (
+          <Field
+            label="Leave days converted"
+            hint="A client granting 5 or more paid vacation leave days a year: de minimis up to the yearly days ceiling, the rest taxable. A client giving only the 5-day service incentive leave: taxable (Client Settings)."
+          >
+            <Input type="number" min={0.5} step="0.5" value={f.leaveDays} onChange={(e) => setF({ ...f, leaveDays: e.target.value })} />
+          </Field>
+        )}
         {needsAuthorization && (
           <Field
             label="Employee's written authorization signed on"
@@ -986,7 +1032,7 @@ function AdjustmentModal({
           <p className="text-xs text-slate-400">
             {benefit
               ? 'Maternity leave days are not paid as salary: the SSS maternity benefit (advanced in full within 30 days of the leave application) and the salary differential up to full pay are their own earnings, both tax-exempt (RMC 105-2019).'
-              : 'Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory minimum wage package stays exempt for minimum wage earners. Monetized unused vacation leave is de minimis up to 12 days a year (RR 29-2025); classify the rest as Other taxable.'}
+              : 'Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory minimum wage package stays exempt for minimum wage earners. De minimis benefits are exempt up to their ceilings (RR 29-2025); the rest is taxed.'}
           </p>
         )}
         <Button className="w-full" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Add adjustment'}</Button>

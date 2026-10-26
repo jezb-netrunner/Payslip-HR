@@ -19,6 +19,7 @@
 import type {
   BirAnnualData,
   BirWhtData,
+  DeMinimisData,
   PagibigData,
   PhilHealthData,
   SssTableData,
@@ -101,10 +102,29 @@ export const BIR_ANNUAL_2023: BirAnnualData = {
   other_benefits_exemption_cap: 90000,
 }
 
+// De minimis ceilings for payments from 6 Jan 2026: RR 2-98 Sec.
+// 2.78.1(A)(3) as amended by RR 29-2025 Sec. 1 (effective 15 days after
+// posting on 22 Dec 2025, Sec. 3). Mirrors legal_parameters 'de_minimis'.
+export const DE_MINIMIS_2026: DeMinimisData = {
+  ceilings: {
+    monetized_vl: { limit: 12, per: 'days_year' },
+    medical_dependents: { limit: 2000, per: 'semester' },
+    rice: { limit: 2500, per: 'month' },
+    uniform: { limit: 8000, per: 'year' },
+    medical_assistance: { limit: 12000, per: 'year' },
+    laundry: { limit: 400, per: 'month' },
+    achievement_award: { limit: 12000, per: 'year' },
+    christmas_gift: { limit: 6000, per: 'year' },
+    meal_ot: { limit: 0.3, per: 'ot_day_of_minimum_wage' },
+    cba_productivity: { limit: 12000, per: 'year' },
+  },
+}
+
 export const DEFAULT_TABLES: StatutoryTables = {
   sss: SSS_2025,
   philhealth: PHILHEALTH_2024,
   pagibig: PAGIBIG_2024,
   bir_wht: BIR_WHT_2023,
   bir_annual: BIR_ANNUAL_2023,
+  de_minimis: DE_MINIMIS_2026,
 }

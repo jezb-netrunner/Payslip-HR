@@ -85,7 +85,7 @@ export interface AnnualSummary {
   taxable13thOtherBenefits: number
   taxableHazard: number
   taxableOvertime: number
-  /** Holiday/premium pay and night differential of non-MWEs. */
+  /** Holiday/premium pay and night differential of non-MWEs; other taxable supplementary pay. */
   taxableOtherSupplementary: number
   /** An MWE's rest-day and special-day premiums (2316 item 51, "Premium pay (MWE)"). */
   taxablePremiumMwe: number
@@ -147,7 +147,7 @@ export function summarizeYear(
   const b = {
     mweBasic: 0, mweHoliday: 0, mweOvertime: 0, mweNightDiff: 0, mweHazard: 0, mweCola: 0,
     nonBasic: 0, holiday: 0, overtime: 0, nightDiff: 0, hazard: 0, cola: 0,
-    representation: 0, transportation: 0, housing: 0, otherTaxable: 0, premium: 0, premiumMwe: 0,
+    representation: 0, transportation: 0, housing: 0, otherTaxable: 0, otherSupplementary: 0, premiumMwe: 0,
     thirteenthOb: 0, deMinimis: 0, otherNonTaxable: 0,
     contribMwe: 0, contribNon: 0,
   }
@@ -183,9 +183,10 @@ export function summarizeYear(
         case 'housing': b.housing += l.amount; break
         case 'premium':
           if (f.isMwe) b.premiumMwe += l.amount
-          else b.premium += l.amount
+          else b.otherSupplementary += l.amount
           break
         case 'other_taxable': b.otherTaxable += l.amount; break
+        case 'other_supplementary': b.otherSupplementary += l.amount; break
         case 'thirteenth':
         case 'other_benefits': b.thirteenthOb += l.amount; break
         case 'de_minimis': b.deMinimis += l.amount; break
@@ -226,7 +227,7 @@ export function summarizeYear(
 
   const taxableBasic = b.nonBasic - nonCarve
   const taxableOtherRegular = b.otherTaxable - spill
-  const taxableOtherSupplementary = b.holiday + b.nightDiff + b.premium
+  const taxableOtherSupplementary = b.holiday + b.nightDiff + b.otherSupplementary
   const totalTaxablePresent =
     taxableBasic + b.representation + b.transportation + b.cola + b.housing +
     taxableOtherRegular + taxable13 + b.hazard + b.overtime + taxableOtherSupplementary + b.premiumMwe

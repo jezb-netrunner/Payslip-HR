@@ -20,7 +20,7 @@
 
 import { annualizedWithholding, isTaxableBucket, type AnnualPayslipFact, type PriorEmployerInput } from './annual'
 import { bracketOf, computePagibig, computePhilHealth, computeSss } from './statutory'
-import { OVERTIME, PREMIUM } from './law'
+import { LEAVE, OVERTIME, PREMIUM } from './law'
 import { periodWithholding, REGULAR_COMPENSATION_BUCKETS, type PeriodTax, type TaxYearToDate } from './withholding'
 import {
   round2,
@@ -28,6 +28,7 @@ import {
   type ContributionTiming,
   type DayComputation,
   type DayType,
+  type DeMinimisKind,
   type PayLine,
   type PayrollEmployeeInput,
   type PayrollSettingsInput,
@@ -236,6 +237,19 @@ export interface ComputePayslipParams {
   separationMonth?: { label: string; already: ContributionSet; compensation?: number }
   /** The tax year so far (cumulative average method); omitted = no history. */
   taxYear?: TaxYearToDate
+  /**
+   * De minimis benefits earlier payrolls already paid, per benefit: this
+   * pay month, half-year and tax year (pesos; days for monetized leave).
+   */
+  deMinimisUsed?: Partial<Record<DeMinimisKind, DeMinimisUsed>>
+}
+
+export interface DeMinimisUsed {
+  month: number
+  semester: number
+  year: number
+  /** this payroll (computed here) */
+  payroll?: number
 }
 
 /**
@@ -439,6 +453,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   let lateMin = 0
   let undertimeMin = 0
   let absentDays = 0
+  // days with overtime or night work (the de minimis overtime meal ceiling)
+  let overtimeOrNightDays = 0
   let paidLeaveDays = 0
   let unpaidLeaveDays = 0
   // absences and unpaid leave in days' pay: a half-day schedule misses half a day
@@ -503,6 +519,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
     if (worked) {
       daysWorked += 1
+      if (d.otMinutes > 0 || d.nightDiffMinutes > 0) overtimeOrNightDays += 1
       hoursWorked += d.workedMinutes / 60
       otHours += d.otMinutes / 60
       ndHours += d.nightDiffMinutes / 60
@@ -617,6 +634,73 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const earnings: PayLine[] = []
   const earn = (code: string, label: string, amount: number, bir: BirBucket, extra: Partial<PayLine> = {}) =>
     earnings.push({ code, label, amount, bir, taxable: isTaxableBucket(bir, isMwe), ...extra })
+  // De minimis benefits are exempt up to their ceilings, and only those on
+  // the list: any other benefit is taxable, and so is pay above a ceiling
+  // (RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 29-2025 Sec. 1; RR 5-2011
+  // Sec. 1, the list is exclusive). The ceilings count what earlier payrolls
+  // of the month, semester or year paid.
+  const dmUsed: Partial<Record<DeMinimisKind, DeMinimisUsed>> = Object.fromEntries(
+    Object.entries(params.deMinimisUsed ?? {}).map(([k, v]) => [k, { ...v }]),
+  )
+  const roomFor = (kind: DeMinimisKind): number => {
+    const c = tables.de_minimis?.ceilings[kind]
+    if (!c) return 0
+    const u = dmUsed[kind] ?? { month: 0, semester: 0, year: 0 }
+    switch (c.per) {
+      case 'month': return c.limit - u.month
+      case 'semester': return c.limit - u.semester
+      case 'ot_day_of_minimum_wage': return round2(c.limit * settings.minimumWageDaily * overtimeOrNightDays) - (u.payroll ?? 0)
+      default: return c.limit - u.year
+    }
+  }
+  const consume = (kind: DeMinimisKind, amount: number) => {
+    const u = dmUsed[kind] ?? { month: 0, semester: 0, year: 0 }
+    dmUsed[kind] = { month: u.month + amount, semester: u.semester + amount, year: u.year + amount, payroll: (u.payroll ?? 0) + amount }
+  }
+  const earnDeMinimis = (code: string, label: string, amount: number, kind: DeMinimisKind | undefined, id?: string) => {
+    if (!kind || !tables.de_minimis?.ceilings[kind]) {
+      earn(code, `${label} (not a de minimis benefit: taxable)`, amount, 'other_supplementary', { meta: id })
+      warnings.push(
+        !kind
+          ? `${label}: not on the de minimis list, so it is taxable compensation (RR 5-2011 Sec. 1: the list is exclusive). Pick the de minimis benefit it is, or classify it as taxable.`
+          : `${label}: no de minimis ceilings are in force for this pay date, so it is taxed. The system maintainer publishes the ceilings.`,
+      )
+      return
+    }
+    const exempt = round2(Math.min(amount, Math.max(0, roomFor(kind))))
+    if (exempt > 0) {
+      earn(code, `${label} (de minimis)`, exempt, 'de_minimis', { meta: id, dm: kind })
+      consume(kind, exempt)
+    }
+    const excess = round2(amount - exempt)
+    if (excess > 0) earn('de_minimis_excess', `${label} (above the de minimis ceiling: taxable)`, excess, 'other_supplementary', { meta: id, dm: kind })
+  }
+  // Unused leave converted to cash: de minimis up to the yearly days ceiling
+  // when the client grants vacation leave (5 days or more: outside SIL,
+  // Labor Code Art. 95(b)); a SIL-only client's conversion is taxable unless
+  // it decides otherwise (O7).
+  const earnLeaveConversion = (label: string, amount: number, days: number, id?: string) => {
+    const vlClient = (settings.paidVlDaysPerYear ?? 0) >= LEAVE.vacationLeaveOutsideSil.value
+    if (!vlClient && settings.silConversionTaxable !== false) {
+      earn('leave_conversion', `${label} (service incentive leave converted to cash: taxable)`, amount, 'other_supplementary', { meta: id, leaveDays: days })
+      return
+    }
+    const c = tables.de_minimis?.ceilings.monetized_vl
+    const exemptDays = c ? Math.max(0, Math.min(days, c.limit - (dmUsed.monetized_vl?.year ?? 0))) : 0
+    const exempt = round2((amount * exemptDays) / days)
+    if (exempt > 0) {
+      earn('adjustment', `${label} (de minimis, ${exemptDays} day/s)`, exempt, 'de_minimis', { meta: id, dm: 'monetized_vl', leaveDays: exemptDays })
+      consume('monetized_vl', exemptDays)
+    }
+    const excess = round2(amount - exempt)
+    if (excess > 0) {
+      earn('de_minimis_excess', `${label} (above the ${c?.limit ?? 0}-day de minimis ceiling: taxable)`, excess, 'other_supplementary', {
+        meta: id,
+        dm: 'monetized_vl',
+        leaveDays: round2(days - exemptDays),
+      })
+    }
+  }
   // an MWE's hazard pay is exempt only for an actual assignment to a danger,
   // strife-torn or disease-infested area or a distressed or isolated station,
   // certified by DOLE or an allied agency (RR 2-98 Sec. 2.78.1(B)(13))
@@ -715,6 +799,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       amt = allocateMonthly(a.amount, period.index, period.count)
     }
     if (amt === 0) continue
+    if (a.category === 'de_minimis') {
+      earnDeMinimis('allowance', `${a.label}${suffix}`, amt, a.deMinimisKind)
+      continue
+    }
     const taxable = isTaxableBucket(a.category, isMwe) || uncertifiedHazard(a.category)
     earn('allowance', `${a.label}${suffix}${taxable ? '' : ' (non-taxable)'}`, amt, a.category, { taxable })
   }
@@ -728,6 +816,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         meta: e.id,
         ...(e.benefit === 'maternity_differential' ? { thirteenthBasis: true } : {}),
       })
+      continue
+    }
+    if (e.leaveDays) {
+      earnLeaveConversion(e.label, amt, e.leaveDays, e.id)
+      continue
+    }
+    if (e.category === 'de_minimis') {
+      earnDeMinimis('adjustment', e.label, amt, e.deMinimisKind, e.id)
       continue
     }
     earn('adjustment', e.label, amt, e.category, { meta: e.id, ...(uncertifiedHazard(e.category) ? { taxable: true } : {}) })

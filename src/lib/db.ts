@@ -6,6 +6,7 @@ import type {
   AllowanceCategory,
   BirBucket,
   ContributionTiming,
+  DeMinimisKind,
   MaternityBenefit,
   PayFrequency,
   RoundingMode,
@@ -57,6 +58,10 @@ export interface Entity {
   payslip_footer_note: string
   /** an MWE's extra 30% for a regular holiday worked on the rest day is taxable */
   mwe_rh_restday_premium_taxable: boolean
+  /** paid vacation leave days granted a year (5 or more: outside SIL, Labor Code Art. 95(b)) */
+  paid_vl_days_per_year: number
+  /** a SIL-only client's leave converted to cash is taxable */
+  sil_conversion_taxable: boolean
   is_active: boolean
   created_at: string
 }
@@ -162,6 +167,8 @@ export interface EmployeeAllowance {
   amount: number
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** which de minimis benefit (category de_minimis) */
+  de_minimis_kind?: DeMinimisKind | null
   active: boolean
 }
 
@@ -322,6 +329,9 @@ export interface PayslipLine {
   bir?: BirBucket
   hours?: number
   meta?: string
+  /** the de minimis benefit the line is, and the leave days it converts */
+  dm?: DeMinimisKind
+  leaveDays?: number
 }
 
 export interface Payslip {
@@ -396,6 +406,10 @@ export interface PayrollAdjustment {
   benefit?: MaternityBenefit | null
   /** date the employee signed the written authorization ('other' deductions, Labor Code Art. 113) */
   authorized_on?: string | null
+  /** which de minimis benefit (category de_minimis) */
+  de_minimis_kind?: DeMinimisKind | null
+  /** unused leave converted to cash: the days converted */
+  leave_days?: number | null
   created_at: string
 }
 
