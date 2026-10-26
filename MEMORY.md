@@ -380,6 +380,16 @@ is in CAR. Tests 282 → 340. The official PDFs in the spec's sources
 (bir-cdn, lawphil, philhealth) are unreachable from the cloud sandbox
 (proxy 403 / DNS), so no label or figure was checked against them.
 
+**Review round (same day):** an independent review found nine defects,
+all fixed with flow tests that fail on the old code (tests 340 → 348):
+maternity pay is the line marked `benefit`, a semi-monthly payout covers
+its own month's other payroll, the tax year to date stops at the payroll's
+pay date and counts last year's periods paid in January, a 13th month's
+SSS counts in its re-annualization, the final-pay check reads the month's
+13th month, the NG share's closing payroll refunds an earlier deduction,
+migrations 0200/0500 fix old rows instead of relying on NOT VALID, and a
+`legal_parameters` change marks drafts stale.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -390,7 +400,10 @@ placeholder versions — rename each file to the version MCP records). The
 branch's front end needs them: merge only after applying them, and run the
 security advisors after. No DROP in them (MCP refuses), so the PhilHealth
 waiver columns are renamed, not dropped, and CHECKs that needed new values
-were only edited while still unapplied.
+were only edited while still unapplied. Live has no old PhilHealth
+waivers, de minimis allowances or adjustments, payrolls paid before 6 Jan
+2026 or payslips with de minimis lines (checked 2026-10-26), so the
+old-row fixes in 0200/0500 change nothing there.
 
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
@@ -1128,6 +1141,13 @@ mattered: running regular + bonus through the table taxed the bonus at the
 next bracket (WHT-1: 11,875.05 vs 11,208.40), and zero-bracket employees'
 bonuses were never withheld at all until December.
 
+The year to date is the tax year's payslips paid by this payroll's pay
+date, so a reopened March ignores June's commission and keeps its method.
+The period count n adds last year's periods paid this tax year: a Dec 16–31
+payroll released on Jan 5 is period 1, and Jan 1–15 is period 2. Why it
+mattered: one period short withheld ₱4,631 instead of ₱623 on a ₱18,525
+semi-monthly pay.
+
 ### Bonuses past the ₱90,000 exemption are taxed when paid (correction)
 
 Regular payrolls used to classify every 13th-month/other-benefits line as
@@ -1159,6 +1179,10 @@ allowances. Flow tests that expected a full rate-based month for mid-month
 hires/absences were wrong and were changed. Why it mattered: rate-based
 SSS under-remits for anyone with OT or allowances (SSS assesses
 deficiencies with 2%/month penalties) and over-deducts partial months.
+A 13th month that trues SSS up passes that SSS to its own
+re-annualization (the alphalist was ₱37.50 off), and the separation-month
+check reads the month's 13th-month payslip too (it reported a false
+over-deduction).
 
 ### Maternity leave is paid as the SSS benefit + salary differential, never as salary (confirmed approach)
 
@@ -1184,6 +1208,13 @@ valid-until; a leave starting later isn't exempt) doesn't take them from
 the SSS benefit: `ee_collect`, a receivable listed on Cash Advances. A
 period wholly on maternity leave pays no salary (a 21-weekday month used
 to leave ₱1,034 of a ₱30,000 salary).
+
+Maternity pay is recognized by the line's `benefit`, never by its
+category. An allowance subject to liquidation is also other non-taxable
+and not SSS compensation, and a ₱500 taxi reimbursement once prepaid four
+months of shares. The payout payroll also covers the other payrolls of
+its own month (semi-monthly: the second half's share, or the first half's
+pending one).
 
 ### Per-payroll deduction amounts are rows on the draft, not edits to the installment (confirmed approach)
 
@@ -1349,6 +1380,14 @@ A CHECK in a migration that isn't live yet can still be edited in place
 (C10 widened C5's `pay_item_type` that way). Why it mattered: widening
 `payroll_adjustments.category` for commissions would have needed a DROP the
 tooling can't run.
+
+### NOT VALID doesn't grandfather a row: fix old rows in the migration (correction)
+
+> Postgres re-checks a NOT VALID constraint on every UPDATE of a row, so an old row that breaks it fails any later update. Finalize and reopen update every employee row. Bring old rows into line in the same migration, then validate: C7 clears an old waiver that has no ID, and C4 turns an unnamed de minimis allowance into "Other taxable allowance".
+
+Keep NOT VALID only where nothing updates the old rows (one-time items of
+payrolls already computed). Count the live rows first. Why it mattered: one
+old waiver would have blocked every payroll of its client.
 
 ### Legal values: `law.ts` for rules, `legal_parameters` for agency ceilings (confirmed approach, 2026-10-26)
 
