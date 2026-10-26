@@ -798,7 +798,7 @@ function PayTab({
               label="Hazardous assignment certification (optional)"
               hint="DOLE or allied agency certification of an actual assignment to a danger, strife-torn or disease-infested area, or a distressed or isolated station. Without it, hazard pay is taxable."
             >
-              <Input value={f.hazard_ref} placeholder="Certification reference" onChange={(e) => setF({ ...f, hazard_ref: e.target.value })} />
+              <Input value={f.hazard_ref} maxLength={200} placeholder="Certification reference" onChange={(e) => setF({ ...f, hazard_ref: e.target.value })} />
             </Field>
           )}
           {Number(employee.rounding_balance) > 0 && (
