@@ -21,6 +21,7 @@
 import { annualizedWithholding, isTaxableBucket, type AnnualPayslipFact, type PriorEmployerInput } from './annual'
 import { bracketOf, computePagibig, computePhilHealth, computeSss } from './statutory'
 import { EMPLOYMENT, HOLIDAY_PAY, LEAVE, OVERTIME, PREMIUM } from './law'
+import { addDays } from '../lib/manila'
 import { periodWithholding, REGULAR_COMPENSATION_BUCKETS, type PeriodTax, type TaxYearToDate } from './withholding'
 import {
   round2,
@@ -35,6 +36,7 @@ import {
   type PayrollSettingsInput,
   type PayslipComputation,
   type PeriodInput,
+  type RateSegment,
   type RoundingInput,
   type RunType,
   type SssComputation,
@@ -460,8 +462,15 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
 
   const notes: string[] = []
   const warnings: string[] = []
-  const { daily, hourly, statutoryMonthlyBase } = deriveRates(employee, settings)
-  const perMinute = hourly / 60
+  // the rates over the period (pay-rate history): each day is paid at the
+  // rate in effect that day; contributions use the rate at the period end
+  const segs: RateSegment[] = employee.rateSegments?.length
+    ? employee.rateSegments
+    : [{ from: period.start, payType: employee.payType, monthlyRate: employee.monthlyRate, dailyRate: employee.dailyRate }]
+  const rateOf = (s: RateSegment) => ({ ...employee, payType: s.payType, monthlyRate: s.monthlyRate, dailyRate: s.dailyRate })
+  const segRates = segs.map((s) => deriveRates(rateOf(s), settings))
+  const segOf = (date: string) => segs.reduce((k, s, i) => (s.from <= date ? i : k), 0)
+  const { daily, hourly, statutoryMonthlyBase } = segRates[segs.length - 1]
   const isMwe = employee.isMinimumWageEarner
 
   // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
@@ -571,31 +580,49 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     else holidayPremium += p.premium * dayWage
   }
 
+  // per rate segment: the days and minutes each rate values
+  const seg = segs.map(() => ({
+    covered: 0, maternity: 0, absence: 0, unpaidHoliday: 0, outside: 0, late: 0, undertime: 0, extra: 0,
+    dailyBasic: 0, worked: 0, paidLeave: 0,
+  }))
+
   for (const d of days) {
     const worked = d.workedMinutes > 0
     // regular hours as a share of the standard day; above 1 only on a
     // longer compressed-workweek shift
     const fraction = d.payableMinutes / stdMin
     const builtIn = builtInFor(d.dayType, settings.workingDaysDivisor)
+    const k = segOf(d.date)
+    const c = seg[k]
+    const { daily, hourly } = segRates[k]
+    const payType = segs[k].payType
+    if (builtIn > 0) c.covered += dayShare(d)
     // maternity leave is paid as the maternity benefit, not as salary (and
     // the benefit runs on every calendar day, holidays included)
     if (!worked && d.leaveCode === MATERNITY_LEAVE_CODE) {
       maternityDates.push(d.date)
-      if (employee.payType === 'monthly' && builtIn > 0) maternityPayDays += dayShare(d)
+      if (payType === 'monthly' && builtIn > 0) {
+        maternityPayDays += dayShare(d)
+        c.maternity += dayShare(d)
+      }
       continue
     }
     if (worked) {
       daysWorked += 1
+      c.worked += 1
       if (d.otMinutes > 0 || d.nightDiffMinutes > 0) overtimeOrNightDays += 1
       hoursWorked += d.workedMinutes / 60
       otHours += d.otMinutes / 60
       ndHours += d.nightDiffMinutes / 60
       lateMin += d.lateMinutes
       undertimeMin += d.undertimeMinutes
+      c.late += d.lateMinutes
+      c.undertime += d.undertimeMinutes
     }
     if (d.absent) {
       absentDays += 1
       absencePayDays += dayShare(d)
+      c.absence += dayShare(d)
     }
     // Leave flags exist on every covered day. Paid-leave credit applies to
     // ordinary scheduled days. Unpaid leave deducts every day the pay basis
@@ -603,19 +630,24 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // paid inside the rate (regular days always; holidays; rest days too
     // under divisor 365); for daily-paid it is a statistic on scheduled days
     // (no work already means no pay).
-    if (d.onPaidLeave && d.dayType === 'regular') paidLeaveDays += 1
+    if (d.onPaidLeave && d.dayType === 'regular') {
+      paidLeaveDays += 1
+      c.paidLeave += 1
+    }
     // an unworked regular holiday is paid on the workday-before rule, even
     // inside a leave without pay that starts on it — never before the hire
     // date or after the last day
     const employedThen = employed(d.date)
     const holidayOk = employedThen && holidayPaid.get(d.date) !== false
-    if (!worked && !employedThen && !d.absent && !d.onUnpaidLeave && employee.payType === 'monthly' && builtIn > 0) {
+    if (!worked && !employedThen && !d.absent && !d.onUnpaidLeave && payType === 'monthly' && builtIn > 0) {
       outsideEmploymentDays += 1
+      c.outside += 1
     }
     if (d.onUnpaidLeave && !worked && !(isRegularHolidayType(d.dayType) && holidayOk)) {
-      if (unpaidLeaveCharged(d.dayType, employee.payType, settings.workingDaysDivisor)) {
+      if (unpaidLeaveCharged(d.dayType, payType, settings.workingDaysDivisor)) {
         unpaidLeaveDays += 1
         absencePayDays += dayShare(d)
+        c.absence += dayShare(d)
       }
     }
     if (!worked && isRegularHolidayType(d.dayType)) {
@@ -623,13 +655,15 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       if (holidayOk) paidUnworkedHolidays += 1
     }
 
-    if (employee.payType === 'monthly') {
+    if (payType === 'monthly') {
       if (worked) {
         // The monthly rate pays the shift's own hours; time past a shorter
         // shift up to the standard day is not overtime (Art. 87 starts at 8
         // hours) but is still worked: paid at the regular rate.
         if (d.scheduled && builtIn > 0) {
-          extraRegularMinutes += Math.max(0, d.payableMinutes - (d.expectedMinutes ?? stdMin))
+          const past = Math.max(0, d.payableMinutes - (d.expectedMinutes ?? stdMin))
+          extraRegularMinutes += past
+          c.extra += past
         }
         const extraMult = DAY_MULT[d.dayType] - builtIn
         const extra = extraMult * hourly * (d.payableMinutes / 60)
@@ -648,12 +682,16 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         // paid: a covered day is deducted (on leave without pay over it, the
         // unpaid-leave rule above already did).
         if (holidayOk && builtIn === 0) holidayPremium += daily
-        else if (!holidayOk && builtIn > 0 && !d.onUnpaidLeave && employedThen) unpaidHolidayDays += 1
+        else if (!holidayOk && builtIn > 0 && !d.onUnpaidLeave && employedThen) {
+          unpaidHolidayDays += 1
+          c.unpaidHoliday += 1
+        }
       }
     } else {
       // daily-paid: no work, no pay — each worked day is paid at its multiplier
       if (worked) {
         dailyBasic += 1.0 * daily * fraction
+        c.dailyBasic += 1.0 * daily * fraction
         const premium = (DAY_MULT[d.dayType] - 1) * daily * fraction
         if (isMwe) mwePremium(d.dayType, daily * fraction)
         else if (d.dayType === 'rest_day') restDayPay += premium
@@ -665,7 +703,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         // whether or not it falls on the rest day, on the workday-before rule
         if (holidayOk) holidayPremium += daily
       }
-      if (d.onPaidLeave && d.dayType === 'regular') dailyBasic += daily * dayShare(d)
+      if (d.onPaidLeave && d.dayType === 'regular') {
+        dailyBasic += daily * dayShare(d)
+        c.dailyBasic += daily * dayShare(d)
+      }
     }
 
     if (worked && d.otMinutes > 0) {
@@ -779,16 +820,60 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // certified by DOLE or an allied agency (RR 2-98 Sec. 2.78.1(B)(13))
   const uncertifiedHazard = (bucket: BirBucket) => isMwe && bucket === 'hazard' && !employee.hazardCertificationRef?.trim()
   let basicPay: number
+  // a day count or minutes valued at each monthly segment's rate (a daily
+  // rate pays the days worked, so it docks nothing)
+  const perDay = (k: number) => segRates[k].daily
+  const perMin = (k: number) => segRates[k].hourly / 60
+  const valued = (pick: (g: (typeof seg)[number]) => number, unit: (k: number) => number) =>
+    segs.reduce((sum, g, k) => (g.payType === 'monthly' ? sum + pick(seg[k]) * unit(k) : sum), 0)
+  const segmentSpan = (k: number) =>
+    k === 0
+      ? `to ${shortDate(addDays(segs[1].from, -1))}`
+      : k === segs.length - 1
+        ? `from ${shortDate(segs[k].from)}`
+        : `${shortDate(segs[k].from)}–${shortDate(addDays(segs[k + 1].from, -1))}`
+  const segmentRate = (k: number) =>
+    segs[k].payType === 'monthly'
+      ? `${plainAmount(segs[k].monthlyRate)} a month`
+      : `${seg[k].worked} day/s${seg[k].paidLeave ? ` + ${seg[k].paidLeave} paid leave` : ''} at ${plainAmount(segs[k].dailyRate)}`
+  for (let k = 1; k < segs.length; k++) {
+    const was = segs[k - 1]
+    const now = segs[k]
+    const label = (g: RateSegment) => (g.payType === 'monthly' ? `₱${plainAmount(g.monthlyRate)} a month` : `₱${plainAmount(g.dailyRate)} a day`)
+    notes.push(`Pay rate from ${shortDate(now.from)}: ${label(was)} → ${label(now)}. Each day is paid at the rate in effect that day; contributions use the rate at the end of the period.`)
+  }
 
   if (extrasOnly) {
     basicPay = 0
     notes.push('Final pay after the last paid period: one-time items, tax adjustment and rounding settlement only.')
-  } else if (employee.payType === 'monthly') {
-    basicPay = allocateMonthly(employee.monthlyRate, period.index, period.count)
-    earn('basic', 'Basic Pay', basicPay, 'basic')
+  } else if (segs.some((g) => g.payType === 'monthly')) {
+    let monthlyBasic: number
+    if (segs.length === 1) {
+      basicPay = monthlyBasic = allocateMonthly(segs[0].monthlyRate, period.index, period.count)
+      earn('basic', 'Basic Pay', basicPay, 'basic')
+    } else {
+      // The rate changed inside the period: the monthly rate in effect for
+      // most of it pays the period's salary less the other days at its daily
+      // rate, and each other day is paid at its own rate.
+      const monthlyKs = segs.flatMap((g, k) => (g.payType === 'monthly' ? [k] : []))
+      const a = monthlyKs.reduce((best, k) => (seg[k].covered > seg[best].covered ? k : best), monthlyKs[0])
+      const others = seg.reduce((sum, g, k) => (k === a ? sum : sum + g.covered), 0)
+      basicPay = monthlyBasic = 0
+      segs.forEach((g, k) => {
+        const amount =
+          g.payType === 'daily'
+            ? round2(seg[k].dailyBasic)
+            : k === a
+              ? round2(Math.max(0, allocateMonthly(g.monthlyRate, period.index, period.count) - others * segRates[a].daily))
+              : round2(seg[k].covered * segRates[k].daily)
+        if (g.payType === 'monthly') monthlyBasic = round2(monthlyBasic + amount)
+        basicPay = round2(basicPay + amount)
+        earn('basic', `Basic Pay ${segmentSpan(k)} (${segmentRate(k)})`, amount, 'basic')
+      })
+    }
     // days not paid never take more than the period's salary (a month of 23
     // weekdays holds more than the divisor's average share of days)
-    let salaryLeft = basicPay
+    let salaryLeft = monthlyBasic
     const dock = (amount: number) => {
       const taken = Math.min(salaryLeft, round2(amount))
       salaryLeft = round2(salaryLeft - taken)
@@ -797,29 +882,29 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // a period wholly on maternity leave pays no salary, whatever its number
     // of workdays (the maternity benefit replaces it)
     const wholePeriodOnLeave = days.length > 0 && days.every((d) => d.leaveCode === MATERNITY_LEAVE_CODE && d.workedMinutes <= 0)
-    const maternityDeduction = dock(wholePeriodOnLeave ? basicPay : maternityPayDays * daily)
+    const maternityDeduction = dock(wholePeriodOnLeave ? monthlyBasic : valued((g) => g.maternity, perDay))
     if (maternityDeduction > 0) {
       earn('maternity', `Maternity leave (${maternityDates.length} day/s, paid as the maternity benefit)`, -maternityDeduction, 'basic')
     }
-    const absenceDeduction = dock(absencePayDays * daily)
+    const absenceDeduction = dock(valued((g) => g.absence, perDay))
     if (absenceDeduction > 0) {
       const n = absentDays + unpaidLeaveDays
       const share = round2(absencePayDays)
       earn('absence', `Absences (${n} day/s${share !== n ? `, ${share} days' pay` : ''})`, -absenceDeduction, 'basic')
     }
-    const unpaidHolidayDeduction = dock(unpaidHolidayDays * daily)
+    const unpaidHolidayDeduction = dock(valued((g) => g.unpaidHoliday, perDay))
     if (unpaidHolidayDeduction > 0) {
       earn('holiday_unpaid', `Regular holiday not paid (${unpaidHolidayDays} day/s)`, -unpaidHolidayDeduction, 'basic')
     }
-    const outsideDeduction = dock(outsideEmploymentDays * daily)
+    const outsideDeduction = dock(valued((g) => g.outside, perDay))
     if (outsideDeduction > 0) {
       earn('outside_employment', `Holidays before the hire date or after the last day (${outsideEmploymentDays} day/s)`, -outsideDeduction, 'basic')
     }
-    const lateDeduction = dock(lateMin * perMinute)
+    const lateDeduction = dock(valued((g) => g.late, perMin))
     if (lateDeduction > 0) {
       earn('late', `Tardiness (${lateMin} min)`, -lateDeduction, 'basic')
     }
-    const undertimeDeduction = dock(undertimeMin * perMinute)
+    const undertimeDeduction = dock(valued((g) => g.undertime, perMin))
     if (undertimeDeduction > 0) {
       earn('undertime', `Undertime (${undertimeMin} min)`, -undertimeDeduction, 'basic')
     }
@@ -827,7 +912,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       earn(
         'extra_hours',
         `Hours past the shift (${round2(extraRegularMinutes / 60)}h at the regular rate)`,
-        round2(extraRegularMinutes * perMinute),
+        round2(valued((g) => g.extra, perMin)),
         'basic',
         { hours: round2(extraRegularMinutes / 60) },
       )
@@ -835,6 +920,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     if (period.count > 1) {
       notes.push(`Monthly rate allocated as pay period ${period.index} of ${period.count} this month.`)
     }
+  } else if (segs.length > 1) {
+    basicPay = 0
+    segs.forEach((_, k) => {
+      const amount = round2(seg[k].dailyBasic)
+      basicPay = round2(basicPay + amount)
+      earn('basic', `Basic Pay ${segmentSpan(k)} (${segmentRate(k)})`, amount, 'basic')
+    })
+    notes.push('Daily-paid: tardiness/undertime is reflected in payable hours rather than deducted separately.')
   } else {
     basicPay = round2(dailyBasic)
     earn(

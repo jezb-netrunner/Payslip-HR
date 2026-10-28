@@ -15,7 +15,7 @@ const TABLES = [
   'entities', 'employees', 'payroll_runs', 'payslips', 'time_entries', 'leave_requests', 'leave_types',
   'employee_allowances', 'recurring_deductions', 'payroll_adjustments', 'employee_tax_years',
   'statutory_versions', 'holidays', 'employee_schedules', 'schedule_overrides', 'payroll_deduction_overrides',
-  'legal_parameters',
+  'legal_parameters', 'employee_pay_rates',
 ]
 
 export const db: { t: Record<string, Row[]>; seq: number } = { t: {}, seq: 0 }

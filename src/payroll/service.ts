@@ -25,6 +25,7 @@ import { computeAttendance } from './attendance'
 import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet, type DeMinimisUsed, type MaternityContext, type MaternityMonth } from './engine'
 import { periodsThisYear, type TaxYearToDate } from './withholding'
 import { philhealthNgFor } from './philhealth'
+import { rateSegments, type PayRateRow } from './payRates'
 import { round2 } from './types'
 import type {
   BirBucket,
@@ -427,7 +428,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     }
   }
 
-  const [entries, leaves, allowances, deductions, adjustments, scheduleRows, deductionOverrides] = await Promise.all([
+  const [entries, leaves, allowances, deductions, adjustments, scheduleRows, deductionOverrides, payRates] = await Promise.all([
     isThirteenth
       ? Promise.resolve([] as (TimeEntryLite & { employee_id: string })[])
       : fetchAll<TimeEntryLite & { employee_id: string }>((from, to) =>
@@ -484,6 +485,14 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       : fetchAll<PayrollDeductionOverride>((from, to) =>
           supabase.from('payroll_deduction_overrides').select('*').eq('payroll_run_id', run.id).order('id').range(from, to),
         ),
+    fetchAll<PayRateRow & { employee_id: string }>((from, to) =>
+      supabase
+        .from('employee_pay_rates')
+        .select('employee_id, effective_from, pay_type, rate')
+        .eq('entity_id', entity.id)
+        .order('id')
+        .range(from, to),
+    ),
   ])
 
   // Year-to-date data. 13th month: basic earned in the payroll year.
@@ -577,6 +586,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     return m
   }
   const entriesBy = groupBy(entries)
+  const ratesBy = groupBy(payRates)
   const leavesBy = groupBy(leaves)
   const allowancesBy = groupBy(allowances)
   const deductionsBy = groupBy(deductions)
@@ -591,7 +601,14 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
 
   const results: { employee: Employee; slip: PayslipComputation }[] = []
 
-  for (const emp of employees) {
+  for (const row of employees) {
+    // the rates over the period from the pay-rate history (the employee row
+    // holds today's rate); the payslip records the rate at the period end
+    const segments = rateSegments(ratesBy.get(row.id) ?? [], run.period_start, run.period_end)
+    const atEnd = segments[segments.length - 1]
+    const emp: Employee = atEnd
+      ? { ...row, pay_type: atEnd.payType, monthly_rate: atEnd.monthlyRate, daily_rate: atEnd.dailyRate }
+      : row
     const engineSettings: PayrollSettingsInput = {
       standardHoursPerDay: Number(entity.standard_hours_per_day),
       workingDaysDivisor: Number(emp.days_per_year ?? entity.working_days_divisor),
@@ -711,6 +728,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         payType: emp.pay_type,
         monthlyRate: Number(emp.monthly_rate),
         dailyRate: Number(emp.daily_rate),
+        rateSegments: !isThirteenth && segments.length > 1 ? segments : undefined,
         isMinimumWageEarner: emp.is_minimum_wage_earner,
         apprentice: emp.employment_status === 'apprentice',
         philhealthNg: isThirteenth ? undefined : philhealthNgFor(emp, run.period_month),

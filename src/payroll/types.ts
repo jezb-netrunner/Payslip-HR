@@ -257,12 +257,27 @@ export type PayItemType = 'christmas_bonus' | 'liquidated_allowance' | 'commissi
 /** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
 export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'
 
-export interface PayrollEmployeeInput {
-  id: string
-  name: string
+/** A pay rate from a date inside a pay period (the pay-rate history). */
+export interface RateSegment {
+  /** First date the rate applies. */
+  from: string
   payType: 'monthly' | 'daily'
   monthlyRate: number
   dailyRate: number
+}
+
+export interface PayrollEmployeeInput {
+  id: string
+  name: string
+  /** The rate in effect at the end of the period. */
+  payType: 'monthly' | 'daily'
+  monthlyRate: number
+  dailyRate: number
+  /**
+   * The rates over the period when one changes inside it: the one in effect
+   * on its first day, then each change (sorted). Each day is paid at its own.
+   */
+  rateSegments?: RateSegment[]
   isMinimumWageEarner: boolean
   /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
   apprentice?: boolean
