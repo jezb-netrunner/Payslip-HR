@@ -29,10 +29,10 @@ begin
 end $$;
 grant execute on function pg_temp.check(boolean, text) to authenticated, anon, service_role;
 
--- the rates of the table in force on a date
+-- the consultancy rates of the table in force on a date
 create or replace function pg_temp.band(p_type text, p_band text, p_date date) returns numeric
 language sql stable as $$
-  select (data->'professional_fees'->p_type->p_band->>'rate')::numeric
+  select (data->'fees'->'consultancy'->p_type->p_band->>'rate')::numeric
   from ewt_versions where effective_from <= p_date order by effective_from desc limit 1
 $$;
 grant execute on function pg_temp.band(text, text, date) to authenticated;
@@ -66,6 +66,7 @@ update consultants set checklist = '{"control": true}', checklist_note = 'sets r
 update consultants set signed_off_by = 'Ana Cruz, HR head' where id = '70000000-0000-0000-0000-0000000020a1';
 select pg_temp.expect_error($$insert into consultants (entity_id, payee_type, last_name, first_name, tin, service, fee_basis, billing, contract_start) values ('10000000-0000-0000-0000-0000000020f0', 'individual', 'Dup', 'Licate', '123-456-789', 'x', 'retainer', 'monthly', '2026-01-01')$$, '%consultants_tin_unique%');
 select pg_temp.expect_error($$insert into consultants (entity_id, payee_type, tin, service, fee_basis, billing, contract_start) values ('10000000-0000-0000-0000-0000000020f0', 'juridical', '111-222-333', 'x', 'retainer', 'monthly', '2026-01-01')$$, '%consultants_named%');
+select pg_temp.expect_error($$insert into consultants (entity_id, payee_type, registered_name, tin, service, fee_kind, fee_basis, billing, contract_start) values ('10000000-0000-0000-0000-0000000020f0', 'juridical', 'Royal Co.', '111-222-333', 'x', 'royalties', 'retainer', 'monthly', '2026-01-01')$$, '%Unknown kind of fee%');
 commit;
 
 \echo '--- 20.2 the database withholds at the table''s rate for the payee and declaration'
@@ -75,7 +76,7 @@ select set_config('request.jwt.claim.sub', :ca, true);
 -- no declaration on file
 insert into consultant_billings (id, consultant_id, invoice_no, billed_on, gross_amount)
 values ('71000000-0000-0000-0000-0000000020b1', '70000000-0000-0000-0000-0000000020a1', 'INV-1', '2026-07-15', 30000);
-select pg_temp.check((select ewt_rate = case when (select (data->'professional_fees'->'individual'->>'no_declaration_above')::boolean from ewt_versions where effective_from <= '2026-07-15' order by effective_from desc limit 1)
+select pg_temp.check((select ewt_rate = case when (select (data->'fees'->'consultancy'->'individual'->>'no_declaration_above')::boolean from ewt_versions where effective_from <= '2026-07-15' order by effective_from desc limit 1)
                                           then pg_temp.band('individual', 'above', '2026-07-15') else pg_temp.band('individual', 'within', '2026-07-15') end
                              and ewt_amount = round(30000 * ewt_rate, 2) and net_amount = 30000 - ewt_amount and entity_id = '10000000-0000-0000-0000-0000000020f0'
   from consultant_billings where id = '71000000-0000-0000-0000-0000000020b1'), 'without a declaration: the table decides');
@@ -99,8 +100,31 @@ insert into consultant_declarations (consultant_id, year, over_threshold, submit
 insert into consultant_billings (id, consultant_id, invoice_no, billed_on, gross_amount, vat_amount)
 values ('71000000-0000-0000-0000-0000000020b3', '70000000-0000-0000-0000-0000000020a2', 'SI-0042', '2026-08-31', 100000, 12000);
 select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'above', '2026-08-31') and ewt_amount = round(100000 * ewt_rate, 2)
-                             and net_amount = 100000 + 12000 - ewt_amount
+                             and net_amount = 100000 + 12000 - ewt_amount and atc = 'WC051'
   from consultant_billings where id = '71000000-0000-0000-0000-0000000020b3'), 'a firm above its threshold: the fee withheld, VAT paid on top');
+-- a firm declared within its threshold: the billing that passes it, and the later ones, take the rate above
+update consultant_declarations set over_threshold = false where consultant_id = '70000000-0000-0000-0000-0000000020a2';
+select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'within', '2026-08-31') and atc = 'WC050'
+  from consultant_billings where id = '71000000-0000-0000-0000-0000000020b3'), 'declared within: the lower rate');
+insert into consultant_billings (id, consultant_id, invoice_no, billed_on, gross_amount, vat_amount)
+values ('71000000-0000-0000-0000-0000000020b4', '70000000-0000-0000-0000-0000000020a2', 'SI-0050', '2026-09-30', 700000, 84000);
+select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'above', '2026-09-30') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b4'),
+  'the billing that takes the year past the threshold: the rate above');
+select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'within', '2026-08-31') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b3'), 'the earlier one keeps its rate');
+-- an earlier billing dated before it moves the later one past too
+insert into consultant_billings (id, consultant_id, invoice_no, billed_on, gross_amount)
+values ('71000000-0000-0000-0000-0000000020b5', '70000000-0000-0000-0000-0000000020a2', 'SI-0031', '2026-06-30', 50000);
+select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'within', '2026-06-30') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b5'), 'the June billing: within');
+delete from consultant_billings where id = '71000000-0000-0000-0000-0000000020b4';
+delete from consultant_billings where id = '71000000-0000-0000-0000-0000000020b5';
+insert into consultant_billings (id, consultant_id, invoice_no, billed_on, gross_amount)
+values ('71000000-0000-0000-0000-0000000020b6', '70000000-0000-0000-0000-0000000020a2', 'SI-0060', '2026-09-30', 620000);
+select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'within', '2026-09-30') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b6'), '720,000 exactly: still within');
+insert into consultant_billings (id, consultant_id, invoice_no, billed_on, gross_amount)
+values ('71000000-0000-0000-0000-0000000020b7', '70000000-0000-0000-0000-0000000020a2', 'SI-0010', '2026-02-27', 1000);
+select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'above', '2026-09-30') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b6'), 'a February billing entered later moves September past the threshold');
+delete from consultant_billings where id in ('71000000-0000-0000-0000-0000000020b6', '71000000-0000-0000-0000-0000000020b7');
+update consultant_declarations set over_threshold = true where consultant_id = '70000000-0000-0000-0000-0000000020a2';
 commit;
 
 \echo '--- 20.3 admins only; the EWT tables are read-only'

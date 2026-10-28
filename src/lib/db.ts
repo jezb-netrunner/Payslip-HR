@@ -247,6 +247,8 @@ export interface Consultant {
   vat_registered: boolean
   /** the nature of the service (the BIR forms' nature of income payment) */
   service: string
+  /** the EWT table's kind of fee: professional, consultancy */
+  fee_kind: string
   fee_basis: 'retainer' | 'per_deliverable'
   /** a retainer's monthly fee, or a deliverable's usual fee */
   fee_amount: number | null

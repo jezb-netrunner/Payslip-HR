@@ -51,6 +51,8 @@ export function ewtReasonText(reason: EwtReason, threshold: number): string {
       return `no sworn declaration of gross income for the year on file`
     case 'vat_registered':
       return 'VAT-registered'
+    case 'billed_over':
+      return `billed more than ${t} this year`
     default:
       return `declared gross income of ${t} or less this year`
   }

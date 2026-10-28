@@ -62,6 +62,21 @@ are refused; the Generate button makes random ones.
   top of the salary (supplementary for withholding; the 13th month is the
   client's policy). SSS and Pag-IBIG settle on the month's output pay; a
   finalized payroll locks the outputs it paid
+- **Independent consultants** (not employees, kept off payroll — no SSS,
+  PhilHealth, Pag-IBIG, 13th month or leave): per client, the payee's TIN
+  and address, contract and fee (monthly retainer or per deliverable,
+  billed once or twice a month), an employee-or-contractor checklist the
+  client signs off before the first billing (the control test), and the
+  payee's yearly sworn declaration. Each billing is withheld expanded
+  withholding tax by the database from the read-only EWT table
+  (professional and management/technical consultancy fees: individuals 5% /
+  10%, firms 10% / 15%; RR 11-2018 and RR 14-2018), the higher rate also
+  from the billing that takes the year's payments past the threshold. The
+  BIR tab gives the quarter's 1601-EQ figures with the 0619-E months, the
+  Quarterly Alphalist of Payees (CSV), the 2307 figures per payee, the
+  filing dates (0619-E by eFPS group, 1601-EQ, 2307, the declarations list,
+  1604-E) and the year's declarations; marking a quarter's 1601-EQ filed
+  locks its billings. Consultants never appear in the 1601-C, 2316 or 1604-C
 - **Schedules**: client shift templates (start, end, meal break, flexible
   start, compressed-workweek days of up to 12 hours — DOLE Department
   Advisory 02-04); each employee's weekly pattern is set *from a date on*

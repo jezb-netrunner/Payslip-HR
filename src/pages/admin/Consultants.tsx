@@ -32,7 +32,7 @@ import {
   Toggle,
 } from '../../components/ui'
 import { useToast } from '../../components/toast'
-import { downloadCsv } from '../../lib/api'
+import { downloadCsv, getHolidaysBetween } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import {
   BILLING_LABELS,
@@ -51,6 +51,7 @@ import { fmtDate, fmtDateTime, fmtTin, money } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import {
+  billedBefore,
   ewtAmount,
   ewtRuleFor,
   ewtVersionOn,
@@ -214,6 +215,7 @@ function ConsultantsPage({ entity }: { entity: Entity }) {
         open={editing !== null}
         onClose={() => setEditing(null)}
         entity={entity}
+        versions={data.versions}
         consultant={editing?.consultant ?? null}
         onSaved={() => {
           setEditing(null)
@@ -295,7 +297,9 @@ function ConsultantList({
     <div className="space-y-3">
       {sorted.map((c) => {
         const declaration = data.declarations.find((d) => d.consultant_id === c.id && d.year === year)
-        const rule = version ? ewtRuleFor(version.data, c, declaration) : null
+        const ytd = data.billings.filter((b) => b.consultant_id === c.id && b.billed_on.startsWith(String(year))).reduce((s, b) => s + Number(b.gross_amount), 0)
+        const rule = version ? ewtRuleFor(version.data, c, declaration, ytd) : undefined
+        const kind = version?.data.fees[c.fee_kind]?.label
         const concerns = checklistConcerns(c.checklist)
         return (
           <Card key={c.id}>
@@ -309,7 +313,8 @@ function ConsultantList({
                   {c.vat_registered ? ' · VAT-registered' : ''}
                 </p>
                 <p className="mt-1 text-sm text-slate-700">
-                  {c.service} · {c.fee_amount ? `${money(Number(c.fee_amount))} ${c.fee_basis === 'retainer' ? 'a month' : 'a deliverable'}` : FEE_BASIS_LABELS[c.fee_basis]} ·{' '}
+                  {c.service}
+                  {kind ? ` (${kind.toLowerCase()})` : ''} · {c.fee_amount ? `${money(Number(c.fee_amount))} ${c.fee_basis === 'retainer' ? 'a month' : 'a deliverable'}` : FEE_BASIS_LABELS[c.fee_basis]} ·{' '}
                   {BILLING_LABELS[c.billing].toLowerCase()}
                 </p>
                 <p className="text-xs text-slate-500">
@@ -367,6 +372,7 @@ interface ConsultantForm {
   zip_code: string
   vat_registered: boolean
   service: string
+  fee_kind: string
   fee_basis: Consultant['fee_basis']
   fee_amount: string
   billing: Consultant['billing']
@@ -385,12 +391,14 @@ function ConsultantModal({
   open,
   onClose,
   entity,
+  versions,
   consultant,
   onSaved,
 }: {
   open: boolean
   onClose: () => void
   entity: Entity
+  versions: EwtVersion[]
   consultant: Consultant | null
   onSaved: () => void
 }) {
@@ -411,6 +419,7 @@ function ConsultantModal({
       zip_code: c?.zip_code ?? '',
       vat_registered: c?.vat_registered ?? false,
       service: c?.service ?? '',
+      fee_kind: c?.fee_kind ?? 'consultancy',
       fee_basis: c?.fee_basis ?? 'retainer',
       fee_amount: c?.fee_amount ? String(c.fee_amount) : '',
       billing: c?.billing ?? 'monthly',
@@ -432,6 +441,7 @@ function ConsultantModal({
   }, [open, consultant?.id])
 
   const concerns = checklistConcerns(f.checklist)
+  const kinds = ewtVersionOn(versions, todayManila())?.data.fees ?? {}
   const answersChanged =
     !!consultant &&
     (JSON.stringify(CONTRACTOR_CHECKLIST.map((q) => f.checklist[q.key])) !== JSON.stringify(CONTRACTOR_CHECKLIST.map((q) => consultant.checklist[q.key])) ||
@@ -470,6 +480,7 @@ function ConsultantModal({
         zip_code: f.zip_code.trim(),
         vat_registered: f.vat_registered,
         service: f.service.trim(),
+        fee_kind: f.fee_kind,
         fee_basis: f.fee_basis,
         fee_amount: f.fee_amount ? Number(f.fee_amount) : null,
         billing: f.billing,
@@ -558,8 +569,15 @@ function ConsultantModal({
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Service" hint="The nature of the income payment on the BIR forms" className="sm:col-span-3">
+          <Field label="Service" hint="The nature of the income payment on the BIR forms" className="sm:col-span-2">
             <Input maxLength={200} placeholder="e.g. Management consultancy" value={f.service} onChange={(e) => setF({ ...f, service: e.target.value })} />
+          </Field>
+          <Field label="Kind of fee" hint="Its tax codes (ATCs)">
+            <Select value={f.fee_kind} onChange={(e) => setF({ ...f, fee_kind: e.target.value })}>
+              {Object.entries(kinds).map(([k, v]) => (
+                <option key={k} value={k}>{v.label}</option>
+              ))}
+            </Select>
           </Field>
           <Field label="Fee">
             <Select value={f.fee_basis} onChange={(e) => setF({ ...f, fee_basis: e.target.value as Consultant['fee_basis'] })}>
@@ -674,7 +692,7 @@ function DeclarationModal({
   const [submitted, setSubmitted] = useState(todayManila())
   const mine = declarations.filter((d) => d.consultant_id === consultant.id).sort((a, b) => b.year - a.year)
   const version = ewtVersionOn(versions, `${year}-12-31`) ?? ewtVersionOn(versions, todayManila())
-  const threshold = version?.data.professional_fees[consultant.payee_type].threshold
+  const threshold = version?.data.fees[consultant.fee_kind]?.[consultant.payee_type].threshold
   const limit = threshold ? `₱${threshold.toLocaleString('en-PH')}` : 'the threshold'
 
   async function save() {
@@ -959,7 +977,8 @@ function BillingModal({
   const vat = Number(f.vat_amount || 0)
   const version = f.billed_on ? ewtVersionOn(data.versions, f.billed_on) : undefined
   const declaration = consultant && f.billed_on ? data.declarations.find((d) => d.consultant_id === consultant.id && d.year === Number(f.billed_on.slice(0, 4))) : undefined
-  const rule = consultant && version ? ewtRuleFor(version.data, consultant, declaration) : null
+  const before = consultant && f.billed_on ? billedBefore(data.billings, consultant.id, f.billed_on, editing?.id) : 0
+  const rule = consultant && version ? ewtRuleFor(version.data, consultant, declaration, round2(before + (gross > 0 ? gross : 0))) : undefined
   const ewt = rule && gross > 0 ? ewtAmount(gross, rule.rate) : 0
 
   async function save() {
@@ -971,7 +990,7 @@ function BillingModal({
       if (vat < 0) return toast('error', 'The VAT must be zero or more.')
       if (vat > 0 && !consultant.vat_registered) return toast('error', 'VAT on a billing needs a VAT-registered consultant.')
       if (f.service_from && f.service_to && f.service_to < f.service_from) return toast('error', 'The service period ends before it starts.')
-      if (!version) return toast('error', `No EWT table is in force on ${fmtDate(f.billed_on)}.`)
+      if (!rule) return toast('error', `No EWT table in force on ${fmtDate(f.billed_on)} has this kind of fee.`)
     }
     setBusy(true)
     try {
@@ -1075,8 +1094,10 @@ function BillingModal({
             </p>
           </div>
         )}
-        {consultant && !version && f.billed_on && (
-          <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">No EWT table is in force on {fmtDate(f.billed_on)}: the system maintainer publishes it.</p>
+        {consultant && f.billed_on && !rule && (
+          <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            No EWT table in force on {fmtDate(f.billed_on)} has this kind of fee: the system maintainer publishes it.
+          </p>
         )}
         <Button className="w-full" disabled={busy} onClick={save}>
           {busy ? 'Saving…' : editing ? 'Save changes' : 'Record billing'}
@@ -1122,7 +1143,23 @@ function BirTab({
   const ret = return1601Eq(facts, quarter)
   const payees = data.consultants.filter((c) => facts.some((b) => b.consultant_id === c.id && b.billed_on >= quarter.start && b.billed_on <= quarter.end))
   const qap = qapRows(payees, facts, quarter)
-  const due = ewtDueDates(quarter)
+  const year = Number(quarter.start.slice(0, 4))
+  const [holidays, setHolidays] = useState<{ holiday_date: string; name: string }[]>([])
+  useEffect(() => {
+    let cancelled = false
+    getHolidaysBetween(entity.id, `${year}-01-01`, `${year + 1}-03-31`)
+      .then((h) => !cancelled && setHolidays(h))
+      .catch(() => !cancelled && setHolidays([]))
+    return () => {
+      cancelled = true
+    }
+  }, [entity.id, year])
+  const due = ewtDueDates(quarter, { filing: entity.bir_filing_method, efpsGroup: entity.efps_group }, holidays)
+  const declared = data.declarations
+    .filter((d) => d.year === year)
+    .map((d) => ({ d, c: data.consultants.find((c) => c.id === d.consultant_id) }))
+    .filter((x): x is { d: ConsultantDeclaration; c: Consultant } => !!x.c)
+    .sort((a, b) => payeeName(a.c).localeCompare(payeeName(b.c)))
   const unpaid = data.billings.filter((b) => b.billed_on >= quarter.start && b.billed_on <= quarter.end && !b.paid_on).length
 
   async function markFiled() {
@@ -1223,7 +1260,75 @@ function BirTab({
             </div>
           ))}
         </dl>
-        <p className="mt-3 text-xs text-slate-500">{due.note}</p>
+      </Card>
+
+      <Card title={`Filing dates — ${quarter.label} and ${year}`} icon={<Landmark />}>
+        <ul className="divide-y divide-slate-100 text-sm">
+          {due.rows.map((r) => (
+            <li key={r.label} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
+              <span className="text-slate-700">
+                {r.label}
+                <span className="block text-xs text-slate-500">
+                  {r.basis}
+                  {r.note ? ` · ${r.note}` : ''}
+                </span>
+              </span>
+              <span className="whitespace-nowrap font-semibold text-ink-900">{fmtDate(r.due)}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2 text-xs text-slate-500">
+          The BIR often extends dates (calamities, system changes): check its advisories. A date on a weekend or holiday is shown as is.
+        </p>
+      </Card>
+
+      <Card
+        title={`Sworn declarations for ${year}`}
+        icon={<FileText />}
+        actions={
+          declared.length > 0 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                downloadCsv(`payee-declarations-${entity.code}-${year}.csv`, [
+                  ['TIN', 'Branch code', 'Payee', 'Payee type', 'Declared gross income', 'Submitted on'],
+                  ...declared.map(({ d, c }) => [
+                    fmtTin(c.tin),
+                    c.tin_branch_code,
+                    payeeName(c),
+                    PAYEE_TYPE_LABELS[c.payee_type],
+                    d.over_threshold ? 'Above the threshold' : 'Within the threshold',
+                    d.submitted_on,
+                  ]),
+                ])
+              }
+            >
+              <Download className="size-4" /> CSV
+            </Button>
+          )
+        }
+      >
+        {declared.length === 0 ? (
+          <p className="text-sm text-slate-400">No sworn declaration recorded for {year}. Without one, the higher rate applies.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100 text-sm">
+            {declared.map(({ d, c }) => (
+              <li key={d.id} className="flex flex-wrap justify-between gap-2 py-2">
+                <span className="text-ink-900">
+                  {payeeName(c)} <span className="text-xs text-slate-500">TIN {fmtTin(c.tin, c.tin_branch_code)}</span>
+                </span>
+                <span className="text-slate-600">
+                  {d.over_threshold ? 'above the threshold' : 'within the threshold'} · {fmtDate(d.submitted_on)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-2 text-xs text-slate-500">
+          The list of payees who gave sworn declarations goes to your RDO by January 31 (a declaration received later: within 15
+          days after its month). Each payee gives its declaration by January 15 or before its first payment.
+        </p>
       </Card>
 
       <Card

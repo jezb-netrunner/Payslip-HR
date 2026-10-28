@@ -431,16 +431,15 @@ the engine, Pag-IBIG/PhilHealth settled on the month's output pay. Tests
 379, SQL suite 19. The local QA gateway emulates Storage (rows under the
 caller's RLS, bytes on disk) — `/tmp/claude-0/stack/gateway.mjs`.
 
-**Doing (part 4, consultants — in progress):** `consultants`,
+**Did (part 4, consultants):** `consultants` (with `fee_kind`),
 `consultant_declarations`, `consultant_billings`, `ewt_quarter_filings` and
 the read-only `ewt_versions` (migration `20261028000400`, NOT live); the
 Consultants page (checklist sign-off before billing, yearly sworn
 declaration, billings withheld by the database, the BIR tab: 1601-EQ with
-the 0619-E months, QAP CSV, 2307 figures; a filed quarter locks its
-billings). The EWT seed (RR 11-2018: individuals 5%/10% at ₱3M, firms
-10%/15% at ₱720K, WI010/WI011/WC010/WC011) is `verified_on` null pending
-the adversarial research pass. `supabase/tests/run.sh` now runs suites 10–99
-(it globbed `1*` only, so suite 20 never ran).
+the 0619-E months, QAP CSV, 2307 figures, filing dates, the declarations
+list; a filed quarter locks its billings) and the EWT card on Statutory
+Tables. Tests 390, SQL suite 20. `supabase/tests/run.sh` now runs suites
+10–99 (it globbed `1*` only, so suite 20 never ran at first).
 
 ---
 
@@ -1480,6 +1479,29 @@ Sec. 8(b): holiday pay of a worker paid by results ≥ average daily earnings
 of the last 7 working days, never below the minimum wage — the engine only
 warns, it doesn't compute it. Why it mattered: a 0-rate output worker had
 no Pag-IBIG at all and PhilHealth on the ₱10,000 floor.
+
+### EWT on consultants' fees: verified rules and the decisions behind them (verified 2026-10-28)
+
+> `ewt_versions` 2018-05-01 (RR 2-98 Sec. 2.57.2 as amended by RR 11-2018 and RR 14-2018): individuals 5% (gross income for the year ≤ ₱3M, not VAT-registered, sworn declaration on file) else 10%; juridical 10% (≤ ₱720K with its declaration) else 15%. ATCs by kind of fee: licensed professionals WI010/WI011, WC010/WC011; management and technical consultants WI050/WI051, WC050/WC051.
+
+Checked by two research agents with adversarial passes on the BIR digests
+of RR 11-2018 and RR 14-2018 (bir-cdn), BIR Form 1601-EQ (January 2019
+ENCS) and RMO 38-2018; nothing after RR 14-2018 changes the rates (RR
+4-2024 timing, RR 5-2025, RR 24-2025 and RMO 46-2025 touch other items).
+WI/WC157-161 are NOT fee codes (government payors, top withholding agents,
+deposit interest) — a 2026 calculator site lists them wrongly. Decisions:
+the base excludes VAT (RMC 72-2004); the higher rate applies from the
+billing that takes the client's payments to the payee past the threshold
+(the safe reading of an open question); a billing's month is when it
+became payable or booked or invoiced, whichever first (RR 4-2024); dates on
+weekends are noted, not moved (as on the filing calendar). Not handled:
+the ₱250,000 one-payor exemption (Annex B-2) — over-withholding is
+creditable, under-withholding is the payor's liability; the QAP DAT file
+(the CSV feeds the BIR alphalist module; its layout is in RMC 15-2025's
+annexes, unread). Owner flags: a CPA should read RR 11-2018 Sec. 2.57.2(A)
+itself; RR 6-2026 (from Oct 16, 2026) makes the consultant's invoice show
+the withheld tax on its own line; the payor's Annex C list of declarations
+(by Jan 31) is medium-confidence.
 
 ### NOT VALID doesn't grandfather a row: fix old rows in the migration (correction)
 

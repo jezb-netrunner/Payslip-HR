@@ -2,32 +2,67 @@
 // payor's quarterly figures (1601-EQ, 2307, the alphalist of payees).
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_EWT } from './defaults'
-import { ewtAmount, ewtRuleFor, ewtVersionOn, form2307Rows, qapRows, quarterOf, return1601Eq, type BillingFact } from './ewt'
+import { billedBefore, ewtAmount, ewtRuleFor, ewtVersionOn, form2307Rows, qapRows, quarterOf, return1601Eq, type BillingFact } from './ewt'
 import { ewtDueDates } from './ewtDueDates'
 
 const data = DEFAULT_EWT.data
-const ind = data.professional_fees.individual
-const jur = data.professional_fees.juridical
+const consultancy = data.fees.consultancy
+const person = (over: Partial<{ vat_registered: boolean; fee_kind: string }> = {}) => ({
+  payee_type: 'individual' as const,
+  vat_registered: false,
+  fee_kind: 'consultancy',
+  ...over,
+})
+const firm = { payee_type: 'juridical' as const, vat_registered: false, fee_kind: 'consultancy' }
 
 describe('the rate a fee is withheld at', () => {
-  it('an individual: the lower rate only on a declaration within the threshold', () => {
+  it('an individual: 5% only with a declaration within ₱3M, not VAT-registered, billed within ₱3M (RR 11-2018, RR 14-2018)', () => {
     const within = { over_threshold: false }
-    expect(ewtRuleFor(data, { payee_type: 'individual', vat_registered: false }, within)).toMatchObject({ ...ind.within, reason: 'declared_within' })
-    expect(ewtRuleFor(data, { payee_type: 'individual', vat_registered: false }, { over_threshold: true })).toMatchObject({ ...ind.above, reason: 'declared_over' })
-    expect(ewtRuleFor(data, { payee_type: 'individual', vat_registered: false }, null).reason).toBe(ind.no_declaration_above ? 'no_declaration' : 'declared_within')
-    expect(ewtRuleFor(data, { payee_type: 'individual', vat_registered: true }, within).reason).toBe(ind.vat_registered_above ? 'vat_registered' : 'declared_within')
+    expect(ewtRuleFor(data, person(), within, 360000)).toMatchObject({ rate: 0.05, atc: 'WI050', reason: 'declared_within' })
+    expect(ewtRuleFor(data, person(), { over_threshold: true }, 1)).toMatchObject({ rate: 0.1, atc: 'WI051', reason: 'declared_over' })
+    expect(ewtRuleFor(data, person(), null, 1)).toMatchObject({ rate: 0.1, reason: 'no_declaration' })
+    expect(ewtRuleFor(data, person({ vat_registered: true }), within, 1)).toMatchObject({ rate: 0.1, reason: 'vat_registered' })
+    // the client's own billings pass the threshold: 10% from that billing on
+    expect(ewtRuleFor(data, person(), within, 3000000)?.reason).toBe('declared_within')
+    expect(ewtRuleFor(data, person(), within, 3000000.01)).toMatchObject({ rate: 0.1, reason: 'billed_over' })
   })
 
-  it('a firm: its own threshold and rates', () => {
-    expect(ewtRuleFor(data, { payee_type: 'juridical', vat_registered: false }, { over_threshold: false })).toMatchObject({ ...jur.within, threshold: jur.threshold })
-    expect(ewtRuleFor(data, { payee_type: 'juridical', vat_registered: false }, { over_threshold: true })).toMatchObject(jur.above)
+  it('a licensed professional has its own codes at the same rates', () => {
+    expect(ewtRuleFor(data, person({ fee_kind: 'professional' }), { over_threshold: false })).toMatchObject({ rate: 0.05, atc: 'WI010' })
+    expect(ewtRuleFor(data, { ...firm, fee_kind: 'professional' }, { over_threshold: true })).toMatchObject({ rate: 0.15, atc: 'WC011' })
+  })
+
+  it('a firm: 10% within ₱720,000 with its declaration, else 15%; VAT registration alone changes nothing', () => {
+    expect(ewtRuleFor(data, firm, { over_threshold: false }, 720000)).toMatchObject({ rate: 0.1, atc: 'WC050', threshold: consultancy.juridical.threshold })
+    expect(ewtRuleFor(data, firm, { over_threshold: false }, 720000.01)).toMatchObject({ rate: 0.15, atc: 'WC051' })
+    expect(ewtRuleFor(data, firm, null)).toMatchObject({ rate: 0.15, reason: 'no_declaration' })
+    expect(ewtRuleFor(data, { ...firm, vat_registered: true }, { over_threshold: false })?.rate).toBe(0.1)
+  })
+
+  it('no rules for a kind of fee the table lacks', () => {
+    expect(ewtRuleFor(data, person({ fee_kind: 'royalties' }), null)).toBeUndefined()
   })
 
   it('picks the table in force on the date and rounds the tax to the centavo', () => {
-    const versions = [{ effective_from: '2018-01-01' }, { effective_from: '2030-01-01' }]
-    expect(ewtVersionOn(versions, '2026-10-28')?.effective_from).toBe('2018-01-01')
-    expect(ewtVersionOn(versions, '2017-12-31')).toBeUndefined()
+    const versions = [{ effective_from: '2018-05-01' }, { effective_from: '2030-01-01' }]
+    expect(ewtVersionOn(versions, '2026-10-28')?.effective_from).toBe('2018-05-01')
+    expect(ewtVersionOn(versions, '2018-04-30')).toBeUndefined()
     expect(ewtAmount(33333.33, 0.05)).toBe(1666.67)
+  })
+
+  it('counts what was billed earlier in the year, by date then entry', () => {
+    const b = (id: string, billed_on: string, created_at: string, gross_amount: number, consultant_id = 'a') => ({ id, consultant_id, billed_on, created_at, gross_amount })
+    const rows = [
+      b('1', '2025-12-31', 't1', 999),
+      b('2', '2026-01-15', 't1', 1000),
+      b('3', '2026-02-15', 't2', 2000),
+      b('4', '2026-02-15', 't3', 4000),
+      b('5', '2026-03-15', 't1', 8000),
+      b('6', '2026-01-01', 't1', 50, 'other'),
+    ]
+    expect(billedBefore(rows, 'a', '2026-02-15')).toBe(7000)
+    expect(billedBefore(rows, 'a', '2026-02-15', '4')).toBe(3000)
+    expect(billedBefore(rows, 'a', '2026-02-15', '3')).toBe(1000)
   })
 })
 
@@ -58,26 +93,26 @@ describe("the payor's figures", () => {
     ewt_amount: ewtAmount(gross, rate),
   })
   const billings = [
-    bill('a', '2026-07-15', 30000, 'WI010', 0.05),
-    bill('a', '2026-07-31', 30000, 'WI010', 0.05),
-    bill('a', '2026-09-30', 30000, 'WI011', 0.1),
-    bill('b', '2026-08-31', 100000, 'WC011', 0.15),
-    bill('b', '2026-10-01', 100000, 'WC011', 0.15),
+    bill('a', '2026-07-15', 30000, 'WI050', 0.05),
+    bill('a', '2026-07-31', 30000, 'WI050', 0.05),
+    bill('a', '2026-09-30', 30000, 'WI051', 0.1),
+    bill('b', '2026-08-31', 100000, 'WC051', 0.15),
+    bill('b', '2026-10-01', 100000, 'WC051', 0.15),
   ]
 
   it('2307: per ATC, the income of each month and the tax withheld', () => {
     expect(form2307Rows(billings.filter((b) => b.consultant_id === 'a'), q3)).toEqual([
-      { atc: 'WI010', rate: 0.05, months: [60000, 0, 0], total: 60000, withheld: 3000 },
-      { atc: 'WI011', rate: 0.1, months: [0, 0, 30000], total: 30000, withheld: 3000 },
+      { atc: 'WI050', rate: 0.05, months: [60000, 0, 0], total: 60000, withheld: 3000 },
+      { atc: 'WI051', rate: 0.1, months: [0, 0, 30000], total: 30000, withheld: 3000 },
     ])
   })
 
   it("1601-EQ: the quarter's tax by ATC, and each month's withholding (0619-E for the first two)", () => {
     const r = return1601Eq(billings, q3)
     expect(r.rows).toEqual([
-      { atc: 'WC011', rate: 0.15, base: 100000, withheld: 15000 },
-      { atc: 'WI010', rate: 0.05, base: 60000, withheld: 3000 },
-      { atc: 'WI011', rate: 0.1, base: 30000, withheld: 3000 },
+      { atc: 'WC051', rate: 0.15, base: 100000, withheld: 15000 },
+      { atc: 'WI050', rate: 0.05, base: 60000, withheld: 3000 },
+      { atc: 'WI051', rate: 0.1, base: 30000, withheld: 3000 },
     ])
     expect(r.total).toBe(21000)
     expect(r.byMonth).toEqual([3000, 15000, 3000])
@@ -90,9 +125,9 @@ describe("the payor's figures", () => {
     ]
     const rows = qapRows(payees, billings, q3)
     expect(rows.map((r) => [r.seq, r.tin, r.registeredName || `${r.lastName}, ${r.firstName}`, r.atc, r.income, r.withheld])).toEqual([
-      [1, '987654321', 'Abaca Advisory Inc.', 'WC011', 100000, 15000],
-      [2, '123456789', 'Santos, Rhea', 'WI010', 60000, 3000],
-      [3, '123456789', 'Santos, Rhea', 'WI011', 30000, 3000],
+      [1, '987654321', 'Abaca Advisory Inc.', 'WC051', 100000, 15000],
+      [2, '123456789', 'Santos, Rhea', 'WI050', 60000, 3000],
+      [3, '123456789', 'Santos, Rhea', 'WI051', 30000, 3000],
     ])
   })
 })

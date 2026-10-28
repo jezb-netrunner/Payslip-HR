@@ -25,8 +25,16 @@ export interface EwtPayeeRules {
   no_declaration_above: boolean
 }
 
+/** A kind of fee: its label and the rules per payee type (its ATCs). */
+export interface EwtFeeKind {
+  label: string
+  individual: EwtPayeeRules
+  juridical: EwtPayeeRules
+}
+
 export interface EwtData {
-  professional_fees: Record<PayeeType, EwtPayeeRules>
+  /** by kind of fee: professional (licensed professionals), consultancy (management and technical consultants) */
+  fees: Record<string, EwtFeeKind>
 }
 
 export interface EwtVersion {
@@ -43,24 +51,56 @@ export function ewtVersionOn<T extends Pick<EwtVersion, 'effective_from'>>(versi
   return [...versions].filter((v) => v.effective_from <= date).sort((a, b) => b.effective_from.localeCompare(a.effective_from))[0]
 }
 
-export type EwtReason = 'declared_over' | 'no_declaration' | 'vat_registered' | 'declared_within'
+export type EwtReason = 'declared_over' | 'no_declaration' | 'vat_registered' | 'billed_over' | 'declared_within'
 
-/** The rate and ATC a fee is withheld at, and why (mirrors consultant_billing_ewt). */
+/**
+ * The rate and ATC a fee is withheld at, and why (mirrors
+ * consultant_billing_ewt): the kind of fee and payee type pick the rules;
+ * the payee's declaration for the year, VAT registration, and what the
+ * client billed it this year (ytd, this fee included) pick the band.
+ * Undefined when the table has no such kind of fee.
+ */
 export function ewtRuleFor(
   data: EwtData,
-  payee: { payee_type: PayeeType; vat_registered: boolean },
+  payee: { payee_type: PayeeType; vat_registered: boolean; fee_kind: string },
   declaration: { over_threshold: boolean } | null | undefined,
-): EwtBand & { reason: EwtReason; threshold: number } {
-  const r = data.professional_fees[payee.payee_type]
+  ytd = 0,
+): (EwtBand & { reason: EwtReason; threshold: number }) | undefined {
+  const r = data.fees[payee.fee_kind]?.[payee.payee_type]
+  if (!r) return undefined
   const reason: EwtReason = declaration?.over_threshold
     ? 'declared_over'
     : !declaration && r.no_declaration_above
       ? 'no_declaration'
       : payee.vat_registered && r.vat_registered_above
         ? 'vat_registered'
-        : 'declared_within'
+        : ytd > r.threshold
+          ? 'billed_over'
+          : 'declared_within'
   const band = reason === 'declared_within' ? r.within : r.above
   return { ...band, reason, threshold: r.threshold }
+}
+
+/** What the client billed a payee in the year before a billing (by date, then entry). */
+export function billedBefore(
+  billings: { id: string; consultant_id: string; billed_on: string; created_at: string; gross_amount: number }[],
+  consultantId: string,
+  billedOn: string,
+  editingId?: string,
+): number {
+  const year = billedOn.slice(0, 4)
+  const editing = billings.find((b) => b.id === editingId)
+  return round2(
+    billings
+      .filter(
+        (b) =>
+          b.consultant_id === consultantId &&
+          b.id !== editingId &&
+          b.billed_on.slice(0, 4) === year &&
+          (b.billed_on < billedOn || (b.billed_on === billedOn && (!editing || b.created_at < editing.created_at || (b.created_at === editing.created_at && b.id < editing.id)))),
+      )
+      .reduce((s, b) => s + Number(b.gross_amount), 0),
+  )
 }
 
 export function ewtAmount(gross: number, rate: number): number {

@@ -130,30 +130,29 @@ export const DEFAULT_TABLES: StatutoryTables = {
   de_minimis: DE_MINIMIS_2026,
 }
 
-// Expanded withholding on professional fees (RR 2-98 Sec. 2.57.2 as amended
-// by RR 11-2018; ATCs as on BIR Form 1601-EQ). Mirrors ewt_versions
-// 2018-01-01 (migration 20261028000400).
+// Expanded withholding on professional and consultancy fees (RR 2-98 Sec.
+// 2.57.2 as amended by RR 11-2018 and RR 14-2018; ATCs of BIR Form 1601-EQ
+// and RMO 38-2018). Mirrors ewt_versions 2018-05-01 (migration
+// 20261028000400).
+const INDIVIDUAL = { threshold: 3000000, vat_registered_above: true, no_declaration_above: true }
+const JURIDICAL = { threshold: 720000, vat_registered_above: false, no_declaration_above: true }
 export const DEFAULT_EWT: EwtVersion = {
-  effective_from: '2018-01-01',
-  description: 'Expanded withholding on professional fees',
-  legal_basis: 'RR 2-98 Sec. 2.57.2 as amended by RR 11-2018',
-  source_url: 'https://bir-cdn.bir.gov.ph/local/pdf/RR%20No.%2011-2018.pdf',
-  verified_on: null,
+  effective_from: '2018-05-01',
+  description: 'Expanded withholding on professional and consultancy fees',
+  legal_basis: 'RR 2-98 Sec. 2.57.2 as amended by RR 11-2018 and RR 14-2018',
+  source_url: 'https://bir-cdn.bir.gov.ph/local/pdf/Digest%20RR%2014-2018.pdf',
+  verified_on: '2026-10-28',
   data: {
-    professional_fees: {
-      individual: {
-        threshold: 3000000,
-        within: { rate: 0.05, atc: 'WI010' },
-        above: { rate: 0.1, atc: 'WI011' },
-        vat_registered_above: true,
-        no_declaration_above: true,
+    fees: {
+      professional: {
+        label: 'Professional fees (lawyers, CPAs, engineers and other licensed professionals)',
+        individual: { ...INDIVIDUAL, within: { rate: 0.05, atc: 'WI010' }, above: { rate: 0.1, atc: 'WI011' } },
+        juridical: { ...JURIDICAL, within: { rate: 0.1, atc: 'WC010' }, above: { rate: 0.15, atc: 'WC011' } },
       },
-      juridical: {
-        threshold: 720000,
-        within: { rate: 0.1, atc: 'WC010' },
-        above: { rate: 0.15, atc: 'WC011' },
-        vat_registered_above: false,
-        no_declaration_above: true,
+      consultancy: {
+        label: 'Management and technical consultancy fees',
+        individual: { ...INDIVIDUAL, within: { rate: 0.05, atc: 'WI050' }, above: { rate: 0.1, atc: 'WI051' } },
+        juridical: { ...JURIDICAL, within: { rate: 0.1, atc: 'WC050' }, above: { rate: 0.15, atc: 'WC051' } },
       },
     },
   },

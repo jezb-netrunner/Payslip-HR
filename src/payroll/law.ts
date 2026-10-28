@@ -80,11 +80,17 @@ export const DEADLINES = {
   /** BIR copies of the 2316s and the Annex F list: day of February */
   form2316BirFebruaryDay: { value: 28, effectiveFrom: '2018-01-01', source: 'RR 2-98 Sec. 2.83.1 as amended by RR 11-2018' },
   /** BIR 0619-E (EWT of a quarter's first two months), filed manually: day of the following month */
-  ewt0619eManualDay: { value: 10, effectiveFrom: '2018-01-01', source: 'BIR Form 0619-E; RR 2-98 Sec. 2.58(A)(2) as amended by RR 11-2018' },
+  ewt0619eManualDay: { value: 10, effectiveFrom: '2018-01-01', source: 'RR 11-2018; RMC 73-2018 (BIR Form 0619-E)' },
+  /** BIR 0619-E on eFPS: e-filing day of the following month for groups A to E (e-payment by the 15th) */
+  ewt0619eEfpsDays: { value: { A: 15, B: 14, C: 13, D: 12, E: 11 }, effectiveFrom: '2018-01-01', source: 'RR 26-2002; RMC 73-2018' },
   /** BIR 1601-EQ with the Quarterly Alphalist of Payees: the last day of the month after the quarter */
-  ewt1601eqLastDayOfNextMonth: { value: true, effectiveFrom: '2018-01-01', source: 'BIR Form 1601-EQ (January 2019 ENCS); RR 2-98 Sec. 2.58(A)(2) as amended by RR 11-2018' },
-  /** BIR 2307 to the payee: days after the close of the quarter */
-  form2307DaysAfterQuarter: { value: 20, effectiveFrom: '2018-01-01', source: 'RR 2-98 Sec. 2.58.3(B) as amended' },
+  ewt1601eqLastDayOfNextMonth: { value: true, effectiveFrom: '2018-01-01', source: 'RR 11-2018 (BIR Form 1601-EQ, January 2019 ENCS)' },
+  /** BIR 2307 to the payee: days after the close of the quarter (or with the payment, on the payee's request) */
+  form2307DaysAfterQuarter: { value: 20, effectiveFrom: '2018-01-01', source: 'RR 2-98 Sec. 2.58(B) as amended by RR 11-2018' },
+  /** BIR 1604-E with the annual alphalist of payees: day of March of the next year */
+  form1604eMarchDay: { value: 1, effectiveFrom: '2018-01-01', source: 'NIRC Sec. 58; RR 11-2018 (BIR Form 1604-E)' },
+  /** the payor's list of payees who gave sworn declarations, to its RDO: day of January (a mid-year one within 15 days after its month) */
+  payeeDeclarationsJanuaryDay: { value: 31, effectiveFrom: '2018-01-01', source: 'RR 11-2018 (Annex C)' },
   /** SSS (regular employer): the last day of the month after the applicable month */
   sssLastDayOfNextMonth: { value: true, effectiveFrom: '2019-01-01', source: 'SSS release citing SSS Circular 2019-012' },
   /** PhilHealth: by the last digit of the employer number, windows in the following month */
