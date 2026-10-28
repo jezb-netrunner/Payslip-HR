@@ -1,6 +1,7 @@
 // Lightweight row types mirroring the Supabase schema.
 // Keep in sync with supabase migrations (source of truth).
 
+import type { PayRateReason } from '../payroll/payRates'
 import type {
   AllowanceBasis,
   AllowanceCategory,
@@ -181,6 +182,22 @@ export interface CareerEvent {
   monthly_rate: number | null
   daily_rate: number | null
   details: string
+  created_at: string
+}
+
+/** A rate in the employee's pay history (admins only), in effect from `effective_from`. */
+export interface EmployeePayRate {
+  id: string
+  employee_id: string
+  entity_id: string
+  effective_from: string
+  pay_type: 'monthly' | 'daily'
+  rate: number
+  reason: PayRateReason
+  approved_by: string
+  note: string
+  career_event_id: string | null
+  created_by: string | null
   created_at: string
 }
 

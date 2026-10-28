@@ -399,9 +399,29 @@ before loans. Monthly de minimis ceilings count the payroll month. The
 payroll holding a separation date closes the month for a later 13th month.
 The ₱90,000 exemption left counts only benefits paid by the pay date.
 
+### 2026-10-28 — Pay history, then fixed-salary, output and consultant pay (same branch, restarted from main after PR #7)
+
+**Asked:** see an employee's pay-rate progression, and pay consultants and
+executives once or twice a month on output instead of attendance. The
+owner's decisions: no-timekeeping is a toggle per employee, their 13th
+month and SIL are company policy, consultants are both employees on
+retainer and independent contractors, admins approve outputs, employees
+don't see their pay history.
+
+**Did (part 1, pay history):** `employee_pay_rates` (migration
+`20261028000100`, NOT live), payroll by the rate of each day, the Pay
+History tab (step chart, table, payrolls paid at another rate, gross by
+month), rates on career events moved into the history, **Reports → Pay
+changes**. Tests 352 → 363, SQL suite 18.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-10-28: `20261028000100_pay_rate_history` is in the repo, NOT live**
+(placeholder version). It enables pg_cron on Supabase (the nightly
+refresh of today's rate). PR #7 deployed: Pages workflow run 10 green,
+2026-10-28 03:04 UTC.
 
 **2026-10-26: the seven compliance migrations are live** (owner's
 approval), as `20261026084112 mwe_premium_pay` … `20261026084508
@@ -1396,6 +1416,21 @@ A CHECK in a migration that isn't live yet can still be edited in place
 (C10 widened C5's `pay_item_type` that way). Why it mattered: widening
 `payroll_adjustments.category` for commissions would have needed a DROP the
 tooling can't run.
+
+### Pay rates are a dated history; the employee row is today's copy (confirmed approach, 2026-10-28)
+
+> `employee_pay_rates` (from a date, reason, approver; admins only) is the source of truth. Payroll resolves the period's rates from it (`rateSegments`) and pays each day at its own; the employee row's `pay_type`/`monthly_rate`/`daily_rate` hold today's rate, refreshed by a trigger on the history and nightly by pg_cron, and a direct edit of them is refused.
+
+When the rate changes inside a period, the monthly rate in effect for most
+of it pays the period's salary less the other days at its daily rate, and
+each other day is paid at its own rate — so an absence after a raise nets
+to zero and a daily→monthly regularization mid-period works like a
+mid-period hire. Contributions use the rate at the period end (the payslip
+snapshot records it). A rate dated back over finalized payrolls doesn't
+touch them: the Pay History tab lists payrolls whose snapshot rate differs
+from the history's for their period. Why: a single current rate prorated
+nothing, recomputing an old draft used today's rate, and the career-event
+rates were readable by employees through RLS.
 
 ### NOT VALID doesn't grandfather a row: fix old rows in the migration (correction)
 

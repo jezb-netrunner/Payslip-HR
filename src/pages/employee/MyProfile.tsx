@@ -123,17 +123,7 @@ export default function MyProfile() {
                     {eventLabels[ev.event_type] ?? ev.event_type}
                     {ev.position ? ` — ${ev.position}` : ''}
                   </p>
-                  {(ev.department || ev.monthly_rate || ev.daily_rate) && (
-                    <p className="text-xs text-slate-500">
-                      {[
-                        ev.department,
-                        ev.monthly_rate ? `${money(Number(ev.monthly_rate))}/mo` : null,
-                        ev.daily_rate ? `${money(Number(ev.daily_rate))}/day` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </p>
-                  )}
+                  {ev.department && <p className="text-xs text-slate-500">{ev.department}</p>}
                   {ev.details && <p className="mt-0.5 text-xs text-slate-500">{ev.details}</p>}
                 </li>
               ))}

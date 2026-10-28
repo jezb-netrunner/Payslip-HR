@@ -2,6 +2,7 @@
 
 import type { EmploymentStatus, PaymentMethod, SeparationReason } from './db'
 import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, PayItemType, RoundingMode } from '../payroll/types'
+import type { PayRateReason } from '../payroll/payRates'
 
 export const FREQUENCY_LABELS: Record<PayFrequency, string> = {
   weekly: 'Weekly',
@@ -149,6 +150,16 @@ export const RUN_TYPE_LABELS: Record<string, string> = {
   thirteenth_month: '13th month pay',
   special: 'Special / off-cycle',
   final_pay: 'Final pay',
+}
+
+export const PAY_RATE_REASON_LABELS: Record<PayRateReason, string> = {
+  hired: 'Hired',
+  regularized: 'Regularized',
+  merit_increase: 'Merit increase',
+  promotion: 'Promotion',
+  wage_order: 'Wage order',
+  adjustment: 'Salary adjustment',
+  correction: 'Correction of an earlier entry',
 }
 
 /** Allowance categories that can be a reimbursement subject to liquidation (not SSS compensation). */

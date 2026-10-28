@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CalendarClock, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck, TrendingUp } from 'lucide-react'
+import { PayChanges } from './PayChangesReport'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th, StatGroup } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees, getHolidaysBetween, getStatutoryTables } from '../../lib/api'
@@ -100,6 +101,7 @@ export default function Reports() {
           { key: '1601c', label: '1601-C remittances', icon: <Landmark /> },
           { key: 'contrib', label: 'SSS / PhilHealth / Pag-IBIG', icon: <ShieldCheck /> },
           { key: 'due', label: 'Due dates', icon: <CalendarClock /> },
+          { key: 'raises', label: 'Pay changes', icon: <TrendingUp /> },
         ]}
         active={tab}
         onChange={setTab}
@@ -110,6 +112,7 @@ export default function Reports() {
       {tab === '1601c' && <Remittances key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === 'contrib' && <Contributions key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === 'due' && <DueDates key={`${entity.id}${year}`} entity={entity} year={year} />}
+      {tab === 'raises' && <PayChanges key={entity.id} entity={entity} year={year} />}
     </div>
   )
 }

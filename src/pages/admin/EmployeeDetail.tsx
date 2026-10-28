@@ -20,6 +20,7 @@ import {
   Receipt,
   RefreshCw,
   StickyNote,
+  TrendingUp,
   UserCheck,
   UserRound,
   UserX,
@@ -49,6 +50,7 @@ import { callAdminUsers, getHolidaysBetween, isActiveOn } from '../../lib/api'
 import { fetchAll } from '../../lib/fetchAll'
 import type {
   CareerEvent,
+  EmployeePayRate,
   Employee,
   EmployeeAllowance,
   EmployeeTaxYear,
@@ -80,10 +82,13 @@ import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { ScheduleTab } from './EmployeeSchedule'
+import { PayHistoryTab, PayRateModal } from './PayHistoryTab'
+import { currentAndUpcoming, rateText } from '../../lib/payHistory'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
 import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, PayFrequency, PayItemType } from '../../payroll/types'
+import type { PayRateReason } from '../../payroll/payRates'
 import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
 import { philhealthNgProblem } from '../../payroll/philhealth'
 import { errorMessage } from '../../lib/errors'
@@ -117,6 +122,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
   const { entities } = useEntity()
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [events, setEvents] = useState<CareerEvent[]>([])
+  const [rates, setRates] = useState<EmployeePayRate[]>([])
   const [allowances, setAllowances] = useState<EmployeeAllowance[]>([])
   const [deductions, setDeductions] = useState<RecurringDeduction[]>([])
   const [account, setAccount] = useState<Profile | null>(null)
@@ -126,15 +132,17 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
 
   const load = useCallback(async () => {
     if (!id) return
-    const [{ data: emp }, { data: evs }, { data: alw }, { data: ded }, { data: prof }] = await Promise.all([
+    const [{ data: emp }, { data: evs }, { data: alw }, { data: ded }, { data: prof }, { data: rts }] = await Promise.all([
       supabase.from('employees').select('*').eq('id', id).maybeSingle(),
       supabase.from('career_events').select('*').eq('employee_id', id).order('effective_date', { ascending: false }),
       supabase.from('employee_allowances').select('*').eq('employee_id', id).order('created_at'),
       supabase.from('recurring_deductions').select('*').eq('employee_id', id).order('created_at'),
       supabase.from('profiles').select('*').eq('employee_id', id).maybeSingle(),
+      supabase.from('employee_pay_rates').select('*').eq('employee_id', id).order('effective_from'),
     ])
     setEmployee((emp as Employee) ?? null)
     setEvents((evs ?? []) as CareerEvent[])
+    setRates((rts ?? []) as EmployeePayRate[])
     setAllowances((alw ?? []) as EmployeeAllowance[])
     setDeductions((ded ?? []) as RecurringDeduction[])
     setAccount((prof as Profile) ?? null)
@@ -226,6 +234,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
           { key: 'time', label: 'Attendance', icon: <Clock /> },
           { key: 'schedule', label: 'Schedule', icon: <CalendarClock /> },
           { key: 'pay', label: 'Pay & Policy', icon: <Wallet /> },
+          { key: 'history', label: 'Pay History', icon: <TrendingUp /> },
           { key: 'career', label: 'Career History', icon: <History /> },
           { key: 'login', label: 'Login Code', icon: <KeyRound /> },
           { key: 'bir', label: 'BIR / Tax Year', icon: <Landmark /> },
@@ -237,9 +246,10 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
       {tab === 'time' && <AttendanceTab employee={employee} entity={entity} />}
       {tab === 'schedule' && <ScheduleTab employee={employee} entity={entity} />}
       {tab === 'pay' && (
-        <PayTab employee={employee} entity={entity} allowances={allowances} deductions={deductions} onChanged={load} />
+        <PayTab employee={employee} entity={entity} rates={rates} allowances={allowances} deductions={deductions} onChanged={load} />
       )}
-      {tab === 'career' && <CareerTab employee={employee} events={events} onChanged={load} />}
+      {tab === 'history' && <PayHistoryTab employee={employee} entity={entity} rates={rates} onChanged={load} />}
+      {tab === 'career' && <CareerTab employee={employee} rates={rates} events={events} onChanged={load} />}
       {tab === 'login' && <LoginTab employee={employee} entity={entity} account={account} onChanged={load} />}
       {tab === 'bir' && <BirTab employee={employee} />}
     </div>
@@ -561,12 +571,14 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
 function PayTab({
   employee,
   entity,
+  rates,
   allowances,
   deductions,
   onChanged,
 }: {
   employee: Employee
   entity: Entity
+  rates: EmployeePayRate[]
   allowances: EmployeeAllowance[]
   deductions: RecurringDeduction[]
   onChanged: () => Promise<void>
@@ -577,10 +589,9 @@ function PayTab({
   const owedOnAdvances = advances.reduce((s, d) => s + Number(d.balance ?? 0), 0)
   const openAdvances = advances.filter((d) => Number(d.balance ?? 0) > 0)
   const recurring = deductions.filter((d) => d.category !== 'cash_advance')
+  const [changingRate, setChangingRate] = useState(false)
+  const { current: rateNow, upcoming } = currentAndUpcoming(rates)
   const [f, setF] = useState({
-    pay_type: employee.pay_type,
-    monthly_rate: String(employee.monthly_rate),
-    daily_rate: String(employee.daily_rate),
     pay_frequency: employee.pay_frequency,
     days_per_year: employee.days_per_year === null ? '' : String(employee.days_per_year),
     is_mwe: employee.is_minimum_wage_earner,
@@ -619,9 +630,6 @@ function PayTab({
       const { error } = await supabase
         .from('employees')
         .update({
-          pay_type: f.pay_type,
-          monthly_rate: Number(f.monthly_rate) || 0,
-          daily_rate: Number(f.daily_rate) || 0,
           pay_frequency: f.pay_frequency,
           days_per_year: f.days_per_year ? Number(f.days_per_year) : null,
           is_minimum_wage_earner: f.is_mwe,
@@ -636,7 +644,7 @@ function PayTab({
         })
         .eq('id', employee.id)
       if (error) throw error
-      toast('success', 'Pay details saved. Record a salary-adjustment career event for rate changes.')
+      toast('success', 'Pay details saved.')
       await onChanged()
     } catch (err) {
       toast('error', errorMessage(err, 'Failed'))
@@ -732,27 +740,31 @@ function PayTab({
   }
 
   const factor = f.days_per_year ? Number(f.days_per_year) : Number(entity.working_days_divisor)
-  const daily = f.pay_type === 'daily' ? Number(f.daily_rate) : ((Number(f.monthly_rate) || 0) * 12) / factor
+  const daily = employee.pay_type === 'daily' ? Number(employee.daily_rate) : ((Number(employee.monthly_rate) || 0) * 12) / factor
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <Card title="Pay and payroll policy" icon={<Wallet />}>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Rate basis">
-            <Select value={f.pay_type} onChange={(e) => setF({ ...f, pay_type: e.target.value as 'monthly' | 'daily' })}>
-              <option value="daily">Daily-rated (no work, no pay)</option>
-              <option value="monthly">Monthly-rated</option>
-            </Select>
-          </Field>
-          {f.pay_type === 'monthly' ? (
-            <Field label="Monthly rate (PHP)">
-              <Input type="number" value={f.monthly_rate} onChange={(e) => setF({ ...f, monthly_rate: e.target.value })} />
-            </Field>
-          ) : (
-            <Field label="Daily rate (PHP)">
-              <Input type="number" value={f.daily_rate} onChange={(e) => setF({ ...f, daily_rate: e.target.value })} />
-            </Field>
-          )}
+          <div className="rounded-lg bg-slate-50 px-3 py-2.5 sm:col-span-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm">
+                <p className="text-xs text-slate-500">Pay rate{employee.pay_type === 'daily' ? ' (daily-rated: no work, no pay)' : ' (monthly-rated)'}</p>
+                <p className="font-semibold text-ink-900">
+                  {rateNow ? rateText(rateNow) : rateText({ pay_type: employee.pay_type, rate: employee.pay_type === 'monthly' ? employee.monthly_rate : employee.daily_rate })}
+                  {rateNow && <span className="font-normal text-slate-500"> since {fmtDate(rateNow.effective_from)}</span>}
+                </p>
+                {upcoming.map((u) => (
+                  <p key={u.id} className="text-xs text-slate-500">
+                    From {fmtDate(u.effective_from)}: {rateText(u)}
+                  </p>
+                ))}
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => setChangingRate(true)}>
+                Change pay rate
+              </Button>
+            </div>
+          </div>
           <Field label="Pay frequency" hint="The payroll runs this employee is included in">
             <Select value={f.pay_frequency} onChange={(e) => setF({ ...f, pay_frequency: e.target.value as PayFrequency })}>
               {Object.entries(FREQUENCY_LABELS).map(([k, v]) => (
@@ -1117,6 +1129,7 @@ function PayTab({
           </div>
         )}
       </Modal>
+      <PayRateModal open={changingRate} onClose={() => setChangingRate(false)} employee={employee} entity={entity} rates={rates} onSaved={onChanged} />
     </div>
   )
 }
@@ -1155,25 +1168,39 @@ interface DeductionForm {
 }
 
 
+/** The pay-history reason a career event's new rate is recorded with. */
+const RATE_REASON_FOR_EVENT: Record<string, PayRateReason> = {
+  hired: 'hired',
+  regularized: 'regularized',
+  promoted: 'promotion',
+  salary_adjustment: 'adjustment',
+}
+
 function CareerTab({
   employee,
+  rates,
   events,
   onChanged,
 }: {
   employee: Employee
+  rates: EmployeePayRate[]
   events: CareerEvent[]
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
   const [adding, setAdding] = useState(false)
+  const rateOfEvent = (eventId: string) => {
+    const r = rates.find((x) => x.career_event_id === eventId)
+    return r ? rateText(r) : null
+  }
   const [busy, setBusy] = useState(false)
   const [f, setF] = useState({
     event_type: 'promoted',
     effective_date: todayManila(),
     position: employee.position,
     department: employee.department,
-    monthly_rate: '',
-    daily_rate: '',
+    pay_type: employee.pay_type,
+    rate: '',
     details: '',
     separation_reason: 'resignation' as SeparationReason,
     apply: true,
@@ -1182,26 +1209,49 @@ function CareerTab({
   async function save() {
     setBusy(true)
     try {
-      const { error } = await supabase.from('career_events').insert({
-        employee_id: employee.id,
-        event_type: f.event_type,
-        effective_date: f.effective_date,
-        position: f.position || null,
-        department: f.department || null,
-        monthly_rate: f.monthly_rate ? Number(f.monthly_rate) : null,
-        daily_rate: f.daily_rate ? Number(f.daily_rate) : null,
-        details:
-          f.event_type === 'separated'
-            ? [SEPARATION_REASON_LABELS[f.separation_reason], f.details].filter(Boolean).join(' — ')
-            : f.details,
-      })
+      const newRate = f.event_type !== 'separated' && Number(f.rate) > 0 ? Number(f.rate) : null
+      if (newRate !== null && f.effective_date < employee.hire_date) {
+        throw new Error(`A pay rate can't start before the hire date (${fmtDate(employee.hire_date)}).`)
+      }
+      // a new rate goes to the pay history (admins only), linked to the event
+      const { data: ev, error } = await supabase
+        .from('career_events')
+        .insert({
+          employee_id: employee.id,
+          event_type: f.event_type,
+          effective_date: f.effective_date,
+          position: f.position || null,
+          department: f.department || null,
+          details:
+            f.event_type === 'separated'
+              ? [SEPARATION_REASON_LABELS[f.separation_reason], f.details].filter(Boolean).join(' — ')
+              : f.details,
+        })
+        .select('id')
+        .single()
       if (error) throw error
+      if (newRate !== null) {
+        const { error: rateErr } = await supabase.from('employee_pay_rates').insert({
+          employee_id: employee.id,
+          effective_from: f.effective_date,
+          pay_type: f.pay_type,
+          rate: newRate,
+          reason: RATE_REASON_FOR_EVENT[f.event_type] ?? 'adjustment',
+          note: f.details.slice(0, 500),
+          career_event_id: ev.id,
+        })
+        if (rateErr) {
+          throw new Error(
+            /one_per_date/.test(errorMessage(rateErr, ''))
+              ? 'Event recorded, but a pay rate from that date already exists: change it on the Pay History tab.'
+              : `Event recorded, but the pay rate was not: ${errorMessage(rateErr, 'save failed')}`,
+          )
+        }
+      }
       if (f.apply) {
         const upd: Record<string, unknown> = {}
         if (f.position) upd.position = f.position
         if (f.department) upd.department = f.department
-        if (f.monthly_rate) upd.monthly_rate = Number(f.monthly_rate)
-        if (f.daily_rate) upd.daily_rate = Number(f.daily_rate)
         if (f.event_type === 'regularized') {
           upd.employment_status = 'regular'
           upd.regularization_date = f.effective_date
@@ -1249,11 +1299,7 @@ function CareerTab({
                 {ev.position ? ` — ${ev.position}` : ''}
               </p>
               <p className="text-xs text-slate-500">
-                {[
-                  ev.department,
-                  ev.monthly_rate ? `${money(Number(ev.monthly_rate))}/mo` : null,
-                  ev.daily_rate ? `${money(Number(ev.daily_rate))}/day` : null,
-                ].filter(Boolean).join(' · ')}
+                {[ev.department, rateOfEvent(ev.id)].filter(Boolean).join(' · ')}
               </p>
               {ev.details && <p className="mt-0.5 text-xs text-slate-500">{ev.details}</p>}
             </li>
@@ -1286,8 +1332,15 @@ function CareerTab({
               <>
                 <Field label="Position"><Input value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></Field>
                 <Field label="Department"><Input value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })} /></Field>
-                <Field label="New monthly rate"><Input type="number" value={f.monthly_rate} onChange={(e) => setF({ ...f, monthly_rate: e.target.value })} /></Field>
-                <Field label="New daily rate"><Input type="number" value={f.daily_rate} onChange={(e) => setF({ ...f, daily_rate: e.target.value })} /></Field>
+                <Field label="New rate basis">
+                  <Select value={f.pay_type} onChange={(e) => setF({ ...f, pay_type: e.target.value as 'monthly' | 'daily' })}>
+                    <option value="monthly">Monthly-rated</option>
+                    <option value="daily">Daily-rated</option>
+                  </Select>
+                </Field>
+                <Field label={`New ${f.pay_type === 'monthly' ? 'monthly' : 'daily'} rate (optional)`} hint="Recorded in the pay history from the effective date">
+                  <Input type="number" min={0} value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} />
+                </Field>
               </>
             )}
           </div>

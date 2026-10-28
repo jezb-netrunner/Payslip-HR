@@ -41,6 +41,13 @@ are refused; the Generate button makes random ones.
   career history, pay frequency, pay type, payment method (cash / bank /
   e-wallet / check), allowances with BIR classification, recurring deductions
   and loans, union dues, previous-employer and PERA data per tax year
+- **Pay history** (admins only): every rate an employee has had, from a
+  date, with the reason and who approved it, charted with the change from
+  the rate before and the gross pay of each payroll month. Payroll pays each
+  day at the rate in effect that day (a raise from the 10th is prorated); a
+  raise dated ahead starts on its date; payrolls already final that were
+  paid at another rate are flagged. **BIR & Reports → Pay changes** lists a
+  year's changes with the monthly cost
 - **Schedules**: client shift templates (start, end, meal break, flexible
   start, compressed-workweek days of up to 12 hours — DOLE Department
   Advisory 02-04); each employee's weekly pattern is set *from a date on*

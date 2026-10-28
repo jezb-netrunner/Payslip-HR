@@ -72,3 +72,26 @@ export function rateChanges<T extends PayRateRow>(rows: T[], daysPerYear: number
     return { row, previous, change: round2(to - from), pct: from > 0 ? round2(((to - from) / from) * 100) : undefined }
   })
 }
+
+export interface PayChange<T extends PayRateRow> extends RateChange<T> {
+  previous: T
+  /** Change in the monthly amount (a daily rate × days-per-year ÷ 12), for cost totals. */
+  monthlyChange: number
+}
+
+/**
+ * The changes of an employee's rate that took effect from `from` to `to`
+ * (inclusive): not the hire rate, not a correction of an earlier entry.
+ */
+export function changesBetween<T extends PayRateRow & { reason: PayRateReason }>(
+  rows: T[],
+  from: string,
+  to: string,
+  daysPerYear: number,
+): PayChange<T>[] {
+  return rateChanges(rows, daysPerYear).flatMap((c) =>
+    c.previous && c.row.effective_from >= from && c.row.effective_from <= to && c.row.reason !== 'hired' && c.row.reason !== 'correction'
+      ? [{ ...c, previous: c.previous, monthlyChange: round2(monthlyEquivalent(c.row, daysPerYear) - monthlyEquivalent(c.previous, daysPerYear)) }]
+      : [],
+  )
+}

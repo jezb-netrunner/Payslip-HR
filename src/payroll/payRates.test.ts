@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { computePayslip } from './engine'
 import { DEFAULT_TABLES } from './defaults'
-import { monthlyEquivalent, rateChanges, rateOn, rateSegments, type PayRateRow } from './payRates'
+import { changesBetween, monthlyEquivalent, rateChanges, rateOn, rateSegments, type PayRateRow, type PayRateReason } from './payRates'
 import { eachDate } from '../lib/manila'
 import type { DayComputation, PayLine, PayrollEmployeeInput, PayrollSettingsInput, RateSegment } from './types'
 
@@ -47,6 +47,25 @@ describe('pay-rate history lookups', () => {
     // 750 a day × 261 ÷ 12 = 16,312.50 a month
     expect(monthlyEquivalent(rows[1], 261)).toBe(16312.5)
     expect(changes[2]).toMatchObject({ change: 3687.5, pct: 22.61 })
+  })
+})
+
+describe('pay changes in a year (the report)', () => {
+  it('counts the changes that took effect in the range, not the hire rate or a correction, with the monthly cost change', () => {
+    const rows: (PayRateRow & { reason: PayRateReason })[] = [
+      { effective_from: '2025-03-01', pay_type: 'daily', rate: 650, reason: 'hired' },
+      { effective_from: '2026-01-10', pay_type: 'daily', rate: 700, reason: 'wage_order' },
+      { effective_from: '2026-02-01', pay_type: 'daily', rate: 705, reason: 'correction' },
+      { effective_from: '2026-08-01', pay_type: 'monthly', rate: 20000, reason: 'regularized' },
+      { effective_from: '2027-01-05', pay_type: 'monthly', rate: 21000, reason: 'merit_increase' },
+    ]
+    const changes = changesBetween(rows, '2026-01-01', '2026-12-31', 313)
+    expect(changes.map((c) => [c.row.effective_from, c.change, c.pct, c.monthlyChange])).toEqual([
+      // 650 → 700 a day = +50 (+7.69%); monthly 16,954.17 → 18,258.33
+      ['2026-01-10', 50, 7.69, 1304.16],
+      // 705 a day (18,388.75 a month) → 20,000 a month
+      ['2026-08-01', 1611.25, 8.76, 1611.25],
+    ])
   })
 })
 
