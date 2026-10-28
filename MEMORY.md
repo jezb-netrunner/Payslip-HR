@@ -422,11 +422,20 @@ employment deducted, presumed workdays count for per-day allowances), and
 a 13th month run leaves out one whose policy says no. The time report
 shows no absences for them. Tests 369, SQL 18.5.
 
+**Did (part 3, output pay):** `employees.output_pay` (basic = paid by
+results, or fees / commission / other supplementary on top of the salary)
+and `output_thirteenth_month`, `employee_outputs` (admins only, guard,
+locks with the finalized payroll) and the private `output-reports` bucket
+(migration `20261028000300`, NOT live); the Outputs tab, output lines in
+the engine, Pag-IBIG/PhilHealth settled on the month's output pay. Tests
+379, SQL suite 19. The local QA gateway emulates Storage (rows under the
+caller's RLS, bytes on disk) — `/tmp/claude-0/stack/gateway.mjs`.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**2026-10-28: `20261028000100_pay_rate_history` and `…0200_fixed_salary` are in the repo, NOT live**
+**2026-10-28: `20261028000100_pay_rate_history`, `…0200_fixed_salary` and `…0300_output_pay` are in the repo, NOT live**
 (placeholder version). It enables pg_cron on Supabase (the nightly
 refresh of today's rate). PR #7 deployed: Pages workflow run 10 green,
 2026-10-28 03:04 UTC.
@@ -1439,6 +1448,27 @@ touch them: the Pay History tab lists payrolls whose snapshot rate differs
 from the history's for their period. Why: a single current rate prorated
 nothing, recomputing an old draft used today's rate, and the career-event
 rates were readable by employees through RLS.
+
+### Output pay: how each contribution and benefit treats it (verified 2026-10-28)
+
+> Basic (paid by results): BIR basic, 13th month counted, PhilHealth's monthly basic salary not below the minimum wage × days-per-year ÷ 12 and settled on the month's output. On top of the salary: BIR fees/commission/others (supplementary), PhilHealth unchanged, 13th month by client policy (default on). Both: SSS (all remuneration) and Pag-IBIG settled at the month's closing payroll.
+
+Sources (web extraction, official hosts unreachable from the sandbox):
+PhilHealth Circular 2018-0001 — MBS is the fixed basic rate without sales
+commission, OT, allowances, 13th month, bonuses; workers paid by results
+get not less than the minimum wage, monthly on 261 or 313 days ÷ 12 (also
+the Supreme Court e-library copy). PD 851 Revised Guidelines — piece-rate
+workers are covered, on total earnings; task-basis workers are not.
+Philippine Duplicators v. NLRC (G.R. 110068, 1995 resolution) — sales
+commissions integral to the pay are basic salary for the 13th month;
+Boie-Takeda (G.R. 92174) excluded incentive-type "commissions": hence the
+client policy, defaulting to counted. Pag-IBIG's IRR counts earnings
+"fixed or ascertained on a time, task, piece or commission basis" (partial
+scan only — the weakest source; owner flag). Omnibus Rules Book III Rule IV
+Sec. 8(b): holiday pay of a worker paid by results ≥ average daily earnings
+of the last 7 working days, never below the minimum wage — the engine only
+warns, it doesn't compute it. Why it mattered: a 0-rate output worker had
+no Pag-IBIG at all and PhilHealth on the ₱10,000 floor.
 
 ### NOT VALID doesn't grandfather a row: fix old rows in the migration (correction)
 

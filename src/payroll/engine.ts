@@ -30,6 +30,7 @@ import {
   type DayComputation,
   type DayType,
   type DeMinimisKind,
+  type OutputPayClass,
   type PayItemType,
   type PayLine,
   type PayrollEmployeeInput,
@@ -183,6 +184,13 @@ export interface MonthContributionsInput {
    * month's actual compensation. Omitted = SSS on the rate.
    */
   compensationAlready?: number
+  /**
+   * Output pay those payslips paid: all of it (Pag-IBIG's monthly
+   * compensation), and the part that is the basic pay of a worker paid by
+   * results (PhilHealth's monthly basic salary). The closing payroll settles
+   * both on the month's output pay.
+   */
+  outputAlready?: { all: number; basic: number }
   /** The employee's last payroll of the month (last slot or separation): deduct what the month still owes. */
   closes: boolean
   /** First payroll of the month for the employee: under 'first_period' timing the month is deducted here. */
@@ -359,9 +367,11 @@ export function computeStatutory(
   tables: StatutoryTables,
   /** Pag-IBIG's monthly compensation: basic salary plus allowances (default: the basic) */
   pagibigBase = statutoryMonthlyBase,
+  /** PhilHealth's monthly basic salary (default: the basic) */
+  philhealthBase = statutoryMonthlyBase,
 ): StatutoryComputation {
   const sss = computeSss(statutoryMonthlyBase, tables.sss)
-  const ph = computePhilHealth(statutoryMonthlyBase, tables.philhealth)
+  const ph = computePhilHealth(philhealthBase, tables.philhealth)
   const pi = computePagibig(pagibigBase, tables.pagibig)
 
   return {
@@ -481,9 +491,13 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     notes.push('Fixed salary, no timekeeping: the monthly rate pays the period. Leave without pay and days outside the employment are deducted; no overtime, night differential or holiday premium.')
   }
 
+  // a worker paid by results: output pay is the basic pay, so the rate alone
+  // may be below the minimum (the period's pay is checked instead)
+  const byResults = employee.outputPay?.class === 'basic'
+
   // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
   const wageFloor = settings.minimumWageDaily * (employee.apprentice ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
-  if (daily + 0.005 < wageFloor) {
+  if (!byResults && daily + 0.005 < wageFloor) {
     warnings.push(
       `Derived daily rate ₱${daily.toFixed(2)} is below ${employee.apprentice ? '75% of ' : ''}the configured minimum wage ₱${settings.minimumWageDaily.toFixed(2)}.`,
     )
@@ -1021,6 +1035,62 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       ...(notSss(e.payItemType) ? { sss: false } : {}),
     })
   }
+  // Output pay: the outputs an admin accepted, dated in the period. Units at
+  // the same rate add up to one line; a fixed amount is a line of its own.
+  const outputs = employee.outputs ?? []
+  if (outputs.length > 0) {
+    const cls: OutputPayClass = employee.outputPay?.class ?? 'other_supplementary'
+    if (!employee.outputPay) {
+      warnings.push('Output pay has no classification for this employee: paid as other supplementary pay. Set it on Pay & Policy.')
+    }
+    const lines = new Map<string, { label: string; quantity?: number; unitRate?: number; amount: number }>()
+    for (const [i, o] of [...outputs].sort((a, b) => a.date.localeCompare(b.date)).entries()) {
+      const units = o.quantity !== undefined && o.unitRate !== undefined
+      const key = units ? `units|${o.description.trim().toLowerCase()}|${o.unitRate}` : `amount|${i}`
+      const g = lines.get(key)
+      if (g) {
+        g.quantity = round2((g.quantity ?? 0) + (o.quantity ?? 0))
+        g.amount = round2(g.amount + o.amount)
+      } else {
+        lines.set(key, { label: o.description.trim(), quantity: o.quantity, unitRate: o.unitRate, amount: round2(o.amount) })
+      }
+    }
+    for (const g of lines.values()) {
+      const label = g.quantity !== undefined && g.unitRate !== undefined ? `${g.label} (${quantityText(g.quantity)} × ${unitRateText(g.unitRate)})` : g.label
+      earn('output', `Output: ${label}`, g.amount, cls, cls !== 'basic' && employee.outputPay?.thirteenth ? { thirteenthBasis: true } : {})
+    }
+    const total = round2(outputs.reduce((s, o) => s + o.amount, 0))
+    notes.push(
+      `Output pay ₱${plainAmount(total)} (${outputs.length} output/s accepted in the period): ${
+        cls === 'basic'
+          ? 'the basic pay of a worker paid by results, counted toward the 13th month (PD 851 Revised Guidelines: total earnings of a worker paid on piece rate)'
+          : `${OUTPUT_CLASS_TEXT[cls]} on top of the salary, ${employee.outputPay?.thirteenth ? '' : 'not '}counted toward the 13th month under the client's policy`
+      }.`,
+    )
+  }
+  if (byResults && !extrasOnly && settings.minimumWageDaily > 0) {
+    // a worker paid by results earns at least the minimum wage for the
+    // normal working hours of each day paid (the regional wage order; Labor
+    // Code Art. 101)
+    const wagePay = round2(earnings.filter((l) => l.bir === 'basic').reduce((s, l) => s + l.amount, 0))
+    const wageDays = daysWorked + paidLeaveDays
+    const floorPay = round2(wageFloor * wageDays)
+    if (wageDays > 0 && wagePay + 0.005 < floorPay) {
+      warnings.push(
+        `Pay for the period ₱${plainAmount(wagePay)} is below ${employee.apprentice ? '75% of ' : ''}the minimum wage for ${wageDays} day/s worked or on paid leave (₱${plainAmount(floorPay)}): a worker paid by results earns at least the minimum wage for the normal working hours (the regional wage order; Labor Code Art. 101). Pay the difference as a payroll adjustment (Basic) or review the output rates.`,
+      )
+    }
+    if (isMwe && wagePay > round2(settings.minimumWageDaily * wageDays) + 0.005) {
+      warnings.push(
+        `Marked as a minimum wage earner, but pay for the period ₱${plainAmount(wagePay)} is above the minimum wage for ${wageDays} day/s (₱${plainAmount(round2(settings.minimumWageDaily * wageDays))}): only an employee paid the statutory minimum wage is tax-exempt as one. Clear the employee's minimum wage earner setting if this is their usual pay.`,
+      )
+    }
+    if (paidUnworkedHolidays > 0 && !holidayPayExempt) {
+      warnings.push(
+        `${paidUnworkedHolidays} unworked regular holiday/s: a worker paid by results gets holiday pay of at least the average daily earnings of the last 7 working days before the holiday, never less than the minimum wage (Omnibus Rules, Book III, Rule IV, Sec. 8(b)). Check the holiday pay and add any difference as a payroll adjustment (Holiday).`,
+      )
+    }
+  }
   if (earnings.some((l) => l.bir === 'hazard' && l.taxable && isMwe)) {
     notes.push(
       "Hazard pay is taxable for this minimum wage earner: it is exempt only with the DOLE or allied agency's certification of an actual assignment to a hazardous area or station on file (RR 2-98 Sec. 2.78.1(B)(13)).",
@@ -1042,9 +1112,45 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         0,
       ),
   )
-  const stat = computeStatutory(statutoryMonthlyBase, settings, period, tables, round2(statutoryMonthlyBase + allowancesMonthly))
-  if (!extrasOnly && allowancesMonthly > 0 && statutoryMonthlyBase < tables.pagibig.max_fund_salary) {
+  const mc = params.monthContributions
+  const mat = params.maternity
+  const maternityMonth = !extrasOnly && !!mat?.months.some((m) => m.month === mat.thisMonth)
+  // Output pay: Pag-IBIG's monthly compensation counts pay fixed or
+  // ascertained on a task, piece or commission basis (IRR of RA 9679);
+  // PhilHealth's monthly basic salary is the fixed basic rate, without
+  // commissions or bonuses, and for a worker paid by results not less than
+  // the minimum wage on the days-per-year factor (PhilHealth Circular
+  // 2018-0001). Earlier payrolls of the month go by the rate; the month's
+  // closing payroll settles both on the month's output pay.
+  const outputHere = earnings.filter((l) => l.code === 'output')
+  const settlesOutput = !extrasOnly && !!mc?.closes && !maternityMonth
+  const monthOutput = settlesOutput
+    ? round2((mc?.outputAlready?.all ?? 0) + outputHere.reduce((s, l) => s + l.amount, 0))
+    : 0
+  const monthOutputBasic = settlesOutput
+    ? round2((mc?.outputAlready?.basic ?? 0) + outputHere.filter((l) => l.bir === 'basic').reduce((s, l) => s + l.amount, 0))
+    : 0
+  const resultsFloor = byResults && !maternityMonth ? round2((wageFloor * settings.workingDaysDivisor) / 12) : 0
+  const philhealthBase = byResults ? Math.max(round2(statutoryMonthlyBase + monthOutputBasic), resultsFloor) : statutoryMonthlyBase
+  const pagibigBase = round2(statutoryMonthlyBase + allowancesMonthly + monthOutput)
+  const stat = computeStatutory(statutoryMonthlyBase, settings, period, tables, pagibigBase, philhealthBase)
+  if (!extrasOnly && monthOutput > 0) {
+    notes.push(
+      `Pag-IBIG on the month's pay with its output pay ₱${plainAmount(monthOutput)}: ₱${pagibigBase.toLocaleString()} a month${
+        pagibigBase > tables.pagibig.max_fund_salary ? ` (capped at ₱${tables.pagibig.max_fund_salary.toLocaleString()})` : ''
+      }.`,
+    )
+  } else if (!extrasOnly && allowancesMonthly > 0 && statutoryMonthlyBase < tables.pagibig.max_fund_salary) {
     notes.push(`Pag-IBIG on basic salary plus allowances: ₱${round2(statutoryMonthlyBase + allowancesMonthly).toLocaleString()} a month.`)
+  }
+  if (!extrasOnly && byResults && philhealthBase !== statutoryMonthlyBase) {
+    notes.push(
+      `PhilHealth on a monthly basic salary of ₱${philhealthBase.toLocaleString()}: ${
+        philhealthBase === resultsFloor
+          ? `a worker paid by results is not below the minimum wage (₱${plainAmount(wageFloor)} a day × ${settings.workingDaysDivisor} ÷ 12; PhilHealth Circular 2018-0001)`
+          : "the rate and the month's output pay"
+      }${mc && !mc.closes ? "; the month's last payroll settles it on the month's output pay" : ''}.`,
+    )
   }
   // the national government pays a solo parent's or PWD's PhilHealth
   // employee half: nothing deducted, the employer's half as usual, the NG
@@ -1060,8 +1166,6 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // monthly SSS, PhilHealth and Pag-IBIG on the regular monthly pay, with or
   // without pay that month (IRR of RA 11199 Rule 12 Sec. 6(v); PhilHealth
   // Circular 2018-0001 Sec. III; RA 9679)
-  const mat = params.maternity
-  const maternityMonth = !extrasOnly && !!mat?.months.some((m) => m.month === mat.thisMonth)
   // A client DOLE exempted from the salary differential (RA 11210 Sec. 5(c);
   // IRR Rule VI Sec. 5; DOLE DA 01-19) — only for a leave that starts while
   // the exemption is valid
@@ -1079,7 +1183,6 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   if (maternityMonth) {
     notes.push('Maternity leave month: SSS, PhilHealth and Pag-IBIG at the usual monthly amounts on the regular monthly pay.')
   }
-  const mc = params.monthContributions
   const share = (monthlyAmount: number, already: number | undefined) => {
     if (extrasOnly) return 0
     // Payrolls of a month can be finalized out of order (a late special run
@@ -1687,6 +1790,22 @@ function taxAdvanceWarning(advanced: number): string {
 }
 
 /** 1234.5 -> "1,234.50": payslip lines print in PDFs, whose fonts have no peso sign. */
+const OUTPUT_CLASS_TEXT: Record<Exclude<OutputPayClass, 'basic'>, string> = {
+  fees: 'fees (BIR Form 2316: fees)',
+  commission: 'commission (BIR Form 2316: commission)',
+  other_supplementary: 'other supplementary pay (BIR Form 2316: others)',
+}
+
+/** A count of units: whole numbers plain, fractions to 2 decimals. */
+function quantityText(q: number): string {
+  return q.toLocaleString('en-PH', { maximumFractionDigits: 2 })
+}
+
+/** A unit rate: 2 decimals, up to 4 when it has them. */
+function unitRateText(r: number): string {
+  return r.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+}
+
 function plainAmount(v: number): string {
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }

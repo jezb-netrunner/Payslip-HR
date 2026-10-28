@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabase'
 import type {
   Employee,
   EmployeeAllowance,
+  EmployeeOutput,
   EmployeeTaxYear,
   Entity,
   PayrollAdjustment,
@@ -240,6 +241,15 @@ function extrasOnly(e: Employee, run: PayrollRun): boolean {
   return run.run_type === 'final_pay' && !!e.separation_date && e.separation_date < run.period_start
 }
 
+/** Output pay the payslips paid: all of it, and what was a worker's basic pay (paid by results). */
+function outputPaid(slips: Pick<Payslip, 'earnings'>[]): { all: number; basic: number } {
+  const lines = slips.flatMap((p) => p.earnings ?? []).filter((l) => l.code === 'output')
+  return {
+    all: round2(lines.reduce((s, l) => s + Number(l.amount), 0)),
+    basic: round2(lines.filter((l) => l.bir === 'basic').reduce((s, l) => s + Number(l.amount), 0)),
+  }
+}
+
 /** Days before the period read for the workday before an early regular holiday. */
 const HOLIDAY_LOOKBACK_DAYS = 10
 
@@ -438,7 +448,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     }
   }
 
-  const [entries, leaves, allowances, deductions, adjustments, scheduleRows, deductionOverrides, payRates] = await Promise.all([
+  const [entries, leaves, allowances, deductions, adjustments, scheduleRows, deductionOverrides, payRates, outputs] = await Promise.all([
     isThirteenth
       ? Promise.resolve([] as (TimeEntryLite & { employee_id: string })[])
       : fetchAll<TimeEntryLite & { employee_id: string }>((from, to) =>
@@ -503,6 +513,19 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         .order('id')
         .range(from, to),
     ),
+    // the outputs accepted in the period: this payroll pays them
+    isThirteenth
+      ? Promise.resolve([] as EmployeeOutput[])
+      : fetchAll<EmployeeOutput>((from, to) =>
+          supabase
+            .from('employee_outputs')
+            .select('*')
+            .eq('entity_id', entity.id)
+            .gte('output_date', run.period_start)
+            .lte('output_date', run.period_end)
+            .order('id')
+            .range(from, to),
+        ),
   ])
 
   // Year-to-date data. 13th month: basic earned in the payroll year.
@@ -601,6 +624,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   const allowancesBy = groupBy(allowances)
   const deductionsBy = groupBy(deductions)
   const adjustmentsBy = groupBy(adjustments)
+  const outputsBy = groupBy(outputs)
   // each employee's schedule per date: patterns in force and roster changes
   const schedules = resolversFor(employees, scheduleRows)
   // what this payroll deducts instead of the usual installment
@@ -747,6 +771,14 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         hireDate: emp.hire_date,
         separationDate: emp.separation_date,
         fixedSalary: emp.fixed_salary === true,
+        ...(emp.output_pay ? { outputPay: { class: emp.output_pay, thirteenth: emp.output_thirteenth_month !== false } } : {}),
+        outputs: (outputsBy.get(emp.id) ?? []).map((o) => ({
+          id: o.id,
+          date: o.output_date,
+          description: o.description,
+          ...(o.quantity !== null && o.unit_rate !== null ? { quantity: Number(o.quantity), unitRate: Number(o.unit_rate) } : {}),
+          amount: Number(o.amount),
+        })),
         allowances: (allowancesBy.get(emp.id) ?? []).map((a) => ({
           label: a.label,
           amount: Number(a.amount),
@@ -826,6 +858,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       monthContributions: {
         already: sumContributions(empMonth),
         compensationAlready: sssCompensation(empMonth.flatMap((p) => p.earnings ?? []), engineSettings),
+        outputAlready: outputPaid(empMonth),
         // the month's last slot, a separation, or a payroll for earlier
         // days computed after the month's closing payroll (the last slot,
         // or the one holding the separation date) was final: a 13th month
@@ -861,6 +894,13 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : undefined,
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
+    // an output's report is the record of what was accepted
+    const unreported = (outputsBy.get(emp.id) ?? []).filter((o) => !o.report_path).length
+    if (unreported > 0) {
+      slip.trace.warnings.push(
+        `${unreported === 1 ? '1 output' : `${unreported} outputs`} paid by this payroll ${unreported === 1 ? 'has' : 'have'} no output report attached: attach it on the employee's Outputs tab.`,
+      )
+    }
     if (isThirteenth) {
       // 13th month is due by Dec 24 (PD 851), often before the year's last
       // payrolls are final: say what the basic pay counted runs through

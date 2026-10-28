@@ -7,6 +7,7 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
   Clock,
   Copy,
   DoorOpen,
@@ -71,6 +72,7 @@ import {
   ALLOWANCE_CATEGORY_LABELS,
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
+  OUTPUT_PAY_LABELS,
   PAYMENT_METHOD_LABELS,
   SEPARATION_REASON_LABELS,
   LIQUIDATABLE_CATEGORIES,
@@ -82,12 +84,13 @@ import { leaveWorkdays } from '../../lib/leave'
 import { generateCodePart, weakCodeReason } from '../../lib/loginCode'
 import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { ScheduleTab } from './EmployeeSchedule'
+import { OutputsTab } from './OutputsTab'
 import { PayHistoryTab, PayRateModal } from './PayHistoryTab'
 import { currentAndUpcoming, rateText } from '../../lib/payHistory'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
-import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, PayFrequency, PayItemType } from '../../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, OutputPayClass, PayFrequency, PayItemType } from '../../payroll/types'
 import type { PayRateReason } from '../../payroll/payRates'
 import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
 import { philhealthNgProblem } from '../../payroll/philhealth'
@@ -235,6 +238,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
           { key: 'schedule', label: 'Schedule', icon: <CalendarClock /> },
           { key: 'pay', label: 'Pay & Policy', icon: <Wallet /> },
           { key: 'history', label: 'Pay History', icon: <TrendingUp /> },
+          ...(employee.output_pay ? [{ key: 'outputs', label: 'Outputs', icon: <ClipboardCheck /> }] : []),
           { key: 'career', label: 'Career History', icon: <History /> },
           { key: 'login', label: 'Login Code', icon: <KeyRound /> },
           { key: 'bir', label: 'BIR / Tax Year', icon: <Landmark /> },
@@ -249,6 +253,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
         <PayTab employee={employee} entity={entity} rates={rates} allowances={allowances} deductions={deductions} onChanged={load} />
       )}
       {tab === 'history' && <PayHistoryTab employee={employee} entity={entity} rates={rates} onChanged={load} />}
+      {tab === 'outputs' && employee.output_pay && <OutputsTab employee={employee} />}
       {tab === 'career' && <CareerTab employee={employee} rates={rates} events={events} onChanged={load} />}
       {tab === 'login' && <LoginTab employee={employee} entity={entity} account={account} onChanged={load} />}
       {tab === 'bir' && <BirTab employee={employee} />}
@@ -597,6 +602,8 @@ function PayTab({
     is_mwe: employee.is_minimum_wage_earner,
     fixed_salary: employee.fixed_salary === true,
     thirteenth: employee.thirteenth_month_eligible !== false,
+    output_pay: employee.output_pay ?? '',
+    output_thirteenth: employee.output_thirteenth_month !== false,
     hazard_ref: employee.hazard_certification_ref ?? '',
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
@@ -638,6 +645,9 @@ function PayTab({
           fixed_salary: f.fixed_salary,
           // the 13th month policy applies to a fixed salary only
           thirteenth_month_eligible: f.fixed_salary ? f.thirteenth : true,
+          output_pay: f.output_pay || null,
+          // and for output pay, to pay on top of the salary only
+          output_thirteenth_month: f.output_pay && f.output_pay !== 'basic' ? f.output_thirteenth : true,
           hazard_certification_ref: f.hazard_ref.trim(),
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
@@ -818,6 +828,35 @@ function PayTab({
             </>
           ) : (
             <p className="text-xs text-slate-500">A fixed salary without timekeeping needs a monthly rate (Pay History → Change pay rate).</p>
+          )}
+        </div>
+        <div className="mt-4 space-y-2 rounded-lg bg-slate-50 p-3">
+          <Field label="Output pay" hint="Outputs are recorded on the Outputs tab, each once accepted, with its report; the payroll covering an output's date pays it.">
+            <Select value={f.output_pay} onChange={(e) => setF({ ...f, output_pay: e.target.value as OutputPayClass | '' })}>
+              <option value="">Not paid on output</option>
+              {Object.entries(OUTPUT_PAY_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </Select>
+          </Field>
+          {f.output_pay === 'basic' && (
+            <p className="text-xs text-slate-500">
+              A worker paid by results (piece rate, or per deliverable without a salary): output pay is the basic pay. It counts
+              toward the 13th month, PhilHealth is on at least the minimum wage, and each payroll warns when a period pays less
+              than the minimum wage for the days worked. Any pay rate is paid on top.
+            </p>
+          )}
+          {f.output_pay && f.output_pay !== 'basic' && (
+            <>
+              <p className="text-xs text-slate-500">
+                Taxed as supplementary pay; SSS and Pag-IBIG count it, PhilHealth stays on the salary.
+              </p>
+              <Toggle
+                checked={f.output_thirteenth}
+                onChange={(v) => setF({ ...f, output_thirteenth: v })}
+                label="Output pay counts toward the 13th month (company policy)"
+              />
+            </>
           )}
         </div>
         <div className="mt-4 space-y-2 rounded-lg bg-slate-50 p-3">

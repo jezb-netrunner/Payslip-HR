@@ -17,6 +17,8 @@ const TABLES: Record<string, string> = {
   time_entries: 'Time entries',
   payroll_runs: 'Payroll runs',
   payroll_adjustments: 'Payroll adjustments',
+  employee_pay_rates: 'Pay rates',
+  employee_outputs: 'Outputs',
   employee_allowances: 'Allowances',
   recurring_deductions: 'Recurring deductions',
   entities: 'Client settings',

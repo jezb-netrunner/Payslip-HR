@@ -53,6 +53,15 @@ are refused; the Generate button makes random ones.
   the rate pays each period, no attendance docking or premiums; leave
   without pay and days outside the employment are deducted; the 13th month
   is the client's policy for them
+- **Output-based pay** (per employee): admins record each accepted output —
+  units × a rate, or a fixed amount for a deliverable or milestone — with its
+  output report (private storage), and the payroll covering its date pays
+  it. Output pay is either the basic pay of a worker paid by results (13th
+  month counted, PhilHealth on at least the minimum wage, a warning when a
+  period pays below the minimum wage) or fees, commission or other pay on
+  top of the salary (supplementary for withholding; the 13th month is the
+  client's policy). SSS and Pag-IBIG settle on the month's output pay; a
+  finalized payroll locks the outputs it paid
 - **Schedules**: client shift templates (start, end, meal break, flexible
   start, compressed-workweek days of up to 12 hours — DOLE Department
   Advisory 02-04); each employee's weekly pattern is set *from a date on*

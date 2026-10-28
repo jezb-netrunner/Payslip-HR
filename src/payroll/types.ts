@@ -254,6 +254,25 @@ export type AllowanceCategory =
  */
 export type PayItemType = 'christmas_bonus' | 'liquidated_allowance' | 'commission' | 'profit_sharing' | 'fees'
 
+/**
+ * How an employee's output pay is classified: the basic pay of a worker
+ * paid by results (piece rate, or per deliverable without a salary), or pay
+ * on top of the salary: fees, commission or other supplementary pay (BIR
+ * Form 2316 items 47, 45 and 51).
+ */
+export type OutputPayClass = 'basic' | 'fees' | 'commission' | 'other_supplementary'
+
+/** An output an admin accepted, paid by the payroll whose period holds its date. */
+export interface OutputInput {
+  id?: string
+  date: string
+  description: string
+  /** units × the rate; neither for a fixed amount (a deliverable or milestone) */
+  quantity?: number
+  unitRate?: number
+  amount: number
+}
+
 /** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
 export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'
 
@@ -308,6 +327,14 @@ export interface PayrollEmployeeInput {
    * days outside the employment are still deducted.
    */
   fixedSalary?: boolean
+  /**
+   * Output pay: how it is classified, and whether pay on top of the salary
+   * counts toward the 13th month (the client's policy; a worker paid by
+   * results earns the 13th month on all of it).
+   */
+  outputPay?: { class: OutputPayClass; thirteenth: boolean }
+  /** The outputs dated in the period (admin-approved). */
+  outputs?: OutputInput[]
 }
 
 export interface AllowanceInput {

@@ -9,6 +9,7 @@ import type {
   ContributionTiming,
   DeMinimisKind,
   MaternityBenefit,
+  OutputPayClass,
   PayFrequency,
   PayItemType,
   RoundingMode,
@@ -149,6 +150,10 @@ export interface Employee {
   fixed_salary?: boolean
   /** Company policy for a fixed-salary employee: false = no 13th month pay. */
   thirteenth_month_eligible?: boolean
+  /** Output pay: the basic pay of a worker paid by results, or pay on top of the salary (its BIR class); null = none. */
+  output_pay?: OutputPayClass | null
+  /** Company policy: output pay on top of the salary counts toward the 13th month. */
+  output_thirteenth_month?: boolean
   /** DOLE or allied agency certification of a hazardous assignment (an MWE's hazard pay is exempt only with it) */
   hazard_certification_ref?: string
   /**
@@ -203,6 +208,27 @@ export interface EmployeePayRate {
   career_event_id: string | null
   created_by: string | null
   created_at: string
+}
+
+/** An output an admin accepted: the payroll whose period holds its date pays it. */
+export interface EmployeeOutput {
+  id: string
+  employee_id: string
+  entity_id: string
+  output_date: string
+  description: string
+  /** units × the rate (the amount follows); null for a fixed amount */
+  quantity: number | null
+  unit_rate: number | null
+  amount: number
+  accepted_by: string
+  note: string
+  /** the output report in the output-reports bucket */
+  report_path: string | null
+  report_name: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 export interface EmployeeAllowance {
