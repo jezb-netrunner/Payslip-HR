@@ -476,9 +476,11 @@ career events' rates were moved off. Security advisors: the 10 intentional
 WARNs plus `can_manage_output_report` (executable by `authenticated` by
 design: the output-reports storage policies call it as the caller), and
 the leaked-password setting. Performance: INFO only (one new unindexed FK,
-`consultant_declarations.entity_id`, on a tiny table). Until the PR is
-merged and deployed, the live site (main) can't change a pay rate from the
-old Pay tab or a career event (the history guard refuses it): merge soon.
+`consultant_declarations.entity_id`, on a tiny table). PR #8 (this
+branch) was merged at the owner's request on 2026-10-28 (merge commit
+`45a8d5a`); the Pages workflow deploys main, so the old Pay tab's direct
+rate edits (refused by the history guard) were only possible in the few
+minutes between the migrations and that deploy.
 
 **2026-10-26: the seven compliance migrations are live** (owner's
 approval), as `20261026084112 mwe_premium_pay` … `20261026084508
