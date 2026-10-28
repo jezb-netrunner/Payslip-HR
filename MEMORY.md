@@ -441,6 +441,11 @@ list; a filed quarter locks its billings) and the EWT card on Statutory
 Tables. Tests 390, SQL suite 20. `supabase/tests/run.sh` now runs suites
 10–99 (it globbed `1*` only, so suite 20 never ran at first).
 
+**Did (follow-ups):** EWT filing dates a client can change
+(`ewt_due_dates`, in `20261028000400`), shown on Reports → Due dates too;
+the unworked regular holiday of a worker paid by results computed (Sec.
+8(b)) instead of warned about. Tests 395, SQL suite 20.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -1476,8 +1481,10 @@ client policy, defaulting to counted. Pag-IBIG's IRR counts earnings
 "fixed or ascertained on a time, task, piece or commission basis" (partial
 scan only — the weakest source; owner flag). Omnibus Rules Book III Rule IV
 Sec. 8(b): holiday pay of a worker paid by results ≥ average daily earnings
-of the last 7 working days, never below the minimum wage — the engine only
-warns, it doesn't compute it. Why it mattered: a 0-rate output worker had
+of the last 7 working days, never below the minimum wage — computed: the
+rate's pay for the 7 days worked before it plus the outputs dated from the
+first of them to its eve, less what the rate already pays for the holiday
+(the service reads three weeks back, `outputsBefore` / `daysBefore`). Why it mattered: a 0-rate output worker had
 no Pag-IBIG at all and PhilHealth on the ₱10,000 floor.
 
 ### EWT on consultants' fees: verified rules and the decisions behind them (verified 2026-10-28)
@@ -1495,15 +1502,17 @@ billing that takes the client's payments to the payee past the threshold
 (the safe reading of an open question); a billing's month is when it
 became payable or booked or invoiced, whichever first (RR 4-2024); dates on
 weekends are noted, not moved (as on the filing calendar). Not handled:
-the ₱250,000 one-payor exemption (Annex B-2) — over-withholding is
-creditable, under-withholding is the payor's liability; the QAP DAT file
+the ₱250,000 one-payor exemption (RR 11-2018 Annex B-2, confirmed: a payee
+paid under ₱250,000 for the year by one payor) — the year's total is only
+known at year-end, over-withholding is creditable and under-withholding is
+the payor's liability; the QAP DAT file
 (the CSV feeds the BIR alphalist module; its layout is in RMC 15-2025's
 annexes, unread). Owner flags: a CPA should read RR 11-2018 Sec. 2.57.2(A)
 itself; RR 6-2026 (from Oct 16, 2026) makes the consultant's invoice show
 the withheld tax on its own line; the payor's Annex C list of declarations
-(by Jan 31) is medium-confidence. The EWT dates can't take per-year
-overrides: `filing_due_dates.filing` has a live CHECK the MCP can't widen
-(a typed column would be the way). A billing's tax is worked out only when
+(by Jan 31) is medium-confidence. A client changes an EWT date in
+`ewt_due_dates` (its own table: `filing_due_dates.filing` has a live CHECK
+the MCP can't widen). A billing's tax is worked out only when
 its fee or date changes or a declaration, VAT flag or kind of fee re-rates
 the year's unpaid billings (`consultants.rerate` flag) — a payment or a
 note never re-rates what was withheld (code review, 2026-10-28).

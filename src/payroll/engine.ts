@@ -1085,10 +1085,46 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         `Marked as a minimum wage earner, but pay for the period ₱${plainAmount(wagePay)} is above the minimum wage for ${wageDays} day/s (₱${plainAmount(round2(settings.minimumWageDaily * wageDays))}): only an employee paid the statutory minimum wage is tax-exempt as one. Clear the employee's minimum wage earner setting if this is their usual pay.`,
       )
     }
-    if (paidUnworkedHolidays > 0 && !holidayPayExempt) {
-      warnings.push(
-        `${paidUnworkedHolidays} unworked regular holiday/s: a worker paid by results gets holiday pay of at least the average daily earnings of the last 7 working days before the holiday, never less than the minimum wage (Omnibus Rules, Book III, Rule IV, Sec. 8(b)). Check the holiday pay and add any difference as a payroll adjustment (Holiday).`,
+  }
+  // A worker paid by results is paid an unworked regular holiday at least the
+  // average daily earnings of the last 7 actual working days before it, never
+  // less than the minimum wage (Omnibus Rules, Book III, Rule IV, Sec. 8(b)):
+  // those days' pay at the rate plus the output pay dated from the first of
+  // them to the eve of the holiday. What the rate pays for the holiday counts.
+  if (byResults && !extrasOnly && !holidayPayExempt) {
+    const history = [...(params.daysBefore ?? []), ...days]
+    const workedOn = (d: DayComputation) =>
+      fixed ? d.scheduled && d.dayType === 'regular' && !d.onPaidLeave && !d.onUnpaidLeave : d.workedMinutes > 0
+    const outputsAll = [...(employee.outputsBefore ?? []), ...(employee.outputs ?? [])]
+    for (const h of days) {
+      if (!isRegularHolidayType(h.dayType) || (!fixed && h.workedMinutes > 0) || h.leaveCode === MATERNITY_LEAVE_CODE) continue
+      if (!employed(h.date) || holidayPaid.get(h.date) === false) continue
+      const window = history.filter((d) => d.date < h.date && employed(d.date) && workedOn(d)).slice(-7)
+      let ratePay = 0
+      for (const d of window) {
+        const j = segOf(d.date)
+        ratePay += segs[j].payType === 'daily' ? segRates[j].daily * (d.payableMinutes / stdMin) : segRates[j].daily
+      }
+      const from = window[0]?.date
+      const outputPay = from ? outputsAll.filter((o) => o.date >= from && o.date < h.date).reduce((s, o) => s + o.amount, 0) : 0
+      const average = window.length > 0 ? round2((ratePay + outputPay) / window.length) : 0
+      const due = round2(Math.max(average, wageFloor))
+      // what the rate already pays for the holiday: a day's pay, unless a
+      // fixed salary leaves a holiday on a day its divisor doesn't cover
+      const k = segOf(h.date)
+      const byRate = segs[k].payType === 'daily' || builtInFor(h.dayType, settings.workingDaysDivisor) > 0 || !fixed ? round2(segRates[k].daily) : 0
+      const extra = round2(due - byRate)
+      notes.push(
+        `Regular holiday ${shortDate(h.date)}${h.holidayName ? ` (${h.holidayName})` : ''}: a worker paid by results is paid at least the average daily earnings of the last ${window.length} working day/s before it, ₱${plainAmount(average)}, and never less than the minimum wage (Omnibus Rules, Book III, Rule IV, Sec. 8(b))${extra > 0 ? `: ₱${plainAmount(extra)} on top of what the rate pays (₱${plainAmount(byRate)})` : ': the rate pays it'}.`,
       )
+      if (window.length < 7) {
+        warnings.push(
+          `Regular holiday ${shortDate(h.date)}: only ${window.length} working day/s on record in the three weeks before it, so its pay averages ${window.length === 1 ? 'that day' : 'those'}. Record each output on the day it is accepted for the average to be right.`,
+        )
+      }
+      if (extra > 0) {
+        earn('holiday', `Holiday Pay, ${shortDate(h.date)} (paid by results: average of the last ${window.length} working day/s)`, extra, 'holiday')
+      }
     }
   }
   if (earnings.some((l) => l.bir === 'hazard' && l.taxable && isMwe)) {

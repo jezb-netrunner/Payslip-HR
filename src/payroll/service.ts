@@ -252,6 +252,8 @@ function outputPaid(slips: Pick<Payslip, 'earnings'>[]): { all: number; basic: n
 
 /** Days before the period read for the workday before an early regular holiday. */
 const HOLIDAY_LOOKBACK_DAYS = 10
+/** Days before the period read for a worker paid by results: the last 7 working days before an early regular holiday. */
+const RESULTS_LOOKBACK_DAYS = 21
 
 const CONTRIBUTION_COLUMNS =
   'sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_er, pagibig_er, philhealth_ng'
@@ -337,16 +339,19 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   // it, which for a holiday early in the period lies in the days before it
   // (a long weekend, Holy Week): attendance is also read for those days.
   const lookbackStart = addDays(run.period_start, -HOLIDAY_LOOKBACK_DAYS)
+  // a worker paid by results is paid a regular holiday on the average of
+  // the last 7 working days before it: those days' attendance and outputs
+  const resultsLookbackStart = addDays(run.period_start, -RESULTS_LOOKBACK_DAYS)
   const holidays: HolidayLite[] = isThirteenth
     ? []
-    : (await getHolidaysBetween(entity.id, lookbackStart, run.period_end)).map((h) => ({
+    : (await getHolidaysBetween(entity.id, resultsLookbackStart, run.period_end)).map((h) => ({
         holiday_date: h.holiday_date,
         name: h.name,
         kind: h.kind,
       }))
+  const regularHoliday = holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start)
   // only the client's holiday absence rule (off by default) needs those days
-  const looksBack = entity.holiday_absence_rule === true && holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start)
-  const attendanceFrom = looksBack ? lookbackStart : run.period_start
+  const looksBack = entity.holiday_absence_rule === true && regularHoliday
 
   const candidates = employeesForRun(
     run,
@@ -403,6 +408,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     })
   }
   const ids = new Set(employees.map((e) => e.id))
+  const byResultsLooksBack = !isThirteenth && regularHoliday && employees.some((e) => e.output_pay === 'basic')
+  const attendanceFrom = byResultsLooksBack ? resultsLookbackStart : looksBack ? lookbackStart : run.period_start
 
   // A final pay after the last day only carries one-time items and the tax
   // adjustment: flag anyone whose last days were never paid, and pick up
@@ -521,7 +528,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
             .from('employee_outputs')
             .select('*')
             .eq('entity_id', entity.id)
-            .gte('output_date', run.period_start)
+            .gte('output_date', byResultsLooksBack ? resultsLookbackStart : run.period_start)
             .lte('output_date', run.period_end)
             .order('id')
             .range(from, to),
@@ -682,7 +689,24 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         approvedLeaves: leaveList,
       })
     const days = isThirteenth ? [] : attendanceOf(run.period_start, run.period_end)
-    const daysBefore = isThirteenth || !looksBack ? undefined : attendanceOf(lookbackStart, addDays(run.period_start, -1))
+    // the days before the period: the holiday absence rule's workday before,
+    // or a worker paid by results' last 7 working days
+    const resultsHistory = byResultsLooksBack && emp.output_pay === 'basic'
+    const daysBefore =
+      isThirteenth || !(looksBack || resultsHistory)
+        ? undefined
+        : attendanceOf(resultsHistory ? resultsLookbackStart : lookbackStart, addDays(run.period_start, -1))
+    // outputs accepted in the period are paid here; the ones before it only
+    // weigh in a worker paid by results' holiday pay
+    const empOutputs = outputsBy.get(emp.id) ?? []
+    const outputsHere = empOutputs.filter((o) => o.output_date >= run.period_start)
+    const outputInput = (o: EmployeeOutput) => ({
+      id: o.id,
+      date: o.output_date,
+      description: o.description,
+      ...(o.quantity !== null && o.unit_rate !== null ? { quantity: Number(o.quantity), unitRate: Number(o.unit_rate) } : {}),
+      amount: Number(o.amount),
+    })
 
     const empAdjustments = adjustmentsBy.get(emp.id) ?? []
     const empDeductions = deductionsBy.get(emp.id) ?? []
@@ -772,13 +796,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         separationDate: emp.separation_date,
         fixedSalary: emp.fixed_salary === true,
         ...(emp.output_pay ? { outputPay: { class: emp.output_pay, thirteenth: emp.output_thirteenth_month !== false } } : {}),
-        outputs: (outputsBy.get(emp.id) ?? []).map((o) => ({
-          id: o.id,
-          date: o.output_date,
-          description: o.description,
-          ...(o.quantity !== null && o.unit_rate !== null ? { quantity: Number(o.quantity), unitRate: Number(o.unit_rate) } : {}),
-          amount: Number(o.amount),
-        })),
+        outputs: outputsHere.map(outputInput),
+        ...(resultsHistory ? { outputsBefore: empOutputs.filter((o) => o.output_date < run.period_start).map(outputInput) } : {}),
         allowances: (allowancesBy.get(emp.id) ?? []).map((a) => ({
           label: a.label,
           amount: Number(a.amount),
@@ -895,7 +914,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
     // an output's report is the record of what was accepted
-    const unreported = (outputsBy.get(emp.id) ?? []).filter((o) => !o.report_path).length
+    const unreported = outputsHere.filter((o) => !o.report_path).length
     if (unreported > 0) {
       slip.trace.warnings.push(
         `${unreported === 1 ? '1 output' : `${unreported} outputs`} paid by this payroll ${unreported === 1 ? 'has' : 'have'} no output report attached: attach it on the employee's Outputs tab.`,

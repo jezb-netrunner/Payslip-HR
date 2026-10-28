@@ -58,7 +58,9 @@ are refused; the Generate button makes random ones.
   output report (private storage), and the payroll covering its date pays
   it. Output pay is either the basic pay of a worker paid by results (13th
   month counted, PhilHealth on at least the minimum wage, a warning when a
-  period pays below the minimum wage) or fees, commission or other pay on
+  period pays below the minimum wage, an unworked regular holiday paid at
+  the average daily earnings of the last 7 working days, never below the
+  minimum wage) or fees, commission or other pay on
   top of the salary (supplementary for withholding; the 13th month is the
   client's policy). SSS and Pag-IBIG settle on the month's output pay; a
   finalized payroll locks the outputs it paid
@@ -75,7 +77,8 @@ are refused; the Generate button makes random ones.
   BIR tab gives the quarter's 1601-EQ figures with the 0619-E months, the
   Quarterly Alphalist of Payees (CSV), the 2307 figures per payee, the
   filing dates (0619-E by eFPS group, 1601-EQ, 2307, the declarations list,
-  1604-E) and the year's declarations; marking a quarter's 1601-EQ filed
+  1604-E; a client changes one when the BIR extends it, and the Due dates
+  calendar shows them) and the year's declarations; marking a quarter's 1601-EQ filed
   locks its billings. Consultants never appear in the 1601-C, 2316 or 1604-C
 - **Schedules**: client shift templates (start, end, meal break, flexible
   start, compressed-workweek days of up to 12 hours — DOLE Department

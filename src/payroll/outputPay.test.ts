@@ -68,7 +68,11 @@ function sept(over: Partial<Record<string, Partial<DayComputation>>> = {}): DayC
   })
 }
 
-const pay = (employee: PayrollEmployeeInput, outputs: OutputInput[], extra: { days?: DayComputation[]; mc?: MonthContributionsInput; second?: boolean } = {}) =>
+const pay = (
+  employee: PayrollEmployeeInput,
+  outputs: OutputInput[],
+  extra: { days?: DayComputation[]; daysBefore?: DayComputation[]; mc?: MonthContributionsInput; second?: boolean } = {},
+) =>
   computePayslip({
     employee: { ...employee, outputs },
     settings,
@@ -77,8 +81,32 @@ const pay = (employee: PayrollEmployeeInput, outputs: OutputInput[], extra: { da
       : { start: '2026-09-01', end: '2026-09-15', index: 1, count: 2 },
     tables: DEFAULT_TABLES,
     days: extra.days ?? sept(),
+    ...(extra.daysBefore ? { daysBefore: extra.daysBefore } : {}),
     runType: 'regular',
     ...(extra.mc ? { monthContributions: extra.mc } : {}),
+  })
+
+/** Aug 18–31, 2026: every weekday worked. */
+const augustTail = (): DayComputation[] =>
+  eachDate('2026-08-18', '2026-08-31').map((date) => {
+    const dow = new Date(`${date}T00:00:00Z`).getUTCDay()
+    const weekday = dow >= 1 && dow <= 5
+    return {
+      date,
+      dayType: weekday ? 'regular' : 'rest_day',
+      scheduled: weekday,
+      workedMinutes: weekday ? 480 : 0,
+      payableMinutes: weekday ? 480 : 0,
+      expectedMinutes: 480,
+      otMinutes: 0,
+      nightDiffMinutes: 0,
+      ndOtMinutes: 0,
+      lateMinutes: 0,
+      undertimeMinutes: 0,
+      absent: false,
+      onPaidLeave: false,
+      onUnpaidLeave: false,
+    }
   })
 
 const articles: OutputInput[] = [
@@ -165,10 +193,40 @@ describe('a worker paid by results', () => {
     expect(slip.earnings.find((l) => l.code === 'output')?.taxable).toBe(false)
   })
 
-  it('points to the holiday pay rule for an unworked regular holiday', () => {
+  it('pays an unworked regular holiday at the average of the last 7 working days (Omnibus Rules Book III Rule IV Sec. 8(b))', () => {
     const days = sept({ '2026-09-08': { dayType: 'regular_holiday', workedMinutes: 0, payableMinutes: 0, holidayName: 'Test holiday' } })
+    // ₱1,200 of shirts accepted each working day: Aug 28 and 31 before the period, Sep 1–4 and 7 in it
+    const daily = (date: string): OutputInput => ({ id: date, date, description: 'Sewn shirts', quantity: 48, unitRate: 25, amount: 1200 })
+    const inPeriod = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-07'].map(daily)
+    const slip = computePayslip({
+      employee: { ...sewer, outputs: inPeriod, outputsBefore: ['2026-08-27', '2026-08-28', '2026-08-31'].map(daily) },
+      settings,
+      period: { start: '2026-09-01', end: '2026-09-15', index: 1, count: 2 },
+      tables: DEFAULT_TABLES,
+      days,
+      daysBefore: augustTail(),
+      runType: 'regular',
+    })
+    // the window is Aug 28 – Sep 7: 7 working days, ₱8,400 of output (Aug 27 falls before it)
+    const holiday = slip.earnings.find((l) => l.label.startsWith('Holiday Pay, Sep 8'))
+    expect([holiday?.amount, holiday?.bir]).toEqual([1200, 'holiday'])
+    expect(slip.trace.notes.some((n) => n.includes('average daily earnings of the last 7 working day/s before it, ₱1,200.00'))).toBe(true)
+    expect(slip.trace.warnings.some((w) => w.includes('working day/s on record'))).toBe(false)
+  })
+
+  it('never pays a regular holiday below the minimum wage, and says when the record is short', () => {
+    const days = sept({ '2026-09-08': { dayType: 'regular_holiday', workedMinutes: 0, payableMinutes: 0, holidayName: 'Test holiday' } })
+    // nothing accepted before the holiday, and only the period's 5 working days on record
     const slip = pay(sewer, shirts(400), { days })
-    expect(slip.trace.warnings.some((w) => w.includes('Rule IV, Sec. 8(b)'))).toBe(true)
+    expect(slip.earnings.find((l) => l.label.startsWith('Holiday Pay, Sep 8'))?.amount).toBe(695)
+    expect(slip.trace.warnings.some((w) => w.startsWith('Regular holiday Sep 8: only 5 working day/s on record'))).toBe(true)
+  })
+
+  it("counts what a daily rate already pays for the holiday", () => {
+    const days = sept({ '2026-09-08': { dayType: 'regular_holiday', workedMinutes: 0, payableMinutes: 0 } })
+    const slip = pay({ ...sewer, dailyRate: 500 }, [], { days, daysBefore: augustTail() })
+    // average 500 a day (no output): the minimum wage 695 is due, the rate paid 500 of it
+    expect(slip.earnings.find((l) => l.label.startsWith('Holiday Pay, Sep 8'))?.amount).toBe(195)
   })
 
   it('takes PhilHealth on at least the minimum wage, and settles both on the month at its close', () => {

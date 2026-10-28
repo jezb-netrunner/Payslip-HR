@@ -335,6 +335,12 @@ export interface PayrollEmployeeInput {
   outputPay?: { class: OutputPayClass; thirteenth: boolean }
   /** The outputs dated in the period (admin-approved). */
   outputs?: OutputInput[]
+  /**
+   * Outputs dated in the weeks before the period: not paid here, only part
+   * of the average daily earnings behind a worker paid by results' pay for
+   * a regular holiday early in the period.
+   */
+  outputsBefore?: OutputInput[]
 }
 
 export interface AllowanceInput {

@@ -66,4 +66,23 @@ describe('output pay', () => {
     // 1/12 of the year's output pay so far
     expect(th.gross_pay).toBe(1666.67)
   })
+
+  it("pays a regular holiday on the average of the last 7 working days, reading the weeks before the period", async () => {
+    const ent = addEntity({ working_days_divisor: 261, minimum_wage_daily: 695 })
+    const worker = addEmployee(ent, { pay_type: 'daily', daily_rate: 0, monthly_rate: 0, output_pay: 'basic', employee_no: 'P2' })
+    db.t.holidays.push({ id: 'h-sep8', entity_id: null, holiday_date: '2026-09-08', name: 'Test holiday', kind: 'regular' })
+    addAttendance(worker, '2026-08-18', '2026-09-07')
+    addAttendance(worker, '2026-09-09', '2026-09-15')
+    for (const d of ['2026-08-27', '2026-08-28', '2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-07']) {
+      addOutput(worker, d, 'Sewn shirts', 1200, { quantity: 48, rate: 25 })
+    }
+    const run = addRun(ent, { period_start: '2026-09-01', period_end: '2026-09-15', pay_date: '2026-09-15' })
+    await computeRun(run as never, ent as never)
+    const slip = db.t.payslips.find((p) => p.payroll_run_id === run.id)!
+    const lines = slip.earnings.map((l: { label: string; amount: number }) => [l.label, l.amount])
+    // only September's outputs are paid here; August's only weigh in the holiday's average
+    expect(lines).toContainEqual(['Output: Sewn shirts (240 × 25.00)', 6000])
+    // Aug 28 – Sep 7: 7 working days, ₱8,400 of output
+    expect(lines).toContainEqual(['Holiday Pay, Sep 8 (paid by results: average of the last 7 working day/s)', 1200])
+  })
 })
