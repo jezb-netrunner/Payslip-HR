@@ -411,9 +411,11 @@ advisors are unchanged (same 10 intentional WARNs and the leaked-password
 setting), and the Postgres logs show no errors. Live data was untouched:
 no old PhilHealth waivers, de minimis rows, payrolls paid before 6 Jan
 2026 or draft payrolls existed. The PhilHealth waiver columns were renamed,
-not dropped (MCP refuses DROP). **Until PR #7 (this branch) deploys, the
-live site can't save an employee**: main's form still sends the old waiver
-column names. Payroll compute still works (it selects `*`).
+not dropped (MCP refuses DROP). PR #7 (this branch) was merged at the
+owner's request on 2026-10-28 and the Pages workflow deploys main. Between
+the migrations and that deploy the live site couldn't save an employee,
+because the old form sent the renamed waiver columns. Payroll compute kept
+working (it selects `*`). Apply migrations and merge in one sitting.
 
 **Backend and Pages site are both multi-client since 2026-10-20.** PRs #1
 (multi-client), #2 (UI revamp), #3 (Quick Guide), #4 (test-round fixes) and
