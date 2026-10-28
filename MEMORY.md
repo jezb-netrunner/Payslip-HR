@@ -478,9 +478,9 @@ design: the output-reports storage policies call it as the caller), and
 the leaked-password setting. Performance: INFO only (one new unindexed FK,
 `consultant_declarations.entity_id`, on a tiny table). PR #8 (this
 branch) was merged at the owner's request on 2026-10-28 (merge commit
-`45a8d5a`); the Pages workflow deploys main, so the old Pay tab's direct
-rate edits (refused by the history guard) were only possible in the few
-minutes between the migrations and that deploy.
+`45a8d5a`) and deployed by Pages run 11 (green, 11:49 UTC): the old Pay
+tab, whose direct rate edits the history guard refuses, was live only for
+the ~10 minutes after the migrations (11:39–11:42 UTC).
 
 **2026-10-26: the seven compliance migrations are live** (owner's
 approval), as `20261026084112 mwe_premium_pay` … `20261026084508
