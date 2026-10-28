@@ -106,14 +106,17 @@ export function filingCalendar(
     { filing: '1604c', period: yearStart, due: dayOf(year + 1, 1, D.form1604cJanuaryDay.value), basis: D.form1604cJanuaryDay.source, note: '' },
     { filing: '2316_bir', period: yearStart, due: dayOf(year + 1, 2, D.form2316BirFebruaryDay.value), basis: D.form2316BirFebruaryDay.source, note: '' },
   )
-  const holidayOn = new Map(holidays.map((h) => [h.holiday_date, h.name]))
   return rows.map((r) => {
     const o = overrides.find((x) => x.filing === r.filing && x.period === r.period)
     const row = o ? { ...r, due: o.due_date, overridden: true, note: o.note } : r
-    if (!row.due || o) return row
-    const day = new Date(`${row.due}T00:00:00Z`).getUTCDay()
-    const holiday = holidayOn.get(row.due)
-    const why = holiday ? `Falls on ${holiday}` : day === 0 || day === 6 ? `Falls on a ${WEEKDAYS[day]}` : ''
-    return why ? { ...row, note: row.note ? `${row.note}. ${why}` : why } : row
+    return !row.due || o ? row : withDayNote(row, holidays)
   })
+}
+
+/** A due date on a weekend or a holiday keeps its date and says so in its note. */
+export function withDayNote<T extends { due: string; note: string }>(row: T, holidays: { holiday_date: string; name: string }[]): T {
+  const day = new Date(`${row.due}T00:00:00Z`).getUTCDay()
+  const holiday = holidays.find((h) => h.holiday_date === row.due)?.name
+  const why = holiday ? `Falls on ${holiday}` : day === 0 || day === 6 ? `Falls on a ${WEEKDAYS[day]}` : ''
+  return why ? { ...row, note: row.note ? `${row.note}. ${why}` : why } : row
 }

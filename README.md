@@ -41,6 +41,45 @@ are refused; the Generate button makes random ones.
   career history, pay frequency, pay type, payment method (cash / bank /
   e-wallet / check), allowances with BIR classification, recurring deductions
   and loans, union dues, previous-employer and PERA data per tax year
+- **Pay history** (admins only): every rate an employee has had, from a
+  date, with the reason and who approved it, charted with the change from
+  the rate before and the gross pay of each payroll month. Payroll pays each
+  day at the rate in effect that day (a raise from the 10th is prorated); a
+  raise dated ahead starts on its date; payrolls already final that were
+  paid at another rate are flagged. **BIR & Reports → Pay changes** lists a
+  year's changes with the monthly cost
+- **Fixed salary without timekeeping** (per employee, monthly-rated:
+  executives, managers, field staff, consultants on an employee retainer):
+  the rate pays each period, no attendance docking or premiums; leave
+  without pay and days outside the employment are deducted; the 13th month
+  is the client's policy for them
+- **Output-based pay** (per employee): admins record each accepted output —
+  units × a rate, or a fixed amount for a deliverable or milestone — with its
+  output report (private storage), and the payroll covering its date pays
+  it. Output pay is either the basic pay of a worker paid by results (13th
+  month counted, PhilHealth on at least the minimum wage, a warning when a
+  period pays below the minimum wage, an unworked regular holiday paid at
+  the average daily earnings of the last 7 working days, never below the
+  minimum wage) or fees, commission or other pay on
+  top of the salary (supplementary for withholding; the 13th month is the
+  client's policy). SSS and Pag-IBIG settle on the month's output pay; a
+  finalized payroll locks the outputs it paid
+- **Independent consultants** (not employees, kept off payroll — no SSS,
+  PhilHealth, Pag-IBIG, 13th month or leave): per client, the payee's TIN
+  and address, contract and fee (monthly retainer or per deliverable,
+  billed once or twice a month), an employee-or-contractor checklist the
+  client signs off before the first billing (the control test), and the
+  payee's yearly sworn declaration. Each billing is withheld expanded
+  withholding tax by the database from the read-only EWT table
+  (professional and management/technical consultancy fees: individuals 5% /
+  10%, firms 10% / 15%; RR 11-2018 and RR 14-2018), the higher rate also
+  from the billing that takes the year's payments past the threshold. The
+  BIR tab gives the quarter's 1601-EQ figures with the 0619-E months, the
+  Quarterly Alphalist of Payees (CSV), the 2307 figures per payee, the
+  filing dates (0619-E by eFPS group, 1601-EQ, 2307, the declarations list,
+  1604-E; a client changes one when the BIR extends it, and the Due dates
+  calendar shows them) and the year's declarations; marking a quarter's 1601-EQ filed
+  locks its billings. Consultants never appear in the 1601-C, 2316 or 1604-C
 - **Schedules**: client shift templates (start, end, meal break, flexible
   start, compressed-workweek days of up to 12 hours — DOLE Department
   Advisory 02-04); each employee's weekly pattern is set *from a date on*

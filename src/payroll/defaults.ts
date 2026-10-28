@@ -25,6 +25,7 @@ import type {
   SssTableData,
   StatutoryTables,
 } from './types'
+import type { EwtVersion } from './ewt'
 
 export const SSS_2025: SssTableData = {
   rate_ee: 0.05,
@@ -127,4 +128,32 @@ export const DEFAULT_TABLES: StatutoryTables = {
   bir_wht: BIR_WHT_2023,
   bir_annual: BIR_ANNUAL_2023,
   de_minimis: DE_MINIMIS_2026,
+}
+
+// Expanded withholding on professional and consultancy fees (RR 2-98 Sec.
+// 2.57.2 as amended by RR 11-2018 and RR 14-2018; ATCs of BIR Form 1601-EQ
+// and RMO 38-2018). Mirrors ewt_versions 2018-05-01 (migration
+// 20261028114218).
+const INDIVIDUAL = { threshold: 3000000, vat_registered_above: true, no_declaration_above: true }
+const JURIDICAL = { threshold: 720000, vat_registered_above: false, no_declaration_above: true }
+export const DEFAULT_EWT: EwtVersion = {
+  effective_from: '2018-05-01',
+  description: 'Expanded withholding on professional and consultancy fees',
+  legal_basis: 'RR 2-98 Sec. 2.57.2 as amended by RR 11-2018 and RR 14-2018',
+  source_url: 'https://bir-cdn.bir.gov.ph/local/pdf/Digest%20RR%2014-2018.pdf',
+  verified_on: '2026-10-28',
+  data: {
+    fees: {
+      professional: {
+        label: 'Professional fees (lawyers, CPAs, engineers and other licensed professionals)',
+        individual: { ...INDIVIDUAL, within: { rate: 0.05, atc: 'WI010' }, above: { rate: 0.1, atc: 'WI011' } },
+        juridical: { ...JURIDICAL, within: { rate: 0.1, atc: 'WC010' }, above: { rate: 0.15, atc: 'WC011' } },
+      },
+      consultancy: {
+        label: 'Management and technical consultancy fees',
+        individual: { ...INDIVIDUAL, within: { rate: 0.05, atc: 'WI050' }, above: { rate: 0.1, atc: 'WI051' } },
+        juridical: { ...JURIDICAL, within: { rate: 0.1, atc: 'WC050' }, above: { rate: 0.15, atc: 'WC051' } },
+      },
+    },
+  },
 }

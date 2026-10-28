@@ -13,6 +13,7 @@ import { errorMessage } from '../../lib/errors'
 import { fmtDate, money } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { ewtVersionOn, type EwtVersion } from '../../payroll/ewt'
 import { computePagibig, computePhilHealth, computeSss, computeWithholdingTax } from '../../payroll/statutory'
 import type { BirAnnualData, BirWhtData, PagibigData, PhilHealthData, SssTableData, TaxBracket } from '../../payroll/types'
 
@@ -74,18 +75,19 @@ function changesFrom(prev: Pick<StatutoryVersion, 'kind' | 'data'>, v: Pick<Stat
 
 export default function Statutory() {
   const [versions, setVersions] = useState<StatutoryVersion[] | null>(null)
+  const [ewt, setEwt] = useState<EwtVersion[]>([])
   const [loadError, setLoadError] = useState('')
   const [sample, setSample] = useState('25000')
 
   const load = useCallback(async () => {
     setLoadError('')
-    const { data, error } = await supabase
-      .from('statutory_versions')
-      .select('*')
-      .order('kind')
-      .order('effective_from', { ascending: false })
+    const [{ data, error }, ewtRows] = await Promise.all([
+      supabase.from('statutory_versions').select('*').order('kind').order('effective_from', { ascending: false }),
+      supabase.from('ewt_versions').select('*').order('effective_from', { ascending: false }),
+    ])
     if (error) setLoadError(errorMessage(error, 'Could not load the statutory tables'))
     else setVersions((data ?? []) as StatutoryVersion[])
+    setEwt((ewtRows.data ?? []) as EwtVersion[])
   }, [])
 
   useEffect(() => {
@@ -209,8 +211,71 @@ export default function Statutory() {
             </Card>
           )
         })}
+        <EwtCard versions={ewt} today={today} />
       </div>
     </div>
+  )
+}
+
+/** Expanded withholding on consultants' fees (Consultants page): the table in force, read-only like the others. */
+function EwtCard({ versions, today }: { versions: EwtVersion[]; today: string }) {
+  const cur = ewtVersionOn(versions, today)
+  const pct = (r: number) => `${Math.round(r * 10000) / 100}%`
+  return (
+    <Card
+      title={
+        <span>
+          Expanded withholding on consultants' fees {cur && <Badge tone="green">in force since {fmtDate(cur.effective_from)}</Badge>}
+        </span>
+      }
+    >
+      {!cur ? (
+        <p className="text-sm text-rose-600">No version in force — consultants' billings cannot be withheld.</p>
+      ) : (
+        <>
+          <TableShell>
+            <thead>
+              <tr>
+                <Th>Kind of fee</Th>
+                <Th>Payee</Th>
+                <Th className="text-right">Gross income for the year</Th>
+                <Th>Within</Th>
+                <Th>Above, or no sworn declaration</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(cur.data.fees).flatMap(([k, kind]) =>
+                (['individual', 'juridical'] as const).map((p) => {
+                  const r = kind[p]
+                  return (
+                    <tr key={`${k}${p}`}>
+                      <Td>{p === 'individual' ? kind.label : ''}</Td>
+                      <Td>{p === 'individual' ? 'Individual' : 'Juridical'}</Td>
+                      <Td className="text-right tabular-nums">{money(r.threshold)}</Td>
+                      <Td className="whitespace-nowrap">
+                        {pct(r.within.rate)} · {r.within.atc}
+                      </Td>
+                      <Td>
+                        {pct(r.above.rate)} · {r.above.atc}
+                        {r.vat_registered_above ? ' (also when VAT-registered)' : ''}
+                      </Td>
+                    </tr>
+                  )
+                }),
+              )}
+            </tbody>
+          </TableShell>
+          <p className="mt-3 text-xs text-slate-500">
+            {cur.legal_basis}
+            {cur.verified_on ? ` · verified ${fmtDate(cur.verified_on)}` : ''} ·{' '}
+            <a href={cur.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand-600 hover:underline">
+              source <ExternalLink className="size-3" />
+            </a>
+            . The rate above also applies from the billing that takes the client's payments to the payee for the year past the threshold.
+          </p>
+        </>
+      )}
+    </Card>
   )
 }
 

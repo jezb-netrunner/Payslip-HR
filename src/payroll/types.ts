@@ -254,15 +254,49 @@ export type AllowanceCategory =
  */
 export type PayItemType = 'christmas_bonus' | 'liquidated_allowance' | 'commission' | 'profit_sharing' | 'fees'
 
+/**
+ * How an employee's output pay is classified: the basic pay of a worker
+ * paid by results (piece rate, or per deliverable without a salary), or pay
+ * on top of the salary: fees, commission or other supplementary pay (BIR
+ * Form 2316 items 47, 45 and 51).
+ */
+export type OutputPayClass = 'basic' | 'fees' | 'commission' | 'other_supplementary'
+
+/** An output an admin accepted, paid by the payroll whose period holds its date. */
+export interface OutputInput {
+  id?: string
+  date: string
+  description: string
+  /** units × the rate; neither for a fixed amount (a deliverable or milestone) */
+  quantity?: number
+  unitRate?: number
+  amount: number
+}
+
 /** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
 export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'
+
+/** A pay rate from a date inside a pay period (the pay-rate history). */
+export interface RateSegment {
+  /** First date the rate applies. */
+  from: string
+  payType: 'monthly' | 'daily'
+  monthlyRate: number
+  dailyRate: number
+}
 
 export interface PayrollEmployeeInput {
   id: string
   name: string
+  /** The rate in effect at the end of the period. */
   payType: 'monthly' | 'daily'
   monthlyRate: number
   dailyRate: number
+  /**
+   * The rates over the period when one changes inside it: the one in effect
+   * on its first day, then each change (sorted). Each day is paid at its own.
+   */
+  rateSegments?: RateSegment[]
   isMinimumWageEarner: boolean
   /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
   apprentice?: boolean
@@ -286,6 +320,27 @@ export interface PayrollEmployeeInput {
   /** Employment dates: days outside them are no one's missing time (warnings only; pay is unchanged). */
   hireDate?: string
   separationDate?: string | null
+  /**
+   * Fixed salary without timekeeping (a monthly rate): the rate pays the
+   * period; nothing is docked for absence or lateness and no overtime,
+   * night differential or holiday premium is computed. Unpaid leave and
+   * days outside the employment are still deducted.
+   */
+  fixedSalary?: boolean
+  /**
+   * Output pay: how it is classified, and whether pay on top of the salary
+   * counts toward the 13th month (the client's policy; a worker paid by
+   * results earns the 13th month on all of it).
+   */
+  outputPay?: { class: OutputPayClass; thirteenth: boolean }
+  /** The outputs dated in the period (admin-approved). */
+  outputs?: OutputInput[]
+  /**
+   * Outputs dated in the weeks before the period: not paid here, only part
+   * of the average daily earnings behind a worker paid by results' pay for
+   * a regular holiday early in the period.
+   */
+  outputsBefore?: OutputInput[]
 }
 
 export interface AllowanceInput {

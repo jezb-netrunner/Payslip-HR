@@ -445,8 +445,7 @@ function AddEmployeeModal({
         effective_date: f.hire_date,
         position: f.position.trim(),
         department: f.department.trim(),
-        monthly_rate: f.pay_type === 'monthly' ? rate || null : null,
-        daily_rate: f.pay_type === 'daily' ? rate || null : null,
+        // the rate starts the pay history (database), which employees don't see
         details: 'Start of employment',
       })
       toast('success', 'Employee added. Complete their 201 file and issue a login code next.')

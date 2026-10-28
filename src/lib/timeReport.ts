@@ -32,6 +32,7 @@ export type ReportEmployee = Pick<
   | 'work_schedule'
   | 'pay_type'
   | 'days_per_year'
+  | 'fixed_salary'
 >
 
 export type ReportEntry = Pick<TimeEntry, 'employee_id' | 'work_date' | 'clock_in' | 'clock_out' | 'flags'>
@@ -216,7 +217,8 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
       const inProgress = !upcoming && (stillOn || (d.date === p.today && !finished))
       // review_time_correction flags the entries it changes or creates
       const corrected = list.some((e) => e.flags?.includes('corrected'))
-      const absent = d.absent && !upcoming && !inProgress
+      // a fixed salary keeps no attendance: a workday without time is no absence
+      const absent = d.absent && !upcoming && !inProgress && !employee.fixed_salary
       // paid leave counts on workdays; unpaid leave on the days payroll docks it
       const leave =
         d.onPaidLeave && d.dayType === 'regular'

@@ -1,7 +1,8 @@
 // Display labels and BIR codes shared across pages.
 
 import type { EmploymentStatus, PaymentMethod, SeparationReason } from './db'
-import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, PayItemType, RoundingMode } from '../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, OutputPayClass, PayFrequency, PayItemType, RoundingMode } from '../payroll/types'
+import type { PayRateReason } from '../payroll/payRates'
 
 export const FREQUENCY_LABELS: Record<PayFrequency, string> = {
   weekly: 'Weekly',
@@ -149,6 +150,32 @@ export const RUN_TYPE_LABELS: Record<string, string> = {
   thirteenth_month: '13th month pay',
   special: 'Special / off-cycle',
   final_pay: 'Final pay',
+}
+
+export const PAY_RATE_REASON_LABELS: Record<PayRateReason, string> = {
+  hired: 'Hired',
+  regularized: 'Regularized',
+  merit_increase: 'Merit increase',
+  promotion: 'Promotion',
+  wage_order: 'Wage order',
+  adjustment: 'Salary adjustment',
+  correction: 'Correction of an earlier entry',
+}
+
+/** How output pay is paid and classified (Pay & Policy). */
+export const OUTPUT_PAY_LABELS: Record<OutputPayClass, string> = {
+  basic: 'Paid by results: output pay is the basic pay',
+  fees: 'Fees, on top of the salary',
+  commission: 'Commission, on top of the salary',
+  other_supplementary: 'Other pay, on top of the salary',
+}
+
+/** What a payroll pays an output as (short). */
+export const OUTPUT_PAY_SHORT_LABELS: Record<OutputPayClass, string> = {
+  basic: 'basic pay (paid by results)',
+  fees: 'fees on top of the salary',
+  commission: 'commission on top of the salary',
+  other_supplementary: 'other pay on top of the salary',
 }
 
 /** Allowance categories that can be a reimbursement subject to liquidation (not SSS compensation). */

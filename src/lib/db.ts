@@ -1,6 +1,7 @@
 // Lightweight row types mirroring the Supabase schema.
 // Keep in sync with supabase migrations (source of truth).
 
+import type { PayRateReason } from '../payroll/payRates'
 import type {
   AllowanceBasis,
   AllowanceCategory,
@@ -8,6 +9,7 @@ import type {
   ContributionTiming,
   DeMinimisKind,
   MaternityBenefit,
+  OutputPayClass,
   PayFrequency,
   PayItemType,
   RoundingMode,
@@ -144,6 +146,14 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
+  /** Fixed salary without timekeeping (monthly-rated): no time in/out, no docking for absence or lateness, no premiums. */
+  fixed_salary?: boolean
+  /** Company policy for a fixed-salary employee: false = no 13th month pay. */
+  thirteenth_month_eligible?: boolean
+  /** Output pay: the basic pay of a worker paid by results, or pay on top of the salary (its BIR class); null = none. */
+  output_pay?: OutputPayClass | null
+  /** Company policy: output pay on top of the salary counts toward the 13th month. */
+  output_thirteenth_month?: boolean
   /** DOLE or allied agency certification of a hazardous assignment (an MWE's hazard pay is exempt only with it) */
   hazard_certification_ref?: string
   /**
@@ -182,6 +192,121 @@ export interface CareerEvent {
   daily_rate: number | null
   details: string
   created_at: string
+}
+
+/** A rate in the employee's pay history (admins only), in effect from `effective_from`. */
+export interface EmployeePayRate {
+  id: string
+  employee_id: string
+  entity_id: string
+  effective_from: string
+  pay_type: 'monthly' | 'daily'
+  rate: number
+  reason: PayRateReason
+  approved_by: string
+  note: string
+  career_event_id: string | null
+  created_by: string | null
+  created_at: string
+}
+
+/** An output an admin accepted: the payroll whose period holds its date pays it. */
+export interface EmployeeOutput {
+  id: string
+  employee_id: string
+  entity_id: string
+  output_date: string
+  description: string
+  /** units × the rate (the amount follows); null for a fixed amount */
+  quantity: number | null
+  unit_rate: number | null
+  amount: number
+  accepted_by: string
+  note: string
+  /** the output report in the output-reports bucket */
+  report_path: string | null
+  report_name: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** An independent consultant (not an employee): kept off payroll, paid on billings with EWT withheld. */
+export interface Consultant {
+  id: string
+  entity_id: string
+  payee_type: 'individual' | 'juridical'
+  last_name: string
+  first_name: string
+  middle_name: string
+  registered_name: string
+  tin: string
+  tin_branch_code: string
+  address: string
+  zip_code: string
+  vat_registered: boolean
+  /** the nature of the service (the BIR forms' nature of income payment) */
+  service: string
+  /** the EWT table's kind of fee: professional, consultancy */
+  fee_kind: string
+  fee_basis: 'retainer' | 'per_deliverable'
+  /** a retainer's monthly fee, or a deliverable's usual fee */
+  fee_amount: number | null
+  billing: 'monthly' | 'semi_monthly' | 'per_deliverable'
+  contract_ref: string
+  contract_start: string
+  contract_end: string | null
+  /** the employee-or-contractor checklist: answers by question key */
+  checklist: Record<string, boolean>
+  checklist_note: string
+  signed_off_by: string | null
+  signed_off_at: string | null
+  active: boolean
+  notes: string
+  created_at: string
+}
+
+/** The payee's sworn declaration of gross income for a year. */
+export interface ConsultantDeclaration {
+  id: string
+  consultant_id: string
+  entity_id: string
+  year: number
+  over_threshold: boolean
+  submitted_on: string
+  note: string
+}
+
+/** A consultant's billing: EWT withheld at the rate the database set. */
+export interface ConsultantBilling {
+  id: string
+  consultant_id: string
+  entity_id: string
+  invoice_no: string
+  /** when the fee became payable: its month and quarter carry the withholding */
+  billed_on: string
+  service_from: string | null
+  service_to: string | null
+  description: string
+  gross_amount: number
+  vat_amount: number
+  atc: string
+  ewt_rate: number
+  ewt_amount: number
+  net_amount: number
+  paid_on: string | null
+  payment_ref: string
+  note: string
+  created_at: string
+}
+
+/** A quarter whose BIR 1601-EQ was filed: its billings are locked. */
+export interface EwtQuarterFiling {
+  id: string
+  entity_id: string
+  quarter: string
+  filed_on: string
+  reference: string
 }
 
 export interface EmployeeAllowance {
