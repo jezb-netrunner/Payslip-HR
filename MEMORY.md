@@ -1501,7 +1501,12 @@ creditable, under-withholding is the payor's liability; the QAP DAT file
 annexes, unread). Owner flags: a CPA should read RR 11-2018 Sec. 2.57.2(A)
 itself; RR 6-2026 (from Oct 16, 2026) makes the consultant's invoice show
 the withheld tax on its own line; the payor's Annex C list of declarations
-(by Jan 31) is medium-confidence.
+(by Jan 31) is medium-confidence. The EWT dates can't take per-year
+overrides: `filing_due_dates.filing` has a live CHECK the MCP can't widen
+(a typed column would be the way). A billing's tax is worked out only when
+its fee or date changes or a declaration, VAT flag or kind of fee re-rates
+the year's unpaid billings (`consultants.rerate` flag) — a payment or a
+note never re-rates what was withheld (code review, 2026-10-28).
 
 ### NOT VALID doesn't grandfather a row: fix old rows in the migration (correction)
 
