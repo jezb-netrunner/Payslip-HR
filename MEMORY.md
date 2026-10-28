@@ -447,7 +447,7 @@ the unworked regular holiday of a worker paid by results computed (Sec.
 8(b)) instead of warned about. Tests 395, SQL suite 20.
 
 **Did (review, walkthrough, live):** a high-effort review of the branch
-found 10 items, 8 fixed: mid-period monthly→daily segments, deduction
+found 10 items, 9 fixed: mid-period monthly→daily segments, deduction
 labels counting daily days, the holiday absence rule docking a fixed
 salary that keeps no time, career events recorded without their rate
 (now refused up front or removed when the rate fails), the toggle label,
