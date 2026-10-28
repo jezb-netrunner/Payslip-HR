@@ -15,6 +15,7 @@ const TABLES = [
   'entities', 'employees', 'payroll_runs', 'payslips', 'time_entries', 'leave_requests', 'leave_types',
   'employee_allowances', 'recurring_deductions', 'payroll_adjustments', 'employee_tax_years',
   'statutory_versions', 'holidays', 'employee_schedules', 'schedule_overrides', 'payroll_deduction_overrides',
+  'legal_parameters',
 ]
 
 export const db: { t: Record<string, Row[]>; seq: number } = { t: {}, seq: 0 }
@@ -22,9 +23,11 @@ export const db: { t: Record<string, Row[]>; seq: number } = { t: {}, seq: 0 }
 export function resetDb() {
   db.seq = 0
   db.t = Object.fromEntries(TABLES.map((n) => [n, []]))
-  for (const [kind, data] of Object.entries(DEFAULT_TABLES)) {
+  const { de_minimis, ...versions } = DEFAULT_TABLES
+  for (const [kind, data] of Object.entries(versions)) {
     db.t.statutory_versions.push({ id: newId(), kind, effective_from: '2000-01-01', data })
   }
+  db.t.legal_parameters.push({ id: newId(), key: 'de_minimis', effective_from: '2026-01-06', data: de_minimis })
 }
 
 export function newId(): string {

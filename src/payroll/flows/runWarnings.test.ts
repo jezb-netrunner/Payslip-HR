@@ -37,6 +37,28 @@ describe('run-level warnings', () => {
     expect(visibleWarnings(res, fp.id).some((w) => w.includes('only paid through 2026-10-15'))).toBe(true)
   })
 
+  it('final pay counts a 13th month of the separation month: no false SSS over-deduction', async () => {
+    const ent = addEntity()
+    const emp = addEmployee(ent, { separation_date: '2026-12-15', separation_reason: 'resignation' })
+    addAttendance(emp, '2026-11-01', '2026-12-15')
+    for (const [start, end, pay] of [['2026-11-01', '2026-11-15', '2026-11-20'], ['2026-11-16', '2026-11-30', '2026-12-05']]) {
+      const r = addRun(ent, { period_start: start, period_end: end, pay_date: pay })
+      await computeRun(r as never, ent as never)
+      finalize(r.id)
+    }
+    const t = addRun(ent, { run_type: 'thirteenth_month', period_start: '2026-01-01', period_end: '2026-12-31', pay_date: '2026-12-10', employee_ids: [emp.id] })
+    await computeRun(t as never, ent as never)
+    finalize(t.id)
+    // the payroll holding the last day settles December's SSS on pay plus the 13th month
+    const last = addRun(ent, { period_start: '2026-12-01', period_end: '2026-12-15', pay_date: '2026-12-20' })
+    await computeRun(last as never, ent as never)
+    finalize(last.id)
+    const fp = addRun(ent, { run_type: 'final_pay', period_start: '2026-12-16', period_end: '2026-12-31', pay_date: '2026-12-23', employee_ids: [emp.id] })
+    db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: fp.id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'SIL conversion', amount: 2000, category: 'other_taxable' })
+    const res = await computeRun(fp as never, ent as never)
+    expect(visibleWarnings(res, fp.id).filter((w) => w.includes('contributions are short') || w.includes('over-deducted'))).toEqual([])
+  })
+
   it("left-out employee is reported and their adjustment blocks finalize", async () => {
     const ent = addEntity()
     const a = addEmployee(ent, { first_name: 'Ana', separation_date: '2026-10-20', separation_reason: 'resignation' })

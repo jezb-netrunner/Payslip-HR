@@ -21,6 +21,8 @@ export interface AnnualPayslipFact {
    *  when compensation is paid, so this — not the payroll month — decides
    *  the tax year and the December / January–November split. */
   payMonth: string
+  /** The pay date (the 2316 of a separated employee is dated the last one). */
+  payDate?: string
   isMwe: boolean
   earnings: { amount: number; bir?: BirBucket; taxable?: boolean }[]
   /** SSS (incl. MPF) + PhilHealth + Pag-IBIG employee shares. */
@@ -83,8 +85,14 @@ export interface AnnualSummary {
   taxable13thOtherBenefits: number
   taxableHazard: number
   taxableOvertime: number
-  /** Holiday/premium pay and night differential of non-MWEs. */
+  /** Holiday/premium pay and night differential of non-MWEs; other taxable supplementary pay. */
   taxableOtherSupplementary: number
+  /** An MWE's rest-day and special-day premiums (2316 item 51, "Premium pay (MWE)"). */
+  taxablePremiumMwe: number
+  /** Commissions, profit sharing, fees (2316 items 45–47). */
+  taxableCommission: number
+  taxableProfitSharing: number
+  taxableFees: number
   totalTaxablePresent: number
   // ---- previous employer ----
   prevGross: number
@@ -143,7 +151,8 @@ export function summarizeYear(
   const b = {
     mweBasic: 0, mweHoliday: 0, mweOvertime: 0, mweNightDiff: 0, mweHazard: 0, mweCola: 0,
     nonBasic: 0, holiday: 0, overtime: 0, nightDiff: 0, hazard: 0, cola: 0,
-    representation: 0, transportation: 0, housing: 0, otherTaxable: 0,
+    representation: 0, transportation: 0, housing: 0, otherTaxable: 0, otherSupplementary: 0, premiumMwe: 0,
+    commission: 0, profitSharing: 0, fees: 0,
     thirteenthOb: 0, deMinimis: 0, otherNonTaxable: 0,
     contribMwe: 0, contribNon: 0,
   }
@@ -156,7 +165,9 @@ export function summarizeYear(
     for (const l of f.earnings) {
       gross += l.amount
       const bucket: BirBucket = l.bir ?? (l.taxable ? 'other_taxable' : 'other_non_taxable')
-      if (f.isMwe && MWE_EXEMPT_BUCKETS.includes(bucket)) {
+      // an MWE's pay in these buckets is exempt unless the line says
+      // otherwise (hazard pay without the hazardous-assignment certification)
+      if (f.isMwe && MWE_EXEMPT_BUCKETS.includes(bucket) && l.taxable !== true) {
         if (bucket === 'basic') b.mweBasic += l.amount
         else if (bucket === 'holiday') b.mweHoliday += l.amount
         else if (bucket === 'overtime') b.mweOvertime += l.amount
@@ -175,7 +186,15 @@ export function summarizeYear(
         case 'representation': b.representation += l.amount; break
         case 'transportation': b.transportation += l.amount; break
         case 'housing': b.housing += l.amount; break
+        case 'premium':
+          if (f.isMwe) b.premiumMwe += l.amount
+          else b.otherSupplementary += l.amount
+          break
         case 'other_taxable': b.otherTaxable += l.amount; break
+        case 'other_supplementary': b.otherSupplementary += l.amount; break
+        case 'commission': b.commission += l.amount; break
+        case 'profit_sharing': b.profitSharing += l.amount; break
+        case 'fees': b.fees += l.amount; break
         case 'thirteenth':
         case 'other_benefits': b.thirteenthOb += l.amount; break
         case 'de_minimis': b.deMinimis += l.amount; break
@@ -216,10 +235,11 @@ export function summarizeYear(
 
   const taxableBasic = b.nonBasic - nonCarve
   const taxableOtherRegular = b.otherTaxable - spill
-  const taxableOtherSupplementary = b.holiday + b.nightDiff
+  const taxableOtherSupplementary = b.holiday + b.nightDiff + b.otherSupplementary
   const totalTaxablePresent =
     taxableBasic + b.representation + b.transportation + b.cola + b.housing +
-    taxableOtherRegular + taxable13 + b.hazard + b.overtime + taxableOtherSupplementary
+    taxableOtherRegular + b.commission + b.profitSharing + b.fees + taxable13 + b.hazard + b.overtime +
+    taxableOtherSupplementary + b.premiumMwe
 
   const prevNonTaxable =
     prior.mweExempt + prior.thirteenthOtherBenefitsExempt + prior.deMinimis +
@@ -252,6 +272,10 @@ export function summarizeYear(
     taxableHazard: round2(b.hazard),
     taxableOvertime: round2(b.overtime),
     taxableOtherSupplementary: round2(taxableOtherSupplementary),
+    taxablePremiumMwe: round2(b.premiumMwe),
+    taxableCommission: round2(b.commission),
+    taxableProfitSharing: round2(b.profitSharing),
+    taxableFees: round2(b.fees),
     totalTaxablePresent: round2(totalTaxablePresent),
     prevGross: round2(prevNonTaxable + prevTaxable),
     prevNonTaxable: round2(prevNonTaxable),

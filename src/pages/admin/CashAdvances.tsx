@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Check, Download, FileSignature, HandCoins, Hourglass, ListChecks, Pause, Pencil, Play, Plus, Printer, Trash2, Wallet, X } from 'lucide-react'
+import { Check, Download, FileSignature, HandCoins, Hourglass, Landmark, ListChecks, Pause, Pencil, Play, Plus, Printer, Trash2, Wallet, X } from 'lucide-react'
 import {
   Avatar,
   Badge,
@@ -226,10 +226,13 @@ function Advances({ entity }: { entity: Entity }) {
           { key: 'outstanding', label: 'Outstanding', icon: <Wallet /> },
           { key: 'requests', label: 'Requests', icon: <Hourglass />, count: pending.length },
           { key: 'paid', label: 'Fully paid', icon: <ListChecks /> },
+          { key: 'payroll', label: 'Advanced in payroll', icon: <Landmark /> },
         ]}
         active={tab}
         onChange={setTab}
       />
+
+      {tab === 'payroll' && <PayrollReceivables entity={entity} employeeId={employeeFilter} onRecord={(employeeId) => setRecording({ employeeId })} />}
 
       {tab === 'outstanding' &&
         (outstanding.length === 0 ? (
@@ -864,5 +867,93 @@ function AdvanceDetailModal({
         )}
       </div>
     </Modal>
+  )
+}
+
+/** What a payroll line advanced for the employee, by its code. */
+const PAYROLL_ADVANCE_CODES: Record<string, string> = {
+  tax_advance: 'Tax advanced by employer',
+  ee_collect: 'Employee share to collect (maternity leave month)',
+}
+
+type ReceivableSlip = Pick<Payslip, 'id' | 'employee_id' | 'pay_date' | 'deductions' | 'employee_snapshot'>
+
+/**
+ * Amounts the employer paid for an employee inside a finalized payroll — the
+ * year-end tax shortfall the last pay could not cover (RR 2-98 Sec.
+ * 2.79(B)(5)(b)), and the contributions of maternity leave months at a client
+ * exempt from the salary differential (O3): receivables to collect, outside
+ * payroll or as an advance.
+ */
+function PayrollReceivables({ entity, employeeId, onRecord }: { entity: Entity; employeeId: string | null; onRecord: (employeeId: string) => void }) {
+  const [slips, setSlips] = useState<ReceivableSlip[] | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    Promise.all(
+      Object.keys(PAYROLL_ADVANCE_CODES).map((code) =>
+        fetchAll<ReceivableSlip>((from, to) =>
+          supabase
+            .from('payslips')
+            .select('id, employee_id, pay_date, deductions, employee_snapshot, payroll_runs!inner(status)')
+            .eq('entity_id', entity.id)
+            .in('payroll_runs.status', ['finalized', 'paid'])
+            // a jsonb containment filter takes the JSON text (an array would be sent as a Postgres array)
+            .contains('deductions', JSON.stringify([{ code }]))
+            .order('pay_date', { ascending: false })
+            .order('id')
+            .range(from, to),
+        ),
+      ),
+    )
+      .then((lists) => {
+        if (!cancelled) setSlips([...new Map(lists.flat().map((p) => [p.id, p])).values()])
+      })
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err, 'Failed to load'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [entity.id])
+  if (error) return <Card><p className="text-sm text-rose-600">{error}</p></Card>
+  if (!slips) return <Spinner />
+  const rows = slips
+    .filter((p) => !employeeId || p.employee_id === employeeId)
+    .flatMap((p) =>
+      p.deductions
+        .filter((l) => PAYROLL_ADVANCE_CODES[l.code])
+        .map((l) => ({ slip: p, what: PAYROLL_ADVANCE_CODES[l.code], amount: -Number(l.amount) })),
+    )
+  if (rows.length === 0) {
+    return (
+      <Card>
+        <EmptyState title="Nothing advanced in payroll" sub="When a year-end tax shortfall is more than the last pay can bear, or a maternity leave month's employee contributions can't be deducted, the employer pays them and they show here as receivables." />
+      </Card>
+    )
+  }
+  return (
+    <Card>
+      <div className="divide-y divide-slate-100">
+        {rows.map((r, i) => (
+          <div key={`${r.slip.id}-${i}`} className="flex flex-wrap items-center justify-between gap-3 py-2.5 text-sm">
+            <div>
+              <p className="font-semibold text-ink-900">{String((r.slip.employee_snapshot as Record<string, unknown>).name ?? '')}</p>
+              <p className="text-xs text-slate-500">{r.what} · payroll paid {r.slip.pay_date ? fmtDate(r.slip.pay_date) : '—'}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-semibold">{money(r.amount)}</span>
+              <Button variant="secondary" onClick={() => onRecord(r.slip.employee_id)}>
+                <Plus className="size-4" /> Record as advance
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-400">
+        The employer paid these with the month's remittance; the employee owes them back. Collect them outside payroll, or record a
+        cash advance (with the employee's signed authorization) to deduct them from later payrolls.
+      </p>
+    </Card>
   )
 }

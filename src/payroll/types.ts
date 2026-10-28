@@ -58,12 +58,38 @@ export interface BirAnnualData {
   other_benefits_exemption_cap: number
 }
 
+/** The de minimis benefits (RR 2-98 Sec. 2.78.1(A)(3) as amended): the list is exclusive. */
+export type DeMinimisKind =
+  | 'monetized_vl'
+  | 'medical_dependents'
+  | 'rice'
+  | 'uniform'
+  | 'medical_assistance'
+  | 'laundry'
+  | 'achievement_award'
+  | 'christmas_gift'
+  | 'meal_ot'
+  | 'cba_productivity'
+
+export interface DeMinimisCeiling {
+  /** pesos, or days (monetized leave), or a share of the regional minimum wage (overtime meals) */
+  limit: number
+  per: 'month' | 'semester' | 'year' | 'days_year' | 'ot_day_of_minimum_wage'
+}
+
+/** De minimis ceilings in force (legal_parameters 'de_minimis'). */
+export interface DeMinimisData {
+  ceilings: Record<DeMinimisKind, DeMinimisCeiling>
+}
+
 export interface StatutoryTables {
   sss: SssTableData
   philhealth: PhilHealthData
   pagibig: PagibigData
   bir_wht: BirWhtData
   bir_annual: BirAnnualData
+  /** by pay date; missing = no ceilings in force (de minimis benefits are then taxable) */
+  de_minimis?: DeMinimisData
 }
 
 // ---------- attendance ----------
@@ -190,7 +216,8 @@ export type RoundingMode = 'none' | 'round_up' | 'carry_forward'
  */
 export type BirBucket =
   | 'basic' //             basic salary / SMW, net of absence, tardiness, undertime lines
-  | 'holiday' //           holiday, special-day and rest-day premium pay
+  | 'holiday' //           holiday, special-day and rest-day premium pay (an MWE's: holiday pay only)
+  | 'premium' //           an MWE's rest-day and special-day premiums: taxable (2316 item 51)
   | 'overtime'
   | 'night_diff'
   | 'hazard'
@@ -202,6 +229,10 @@ export type BirBucket =
   | 'cola'
   | 'housing'
   | 'other_taxable'
+  | 'commission' //        supplementary: commissions (2316 item 45)
+  | 'profit_sharing' //    supplementary: profit sharing (item 46)
+  | 'fees' //              supplementary: fees, directors' fees included (item 47)
+  | 'other_supplementary' // other taxable supplementary pay: pay above a de minimis ceiling, leave converted to cash (2316 item 51)
   | 'other_non_taxable'
 
 export type AllowanceCategory =
@@ -214,6 +245,14 @@ export type AllowanceCategory =
   | 'housing'
   | 'other_taxable'
   | 'other_non_taxable'
+
+/**
+ * Pay-item types that refine a classification: a bonus typed as the
+ * Christmas bonus and an allowance subject to liquidation (a reimbursement)
+ * are not SSS compensation (RA 11199 Sec. 8(f)); commissions, profit
+ * sharing and fees are taxable supplementary pay with their own 2316 items.
+ */
+export type PayItemType = 'christmas_bonus' | 'liquidated_allowance' | 'commission' | 'profit_sharing' | 'fees'
 
 /** monthly: split over the month's pay periods; per_period: every payroll; per_day: per paid day. */
 export type AllowanceBasis = 'monthly' | 'per_period' | 'per_day'
@@ -228,16 +267,22 @@ export interface PayrollEmployeeInput {
   /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
   apprentice?: boolean
   /**
-   * The national government pays the PhilHealth employee share for this
-   * period: employed PWDs (RA 11228) and solo parents (RA 11861, PhilHealth
-   * Circular 2026-0015). The employer share is unchanged.
+   * The national government pays the PhilHealth employee half this payroll
+   * month (solo parents, PWDs — PhilHealth Circulars 2026-0015, 2026-0017):
+   * nothing is deducted, the employer pays its usual half, and the NG half
+   * is shown, neither deducted nor remitted.
    */
-  philhealthEeWaiver?: 'pwd' | 'solo_parent'
+  philhealthNg?: 'pwd' | 'solo_parent'
   schedule: WorkSchedule
   allowances: AllowanceInput[]
   extraDeductions: ExtraDeductionInput[]
   /** One-time earnings for this run (payroll adjustments). */
   oneTimeEarnings?: OneTimeEarningInput[]
+  /**
+   * DOLE or allied agency certification of an actual assignment to a
+   * hazardous area or station: without it, an MWE's hazard pay is taxable.
+   */
+  hazardCertificationRef?: string
   /** Employment dates: days outside them are no one's missing time (warnings only; pay is unchanged). */
   hireDate?: string
   separationDate?: string | null
@@ -248,6 +293,9 @@ export interface AllowanceInput {
   amount: number
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** which de minimis benefit (category de_minimis): none = not on the list, taxable */
+  deMinimisKind?: DeMinimisKind
+  payItemType?: PayItemType
 }
 
 /**
@@ -263,6 +311,11 @@ export interface OneTimeEarningInput {
   amount: number
   category: BirBucket
   benefit?: MaternityBenefit
+  /** which de minimis benefit (category de_minimis) */
+  deMinimisKind?: DeMinimisKind
+  /** unused leave converted to cash: the days converted */
+  leaveDays?: number
+  payItemType?: PayItemType
 }
 
 export interface ExtraDeductionInput {
@@ -293,6 +346,23 @@ export interface PayrollSettingsInput {
   contributionTiming: ContributionTiming
   payFrequency: PayFrequency
   minimumWageDaily: number
+  /** An MWE's extra 30% for a regular holiday worked on the rest day is taxable (client setting, default true). */
+  mweRhRestdayPremiumTaxable?: boolean
+  /** Paid vacation leave days the client grants a year (5 or more: outside SIL, Labor Code Art. 95(b)). */
+  paidVlDaysPerYear?: number
+  /** A SIL-only client's leave converted to cash is taxable (default true, O7). */
+  silConversionTaxable?: boolean
+  /** The 13th month pay is SSS compensation of its month (client setting, default true, O2). */
+  sssInclude13thMonth?: boolean
+  /** The client's DOLE exemption from the maternity salary differential, when it claims one. */
+  maternityDifferentialExemption?: { ref: string; validUntil: string }
+  /**
+   * No regular holiday pay after unpaid absence on the workday before a
+   * holiday not worked (client setting, default off: the holiday is paid, O8).
+   */
+  holidayAbsenceRule?: boolean
+  /** A retail or service establishment regularly employing less than 10 workers: no holiday pay (Labor Code Art. 94). */
+  holidayPayExempt?: boolean
 }
 
 export interface PeriodInput {
@@ -322,7 +392,21 @@ export interface PayLine {
   bir?: BirBucket
   hours?: number
   meta?: string
-  /** Earnings only: counts toward 13th month pay although not basic pay (the maternity salary differential). */
+  /** Earnings only: the de minimis benefit the line is (its ceiling applies). */
+  dm?: DeMinimisKind
+  /** Earnings only: days of leave converted to cash this line pays. */
+  leaveDays?: number
+  /** Earnings only: false = not SSS compensation (Christmas bonus, allowance subject to liquidation, maternity pay). */
+  sss?: boolean
+  /** Earnings only: the RA 11210 maternity pay this line is. */
+  benefit?: MaternityBenefit
+  /** Deductions only: the maternity leave months a payout's contribution deduction covers. */
+  covers?: { month: string; amount: number }[]
+  /**
+   * Earnings only: true counts toward 13th month pay although not basic pay
+   * (the maternity salary differential); false leaves basic pay out of it
+   * (an MWE's rest-day wage, paid on top of the monthly rate).
+   */
   thirteenthBasis?: boolean
 }
 
@@ -344,6 +428,18 @@ export interface StatutoryComputation {
   pagibigEr: number
   /** Fraction of the monthly contribution charged to this period (0, 1/count or 1). */
   periodFactor: number
+}
+
+/** How a payslip's withholding tax was computed. */
+export interface TaxTrace {
+  method: 'table' | 'supplementary' | 'cumulative_average' | 'annualized'
+  /** taxable regular and supplementary pay of the payroll */
+  regular: number
+  supplementary: number
+  /** cumulative average method: the year's taxable pay, its average a period, and the periods */
+  cumulative?: number
+  average?: number
+  periods?: number
 }
 
 export interface PayslipComputation {
@@ -368,6 +464,8 @@ export interface PayslipComputation {
   sssMpfEr: number
   philhealthEe: number
   philhealthEr: number
+  /** PhilHealth's employee half paid by the national government: not deducted, not remitted */
+  philhealthNg: number
   pagibigEe: number
   pagibigEr: number
   withholdingTax: number
@@ -386,6 +484,7 @@ export interface PayslipComputation {
     notes: string[]
     warnings: string[]
     days: DayComputation[]
+    tax?: TaxTrace
   }
 }
 

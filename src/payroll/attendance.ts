@@ -5,6 +5,7 @@
 // a half day expects its own hours, a flexible start moves the shift with
 // the time in, and a compressed-workweek shift is regular time to its end.
 
+import { HOURS } from './law'
 import {
   eachDate,
   hhmmToMinutes,
@@ -34,7 +35,7 @@ export interface AttendanceParams {
 }
 
 /** Rest periods ("coffee breaks") of 5 to 20 minutes are hours worked (IRR Book III, Rule I, Sec. 7). */
-export const REST_PERIOD_MINUTES = 20
+export const REST_PERIOD_MINUTES = HOURS.compensableRestMinutes.value
 
 /** Overlap in minutes between [aStart, aEnd) and [bStart, bEnd) (epoch ms). */
 function overlapMinutes(aStart: number, aEnd: number, bStart: number, bEnd: number): number {
@@ -55,8 +56,8 @@ function nightDiffMinutesFor(dateStr: string, inMs: number, outMs: number): numb
       Number(dateStr.slice(8, 10)) + offset,
     ))
     const ds = d.toISOString().slice(0, 10)
-    const windowStart = manilaInstant(ds, 22 * 60).getTime()
-    const windowEnd = windowStart + 8 * 60 * 60 * 1000 // 22:00 -> 06:00 next day
+    const windowStart = manilaInstant(ds, HOURS.nightShiftStartMinute.value).getTime()
+    const windowEnd = windowStart + HOURS.nightShiftHours.value * 60 * 60 * 1000 // 22:00 -> 06:00 next day
     total += overlapMinutes(inMs, outMs, windowStart, windowEnd)
   }
   return total

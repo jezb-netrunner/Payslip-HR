@@ -15,8 +15,7 @@ import type {
   PagibigData,
   PhilHealthData,
   SssTableData,
-  StatutoryTables,
-} from '../payroll/types'
+  StatutoryTables, DeMinimisData } from '../payroll/types'
 
 export async function getEntity(id: string): Promise<Entity> {
   const { data, error } = await supabase.from('entities').select('*').eq('id', id).single()
@@ -47,7 +46,15 @@ export async function getStatutoryTables(asOf: string): Promise<StatutoryTables>
       'Statutory tables are incomplete for ' + asOf + '. The missing table version has to be published by the system maintainer (statutory tables ship with the software).',
     )
   }
-  return { sss, philhealth, pagibig, bir_wht, bir_annual }
+  // other legal parameters in force on the date (de minimis ceilings, RR 29-2025)
+  const { data: params, error: paramsError } = await supabase
+    .from('legal_parameters')
+    .select('key, effective_from, data')
+    .lte('effective_from', asOf)
+    .order('effective_from', { ascending: false })
+  if (paramsError) throw paramsError
+  const de_minimis = (params ?? []).find((r) => r.key === 'de_minimis')?.data as DeMinimisData | undefined
+  return { sss, philhealth, pagibig, bir_wht, bir_annual, ...(de_minimis ? { de_minimis } : {}) }
 }
 
 const HOLIDAY_STRENGTH: Record<Holiday['kind'], number> = {

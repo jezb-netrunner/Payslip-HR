@@ -353,7 +353,7 @@ describe('review fixes: holidays on rest days, unpaid leave, divisor semantics',
     expect(rest?.amount).toBe(295.89)
   })
 
-  it('withholds holiday pay from a daily-paid employee on leave without pay over the holiday', () => {
+  it('withholds holiday pay from a daily-paid employee on leave without pay over the holiday (holiday absence rule on)', () => {
     const holidays: HolidayLite[] = [
       { holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' },
     ]
@@ -372,7 +372,7 @@ describe('review fixes: holidays on rest days, unpaid leave, divisor semantics',
     })
     const slip = computePayslip({
       employee: dailyEmployee,
-      settings,
+      settings: { ...settings, holidayAbsenceRule: true },
       period,
       tables: DEFAULT_TABLES,
       days,
@@ -380,6 +380,9 @@ describe('review fixes: holidays on rest days, unpaid leave, divisor semantics',
     })
     expect(slip.earnings.find((l) => l.code === 'holiday')).toBeUndefined()
     expect(slip.earnings.find((l) => l.code === 'basic')?.amount).toBe(3500)
+    // with the rule off (the default) the holiday is paid
+    const byDefault = computePayslip({ employee: dailyEmployee, settings, period, tables: DEFAULT_TABLES, days, runType: 'regular' })
+    expect(byDefault.earnings.find((l) => l.code === 'holiday')?.amount).toBe(dailyEmployee.dailyRate)
   })
 })
 
@@ -577,9 +580,11 @@ describe('13th month pay (PD 851)', () => {
     })
     expect(slip.grossPay).toBe(150000)
     expect(slip.taxableIncome).toBe(60000)
-    // marginal: tax(145,550 + 60,000) - tax(145,550) on the monthly table
-    expect(slip.withholdingTax).toBe(16944.15)
-    expect(slip.netPay).toBe(133055.85)
+    // supplementary pay (RR 2-98 Sec. 2.79(B)(3)): the 25% rate of the regular
+    // monthly pay's bracket (145,550), not the 30% the total would reach
+    expect(slip.withholdingTax).toBe(15000)
+    expect(slip.netPay).toBe(135000)
+    expect(slip.trace.tax).toMatchObject({ method: 'supplementary', regular: 145550, supplementary: 60000 })
   })
 })
 
@@ -635,11 +640,13 @@ describe('payslip: cash advances', () => {
   })
 })
 
-describe('regular holiday pay needs the workday before (IRR Book III, Rule IV, Secs. 6 and 10)', () => {
+describe('with the holiday absence rule on, regular holiday pay needs the workday before (IRR Book III, Rule IV, Secs. 6 and 10)', () => {
   const heroes: HolidayLite[] = [{ holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' }]
   const dailyEmployee: PayrollEmployeeInput = { ...monthlyEmployee, id: 'e4', payType: 'daily', monthlyRate: 0, dailyRate: 700 }
+  // the rule is a client setting, off by default (C8): these tests turn it on
+  const ruleOn = { ...settings, holidayAbsenceRule: true }
   const pay = (employee: PayrollEmployeeInput, days: DayComputation[], daysBefore?: DayComputation[]) =>
-    computePayslip({ employee, settings, period, tables: DEFAULT_TABLES, days, daysBefore, runType: 'regular' })
+    computePayslip({ employee, settings: ruleOn, period, tables: DEFAULT_TABLES, days, daysBefore, runType: 'regular' })
   // absent Friday Aug 28, the workday before Monday's holiday
   const absentFriday = WORKDAYS.filter((d) => d !== '2026-08-28' && d !== '2026-08-31').map((d) => entry(d))
 

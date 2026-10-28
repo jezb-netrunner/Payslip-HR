@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck } from 'lucide-react'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th, StatGroup } from '../../components/ui'
 import { useToast } from '../../components/toast'
-import { downloadCsv, getEmployees, getStatutoryTables } from '../../lib/api'
+import { downloadCsv, getEmployees, getHolidaysBetween, getStatutoryTables } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fetchAll } from '../../lib/fetchAll'
 import type { Entity, Payslip, TaxRemittance } from '../../lib/db'
@@ -10,12 +10,60 @@ import { useEntity } from '../../lib/entity'
 import { fmtDate, fmtMonth, fmtTin, fullName, money, plural } from '../../lib/format'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
-import { alphalistCsv, buildAlphalist, type AlphalistRow, type YearEndRate } from '../../payroll/alphalist'
+import { alphalistCsv, annexFCsv, buildAlphalist, form2316Items, FORM_2316_LABELS, type AlphalistRow, type Form2316Item, type YearEndRate } from '../../payroll/alphalist'
+import { remittances1601C, type RemittanceMonth } from '../../payroll/remittance'
+import { FILING_LABELS, filingCalendar, type DueDate, type DueDateOverride } from '../../payroll/dueDates'
+import { round2 } from '../../payroll/types'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
 import Insights from './Insights'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
+
+type WithholdingSlip = { pay_date: string | null; withholding_tax: number }
+
+/**
+ * The year's 1601-C by month (pay date): tax withheld, refunds paid, and
+ * the amount to remit — a refund larger than the month's tax carries to the
+ * following months (NIRC Sec. 79(F); RR 2-98 Sec. 2.79(B)(5)(b)).
+ */
+function monthlyRemittances(slips: WithholdingSlip[], year: number, openingCarry = 0): RemittanceMonth[] {
+  const by = new Map<string, { withheld: number; refunds: number }>()
+  for (const p of slips) {
+    if (!p.pay_date || Number(p.pay_date.slice(0, 4)) !== year) continue
+    const k = p.pay_date.slice(5, 7)
+    const m = by.get(k) ?? { withheld: 0, refunds: 0 }
+    const v = Number(p.withholding_tax)
+    if (v >= 0) m.withheld += v
+    else m.refunds -= v
+    by.set(k, m)
+  }
+  return remittances1601C(
+    MONTHS.map((mm) => ({
+      month: `${year}-${mm}-01`,
+      withheld: round2(by.get(mm)?.withheld ?? 0),
+      refunds: round2(by.get(mm)?.refunds ?? 0),
+    })),
+    openingCarry,
+  )
+}
+
+/** Refunds the previous year left unused at December's 1601-C, applied from January. */
+async function refundCarryInto(entityId: string, year: number): Promise<number> {
+  const prev = await fetchAll<WithholdingSlip>((from, to) =>
+    supabase
+      .from('payslips')
+      .select('pay_date, withholding_tax, payroll_runs!inner(status)')
+      .eq('entity_id', entityId)
+      .in('payroll_runs.status', ['finalized', 'paid'])
+      .gte('pay_date', `${year - 1}-01-01`)
+      .lte('pay_date', `${year - 1}-12-31`)
+      .order('id')
+      .range(from, to),
+  )
+  if (!prev.some((p) => Number(p.withholding_tax) < 0)) return 0
+  return monthlyRemittances(prev, year - 1).at(-1)?.carryOut ?? 0
+}
 
 export default function Reports() {
   const { entity } = useEntity()
@@ -51,6 +99,7 @@ export default function Reports() {
           { key: '1604c', label: '1604-C summary', icon: <FileText /> },
           { key: '1601c', label: '1601-C remittances', icon: <Landmark /> },
           { key: 'contrib', label: 'SSS / PhilHealth / Pag-IBIG', icon: <ShieldCheck /> },
+          { key: 'due', label: 'Due dates', icon: <CalendarClock /> },
         ]}
         active={tab}
         onChange={setTab}
@@ -60,6 +109,7 @@ export default function Reports() {
       {tab === '1604c' && <Summary1604C key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === '1601c' && <Remittances key={`${entity.id}${year}`} entity={entity} year={year} />}
       {tab === 'contrib' && <Contributions key={`${entity.id}${year}`} entity={entity} year={year} />}
+      {tab === 'due' && <DueDates key={`${entity.id}${year}`} entity={entity} year={year} />}
     </div>
   )
 }
@@ -240,7 +290,14 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
                       <Td className="text-right">{money(r.summary.totalNonTaxable)}</Td>
                       <Td className="text-right">{money(r.summary.totalTaxablePresent)}</Td>
                       <Td className="text-right">{money(r.summary.taxDue)}</Td>
-                      <Td className="text-right">{money(r.summary.withheldAsAdjusted + r.summary.prevTaxWithheld)}</Td>
+                      <Td className="text-right">
+                        {money(r.summary.withheldAsAdjusted + r.summary.prevTaxWithheld)}
+                        {(r.summary.withheldDec > 0 || r.summary.refunded > 0) && (
+                          <p className="text-[11px] text-slate-400">
+                            Dec {money(r.summary.withheldDec)}{r.summary.refunded > 0 ? ` · refunded ${money(r.summary.refunded)}` : ''}
+                          </p>
+                        )}
+                      </Td>
                       <Td className={`text-right font-semibold ${r.summary.variance === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {money(r.summary.variance)}
                       </Td>
@@ -257,10 +314,27 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
           </Card>
         )
       })}
+      <Card title="BIR Form 2316 — all employees" icon={<FileText />}>
+        <p className="text-sm text-amber-700">{FORM_2316_REMINDER}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => print2316(rows, entity, year)}>
+            <Printer className="size-4" /> Print all 2316 data sheets
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!rows.some((r) => r.substitutedFiling)}
+            onClick={() => downloadCsv(`annexF_substituted_filing_${entity.code}_${year}.csv`, annexFCsv(rows, entity, year))}
+          >
+            <Download className="size-4" /> Annex F list (substituted filing)
+          </Button>
+        </div>
+      </Card>
       <p className="text-[11px] text-slate-400">
-        Layout follows the 1604-C alphalist (RMC 73-2019): Schedule 1 employees, Schedule 2 minimum
-        wage earners, each figure as declared on BIR Form 2316. Key or import the CSV figures into the BIR Alphalist
-        Data Entry and Validation Module (it generates the DAT file for eSubmission). Balance = tax due − tax withheld.
+        Layout follows the 1604-C (January 2018 ENCS) alphalist as revised by RMC 160-2022 (with the PERA 5% tax
+        credit): Schedule 1 employees, Schedule 2 minimum wage earners, each figure as declared on BIR Form 2316
+        (September 2021 ENCS), with each employee's annualization (tax due, withheld January–November and December,
+        refunds, as adjusted). Key or import the CSV figures into the BIR Alphalist Data Entry and Validation Module (it
+        generates the DAT file for eSubmission). Balance = tax due − tax withheld.
       </p>
 
       {viewing && <Form2316Modal row={viewing} entity={entity} year={year} onClose={() => setViewing(null)} />}
@@ -268,10 +342,12 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
   )
 }
 
-function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; entity: Entity; year: number; onClose: () => void }) {
+/** The 2316 figures of one employee: Part IV-A summary, Part IV-B by item number (September 2021 ENCS). */
+function form2316Groups(row: AlphalistRow): [string, [string, number | string][]][] {
   const s = row.summary
-  const e = row.employee
-  const groups: [string, [string, number | string][]][] = [
+  const items = form2316Items(s)
+  const numbered = (keys: Form2316Item[]): [string, number][] => keys.map((k) => [`${k}. ${FORM_2316_LABELS[k]}`, items[k]])
+  return [
     [
       'Part IV-A — Summary',
       [
@@ -288,46 +364,24 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
         ['Total taxes withheld', s.withheldAsAdjusted + s.prevTaxWithheld + s.peraCredit],
       ],
     ],
-    [
-      'Part IV-B — Non-taxable / exempt compensation',
-      [
-        ['Basic salary / statutory minimum wage (MWE)', s.mweBasic],
-        ['Holiday pay (MWE)', s.mweHoliday],
-        ['Overtime pay (MWE)', s.mweOvertime],
-        ['Night shift differential (MWE)', s.mweNightDiff],
-        ['Hazard pay (MWE)', s.mweHazard],
-        ['13th month pay and other benefits', s.thirteenthOtherBenefitsExempt],
-        ['De minimis benefits', s.deMinimis],
-        ['SSS, GSIS, PHIC & Pag-IBIG contributions and union dues (employee share)', s.contributions],
-        ['Salaries and other forms of compensation', s.otherNonTaxable],
-        ['Total non-taxable / exempt compensation', s.totalNonTaxable],
-      ],
-    ],
-    [
-      'Part IV-B — Taxable compensation',
-      [
-        ['Basic salary', s.taxableBasic],
-        ['Representation', s.taxableRepresentation],
-        ['Transportation', s.taxableTransportation],
-        ['Cost of living allowance (COLA)', s.taxableCola],
-        ['Fixed housing allowance', s.taxableHousing],
-        ['Others (regular)', s.taxableOtherRegular],
-        ['Taxable 13th month benefits and other benefits', s.taxable13thOtherBenefits],
-        ['Hazard pay', s.taxableHazard],
-        ['Overtime pay', s.taxableOvertime],
-        ['Others (supplementary: holiday/premium pay, night differential)', s.taxableOtherSupplementary],
-        ['Total taxable compensation (present employer)', s.totalTaxablePresent],
-      ],
-    ],
+    ['Part IV-B — Non-taxable / exempt compensation income', numbered([29, 30, 31, 32, 33, 34, 35, 36, 37, 38])],
+    ['Part IV-B — Taxable compensation income', numbered([39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, '51A', '51B', 52])],
   ]
+}
 
-  function print() {
-    const w = window.open('', '_blank', 'width=760,height=900')
-    if (!w) return
-    const esc = (v: string) =>
-      v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
-    const val = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : esc(v))
-    const sections = groups
+const FORM_2316_REMINDER =
+  "BIR copies of the 2316 need the employee's signature and are submitted to the BIR as scanned soft copies, with the certified list of employees qualified for substituted filing (Annex F)."
+
+/** Printable 2316 data sheets, one per page. */
+function print2316(rows: AlphalistRow[], entity: Entity, year: number) {
+  const w = window.open('', '_blank', 'width=760,height=900')
+  if (!w) return
+  const esc = (v: string) =>
+    v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
+  const val = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : esc(v))
+  const sheet = (row: AlphalistRow) => {
+    const e = row.employee
+    const sections = form2316Groups(row)
       .map(
         ([title, items]) =>
           `<h3 style="margin:18px 0 6px;font-size:13px">${esc(title)}</h3><table style="width:100%;border-collapse:collapse;font-size:12px">${items
@@ -335,28 +389,34 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
             .join('')}</table>`,
       )
       .join('')
-    w.document.write(
-      `<html><head><title>BIR 2316 data — ${esc(fullName(e))}</title></head><body style="font-family:sans-serif;padding:24px;color:#0f172a">
+    return `<section style="page-break-after:always">
       <h2 style="margin:0">BIR Form 2316 figures — ${year}</h2>
-      <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2316 (Certificate of Compensation Payment / Tax Withheld).</p>
+      <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2316 (September 2021 ENCS). ${esc(FORM_2316_REMINDER)}</p>
       <p style="font-size:12px"><b>Employee:</b> ${esc(`${e.last_name}, ${e.first_name} ${e.middle_name ?? ''}`)} · TIN ${esc(e.tin ?? '—')} · Born ${esc(e.birth_date ?? '—')}<br/>
       <b>Address:</b> ${esc(e.address ?? '—')} ${esc(e.zip_code ?? '')} · <b>Period:</b> ${esc(row.from)} to ${esc(row.to)}${row.schedule === 2 ? ` · <b>MWE</b> ${esc(row.region)} SMW ₱${val(row.smwPerDay)}/day` : ''}<br/>
+      ${row.issuedOn ? `<b>Date issued:</b> ${esc(row.issuedOn)} (last pay day of a separated employee)<br/>` : ''}
       <b>Employer:</b> ${esc(entity.name)} · TIN ${esc(fmtTin(entity.tin, entity.tin_branch_code))} · ${esc(entity.registered_address)} ${esc(entity.zip_code)}
       ${row.prevEmployerTin ? `<br/><b>Previous employer:</b> ${esc(row.prevEmployerName)} · TIN ${esc(row.prevEmployerTin)}` : ''}</p>
-      ${sections}</body></html>`,
-    )
-    w.document.close()
-    w.print()
+      ${sections}</section>`
   }
+  w.document.write(
+    `<html><head><title>BIR 2316 data — ${esc(entity.name)} ${year}</title></head><body style="font-family:sans-serif;padding:24px;color:#0f172a">${rows.map(sheet).join('')}</body></html>`,
+  )
+  w.document.close()
+  w.print()
+}
 
+function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; entity: Entity; year: number; onClose: () => void }) {
+  const e = row.employee
   return (
     <Modal open onClose={onClose} title={`BIR 2316 figures — ${fullName(e)} (${year})`} wide>
       <div className="space-y-4">
         <p className="text-xs text-slate-500">
           {e.last_name}, {e.first_name} · TIN {e.tin || '—'} · {fmtDate(row.from)} – {fmtDate(row.to)}
           {row.schedule === 2 && ` · MWE (${row.region}) ₱${row.smwPerDay}/day × ${row.factor} days`}
+          {row.issuedOn && ` · issued ${fmtDate(row.issuedOn)}, the last pay day (separated)`}
         </p>
-        {groups.map(([title, items]) => (
+        {form2316Groups(row).map(([title, items]) => (
           <div key={title}>
             <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">{title}</p>
             <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4">
@@ -369,7 +429,8 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
             </div>
           </div>
         ))}
-        <Button variant="secondary" onClick={print}>
+        <p className="text-xs text-amber-700">{FORM_2316_REMINDER}</p>
+        <Button variant="secondary" onClick={() => print2316([row], entity, year)}>
           <Printer className="size-4" /> Print
         </Button>
       </div>
@@ -399,21 +460,18 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
   }, [entity.id, year])
   const error = alphaError || remitError
 
-  const withheldByMonth = useMemo(() => {
-    const m: Record<string, number> = {}
-    for (const s of slips) {
-      const k = (s.pay_date ?? '').slice(5, 7)
-      m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
-    }
-    return m
-  }, [slips])
+  const [carryIn, setCarryIn] = useState(0)
+  useEffect(() => {
+    refundCarryInto(entity.id, year).then(setCarryIn, () => setCarryIn(0))
+  }, [entity.id, year])
+  const due = useMemo(() => monthlyRemittances(slips, year, carryIn), [slips, year, carryIn])
 
   if (error) return <Card><p className="text-sm text-rose-600">{error}</p></Card>
   if (!rows) return <Spinner />
 
-  const months = MONTHS.map((mm) => {
+  const months = MONTHS.map((mm, i) => {
     const r = remits.find((x) => x.period_month.slice(5, 7) === mm)
-    return { mm, payroll: Math.round((withheldByMonth[mm] ?? 0) * 100) / 100, r }
+    return { mm, payroll: due[i].toRemit, r }
   })
   const totals = {
     payroll: months.reduce((s, m) => s + m.payroll, 0),
@@ -501,7 +559,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {months.map((m) => {
-              const mismatch = m.r ? Math.abs(Number(m.r.taxes_withheld) - m.payroll) > 0.005 : m.payroll > 0
+              const mismatch = m.r ? Math.abs(Number(m.r.taxes_withheld) + Number(m.r.adjustment) - m.payroll) > 0.005 : m.payroll > 0
               return (
                 <tr key={m.mm}>
                   <Td className="font-semibold">{fmtMonth(`${year}-${m.mm}-01`)}</Td>
@@ -528,8 +586,9 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
           </tbody>
         </TableShell>
         <p className="mt-3 text-[11px] text-slate-400">
-          "Withheld per payroll" sums finalized payslips by the month they were paid (pay date) — refunds from annualization reduce it;
-          record each monthly 1601-C payment under 1601-C remittances. Amber = payroll and remittance differ.
+          "Withheld per payroll" is the month's tax to remit: finalized payslips by the month they were paid (pay date), less the
+          year-end refunds paid that month — a refund larger than the month's tax carries to the following months. Record each
+          monthly 1601-C payment under 1601-C remittances. Amber = payroll and remittance differ.
         </p>
       </Card>
 
@@ -552,7 +611,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
 function Remittances({ entity, year }: { entity: Entity; year: number }) {
   const toast = useToast()
   const [remits, setRemits] = useState<TaxRemittance[]>([])
-  const [byMonth, setByMonth] = useState<Record<string, number>>({})
+  const [due, setDue] = useState<RemittanceMonth[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [editing, setEditing] = useState<Partial<TaxRemittance> & { period_month: string } | null>(null)
@@ -560,19 +619,15 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
   const load = useCallback(async () => {
     setLoadError('')
     try {
-      const [{ data, error }, slips] = await Promise.all([
+      const [{ data, error }, slips, carryIn] = await Promise.all([
         supabase.from('tax_remittances').select('*').eq('entity_id', entity.id).gte('period_month', `${year}-01-01`).lte('period_month', `${year}-12-01`),
         fetchFinalizedPayslipsForTaxYear(entity.id, year),
+        refundCarryInto(entity.id, year),
       ])
       if (error) throw error
       setRemits((data ?? []) as TaxRemittance[])
-      // 1601-C covers tax withheld in the month the pay was released
-      const m: Record<string, number> = {}
-      for (const s of slips) {
-        const k = (s.pay_date ?? '').slice(5, 7)
-        m[k] = (m[k] ?? 0) + Number(s.withholding_tax)
-      }
-      setByMonth(m)
+      // 1601-C covers tax withheld in the month the pay was released, less refunds paid that month
+      setDue(monthlyRemittances(slips, year, carryIn))
     } catch (err) {
       setLoadError(errorMessage(err, 'Failed to load'))
     } finally {
@@ -615,6 +670,8 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
           <tr>
             <Th>Month</Th>
             <Th className="text-right">Withheld per payroll</Th>
+            <Th className="text-right">Refunds paid</Th>
+            <Th className="text-right">To remit</Th>
             <Th>Date remitted</Th>
             <Th>Reference</Th>
             <Th className="text-right">Total remitted</Th>
@@ -622,20 +679,31 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {MONTHS.map((mm) => {
+          {MONTHS.map((mm, i) => {
             const month = `${year}-${mm}-01`
             const r = remits.find((x) => x.period_month === month)
-            const payroll = Math.round((byMonth[mm] ?? 0) * 100) / 100
+            const d = due[i] ?? { withheld: 0, refunds: 0, carryIn: 0, toRemit: 0, carryOut: 0 }
+            const applied = round2(d.withheld - d.toRemit)
             return (
               <tr key={mm} className="hover:bg-slate-50">
                 <Td className="font-semibold">{fmtMonth(month)}</Td>
-                <Td className="text-right">{money(payroll)}</Td>
+                <Td className="text-right">{money(d.withheld)}</Td>
+                <Td className="text-right text-xs">
+                  {d.refunds > 0 || d.carryIn > 0 ? (
+                    <>
+                      {money(d.refunds)}
+                      {d.carryIn > 0 && <span className="block text-slate-400">+ {money(d.carryIn)} carried in</span>}
+                      {d.carryOut > 0 && <span className="block text-amber-600">{money(d.carryOut)} carried to next month</span>}
+                    </>
+                  ) : '—'}
+                </Td>
+                <Td className="text-right">{money(d.toRemit)}</Td>
                 <Td className="text-xs">{r?.date_paid ? fmtDate(r.date_paid) : '—'}</Td>
                 <Td className="text-xs">{r ? `${r.bank_or_agency || '—'} · ${r.reference_no || '—'}` : '—'}</Td>
                 <Td className="text-right font-semibold">{r ? money(Number(r.total_remitted)) : '—'}</Td>
                 <Td>
                   <button
-                    onClick={() => setEditing(r ? { ...r } : { period_month: month, taxes_withheld: payroll, adjustment: 0, penalties: 0 })}
+                    onClick={() => setEditing(r ? { ...r } : { period_month: month, taxes_withheld: d.withheld, adjustment: -applied, penalties: 0 })}
                     className="flex items-center gap-1 text-xs font-semibold text-brand-600"
                   >
                     <Pencil className="size-3.5" /> {r ? 'Edit' : 'Record'}
@@ -647,7 +715,8 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
         </tbody>
       </TableShell>
       <p className="mt-3 text-[11px] text-slate-400">
-        1601-C is filed and paid monthly (eFPS/eBIRForms); these records feed Part II of the 1604-C.
+        1601-C is filed and paid monthly (eFPS/eBIRForms); these records feed Part II of the 1604-C. Year-end refunds (due by
+        January 25) reduce the 1601-C of the month they are paid; what a month can't absorb carries to the next months.
       </p>
 
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={`1601-C — ${editing ? fmtMonth(editing.period_month) : ''}`}>
@@ -688,7 +757,7 @@ function Remittances({ entity, year }: { entity: Entity; year: number }) {
 
 type ContribSlip = Pick<
   Payslip,
-  'employee_id' | 'employee_snapshot' | 'sss_ee' | 'sss_mpf_ee' | 'sss_er' | 'sss_mpf_er' | 'sss_ec_er' | 'philhealth_ee' | 'philhealth_er' | 'pagibig_ee' | 'pagibig_er'
+  'employee_id' | 'employee_snapshot' | 'sss_ee' | 'sss_mpf_ee' | 'sss_er' | 'sss_mpf_er' | 'sss_ec_er' | 'philhealth_ee' | 'philhealth_er' | 'pagibig_ee' | 'pagibig_er' | 'philhealth_ng'
 >
 
 function Contributions({ entity, year }: { entity: Entity; year: number }) {
@@ -707,7 +776,7 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
     fetchAll<ContribSlip>((from, to) =>
       supabase
         .from('payslips')
-        .select('employee_id, employee_snapshot, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, pagibig_ee, pagibig_er, payroll_runs!inner(status)')
+        .select('employee_id, employee_snapshot, sss_ee, sss_mpf_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_ee, philhealth_er, philhealth_ng, pagibig_ee, pagibig_er, payroll_runs!inner(status)')
         .eq('entity_id', entity.id)
         .eq('period_month', `${year}-${month}-01`)
         .in('payroll_runs.status', ['finalized', 'paid'])
@@ -729,18 +798,19 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
     const m = new Map<string, { name: string; no: string; sss: string; ph: string; hdmf: string; v: number[] }>()
     for (const s of slips ?? []) {
       const snap = s.employee_snapshot as Record<string, string>
-      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0] }
+      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0, 0] }
       const add = [
         Number(s.sss_ee) + Number(s.sss_mpf_ee), Number(s.sss_er) + Number(s.sss_mpf_er), Number(s.sss_ec_er),
-        Number(s.sss_mpf_ee) + Number(s.sss_mpf_er), Number(s.philhealth_ee), Number(s.philhealth_er), Number(s.pagibig_ee), Number(s.pagibig_er),
+        Number(s.sss_mpf_ee) + Number(s.sss_mpf_er), Number(s.philhealth_ee), Number(s.philhealth_er), Number(s.philhealth_ng ?? 0),
+        Number(s.pagibig_ee), Number(s.pagibig_er),
       ]
       cur.v = cur.v.map((x, i) => Math.round((x + add[i]) * 100) / 100)
       m.set(s.employee_id, cur)
     }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
   }, [slips])
-  const tot = rows.reduce((acc, r) => acc.map((x, i) => Math.round((x + r.v[i]) * 100) / 100), [0, 0, 0, 0, 0, 0, 0, 0])
-  const cols = ['SSS EE', 'SSS ER', 'EC', 'of which MPF', 'PhilHealth EE', 'PhilHealth ER', 'Pag-IBIG EE', 'Pag-IBIG ER']
+  const tot = rows.reduce((acc, r) => acc.map((x, i) => Math.round((x + r.v[i]) * 100) / 100), [0, 0, 0, 0, 0, 0, 0, 0, 0])
+  const cols = ['SSS EE', 'SSS ER', 'EC', 'of which MPF', 'PhilHealth EE', 'PhilHealth ER', 'PhilHealth NG (not remitted)', 'Pag-IBIG EE', 'Pag-IBIG ER']
 
   return (
     <Card
@@ -807,8 +877,136 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
       )}
       <p className="mt-3 text-[11px] text-slate-400">
         Totals per employee across every payroll of the month — the amounts to report and remit for SSS (incl.
-        MPF/WISP and EC), PhilHealth and Pag-IBIG.
+        MPF/WISP and EC), PhilHealth and Pag-IBIG. PhilHealth NG is the employee half the national government pays
+        for a solo parent or PWD: neither deducted nor remitted.
       </p>
     </Card>
+  )
+}
+
+// ---------- filing and payment due dates ----------
+
+function DueDates({ entity, year }: { entity: Entity; year: number }) {
+  const toast = useToast()
+  const [rows, setRows] = useState<DueDate[] | null>(null)
+  const [error, setError] = useState('')
+  const [editing, setEditing] = useState<{ row: DueDate; due: string; note: string } | null>(null)
+  const [reload, setReload] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      getHolidaysBetween(entity.id, `${year}-01-01`, `${year + 1}-03-31`),
+      supabase.from('filing_due_dates').select('filing, period, due_date, note').eq('entity_id', entity.id).gte('period', `${year}-01-01`).lte('period', `${year}-12-01`),
+    ])
+      .then(([holidays, overrides]) => {
+        if (overrides.error) throw overrides.error
+        if (cancelled) return
+        setRows(
+          filingCalendar(
+            year,
+            {
+              filing: entity.bir_filing_method ?? 'manual',
+              efpsGroup: entity.efps_group ?? null,
+              philhealthEmployerNo: entity.philhealth_employer_no ?? '',
+              pagibigDueDay: entity.pagibig_due_day ?? null,
+            },
+            holidays,
+            (overrides.data ?? []) as DueDateOverride[],
+          ),
+        )
+      })
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err, 'Failed to load'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [entity, year, reload])
+
+  async function save(useStandard: boolean) {
+    if (!editing) return
+    const key = { entity_id: entity.id, filing: editing.row.filing, period: editing.row.period }
+    const { error: err } = useStandard
+      ? await supabase.from('filing_due_dates').delete().match(key)
+      : await supabase.from('filing_due_dates').upsert({ ...key, due_date: editing.due, note: editing.note.trim() }, { onConflict: 'entity_id,filing,period' })
+    if (err) toast('error', errorMessage(err, 'Save failed'))
+    else {
+      toast('success', useStandard ? 'Back to the standard date.' : 'Due date changed for this year (audit-logged).')
+      setEditing(null)
+      setReload((n) => n + 1)
+    }
+  }
+
+  if (error) return <Card><p className="text-sm text-rose-600">{error}</p></Card>
+  if (!rows) return <Spinner />
+  const monthly = rows.filter((r) => !['refunds', '2316_employees', '1604c', '2316_bir'].includes(r.filing))
+  const yearEnd = rows.filter((r) => ['refunds', '2316_employees', '1604c', '2316_bir'].includes(r.filing))
+  const table = (list: DueDate[], showPeriod: boolean) => (
+    <TableShell>
+      <thead className="bg-slate-50">
+        <tr>
+          {showPeriod && <Th>Covers</Th>}
+          <Th>Filing / payment</Th>
+          <Th>Due</Th>
+          <Th>Note</Th>
+          <Th></Th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {list.map((r) => (
+          <tr key={`${r.filing}${r.period}`}>
+            {showPeriod && <Td className="whitespace-nowrap font-semibold">{fmtMonth(r.period)}</Td>}
+            <Td>
+              <p className="text-sm">{FILING_LABELS[r.filing]}</p>
+              <p className="text-[11px] text-slate-400">{r.basis}</p>
+            </Td>
+            <Td className="whitespace-nowrap text-sm font-semibold">
+              {r.due ? (r.from ? `${fmtDate(r.from)} – ${fmtDate(r.due)}` : fmtDate(r.due)) : '—'}
+              {r.overridden && <Badge tone="blue">changed</Badge>}
+            </Td>
+            <Td className={`text-xs ${r.note.startsWith('Falls on') || r.note.includes('. Falls on') ? 'text-amber-700' : 'text-slate-500'}`}>{r.note || '—'}</Td>
+            <Td>
+              <button onClick={() => setEditing({ row: r, due: r.due, note: r.overridden ? r.note : '' })} className="flex items-center gap-1 text-xs font-semibold text-brand-600">
+                <Pencil className="size-3.5" /> Change
+              </button>
+            </Td>
+          </tr>
+        ))}
+      </tbody>
+    </TableShell>
+  )
+  return (
+    <div className="space-y-6">
+      <Card title={`Monthly filings and payments — ${year}`} icon={<CalendarClock />}>
+        {table(monthly, true)}
+      </Card>
+      <Card title={`Year-end filings for ${year}`} icon={<CalendarClock />}>
+        {table(yearEnd, false)}
+        <p className="mt-3 text-[11px] text-slate-400">
+          Dates follow the BIR, SSS and PhilHealth rules; a date on a weekend or holiday is shown with a note, not moved.
+          When an agency extends a deadline, change the date for this year. Set the filing method, eFPS group and
+          Pag-IBIG due day in Client Settings.
+        </p>
+      </Card>
+      <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing ? `${FILING_LABELS[editing.row.filing]} — ${fmtMonth(editing.row.period)}` : ''}>
+        {editing && (
+          <div className="space-y-4">
+            <Field label="Due date">
+              <Input type="date" value={editing.due} onChange={(e) => setEditing({ ...editing, due: e.target.value })} />
+            </Field>
+            <Field label="Note" hint="e.g. the circular that extends it">
+              <Input value={editing.note} maxLength={200} onChange={(e) => setEditing({ ...editing, note: e.target.value })} />
+            </Field>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={!editing.due} onClick={() => save(false)}>Save for {year}</Button>
+              {editing.row.overridden && (
+                <Button variant="secondary" onClick={() => save(true)}>Use the standard date</Button>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
+    </div>
   )
 }

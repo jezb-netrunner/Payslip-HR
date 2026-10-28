@@ -1,7 +1,7 @@
 // Display labels and BIR codes shared across pages.
 
 import type { EmploymentStatus, PaymentMethod, SeparationReason } from './db'
-import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, RoundingMode } from '../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, BirBucket, ContributionTiming, MaternityBenefit, PayFrequency, PayItemType, RoundingMode } from '../payroll/types'
 
 export const FREQUENCY_LABELS: Record<PayFrequency, string> = {
   weekly: 'Weekly',
@@ -91,6 +91,7 @@ export const ALLOWANCE_BASIS_LABELS: Record<AllowanceBasis, string> = {
 export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
   basic: 'Basic pay',
   holiday: 'Holiday / premium pay',
+  premium: 'Premium pay (MWE, taxable)',
   overtime: 'Overtime pay',
   night_diff: 'Night differential',
   hazard: 'Hazard pay',
@@ -102,13 +103,17 @@ export const BIR_BUCKET_LABELS: Record<BirBucket, string> = {
   cola: 'COLA (wage order)',
   housing: 'Housing allowance',
   other_taxable: 'Other taxable',
+  commission: 'Commission',
+  profit_sharing: 'Profit sharing',
+  fees: 'Fees (directors’ fees included)',
+  other_supplementary: 'Other taxable (supplementary)',
   other_non_taxable: 'Other non-taxable',
 }
 
 /** RA 11210 maternity pay, paid as one-time earnings (both tax-exempt, RMC 105-2019). */
 export const MATERNITY_BENEFIT_LABELS: Record<MaternityBenefit, string> = {
   sss_maternity: 'SSS maternity benefit (tax-exempt)',
-  maternity_differential: 'Maternity salary differential (tax-exempt, counts for 13th month)',
+  maternity_differential: 'Salary differential (before employee contributions; tax-exempt, counts for 13th month)',
 }
 
 /** Wage-board regions (for minimum wage and the MWE alphalist). */
@@ -146,16 +151,16 @@ export const RUN_TYPE_LABELS: Record<string, string> = {
   final_pay: 'Final pay',
 }
 
-/** The solo-parent PhilHealth rule's first day (PhilHealth Circular 2026-0015). */
-export const SOLO_PARENT_PHILHEALTH_FROM = '2026-09-26'
+/** Allowance categories that can be a reimbursement subject to liquidation (not SSS compensation). */
+export const LIQUIDATABLE_CATEGORIES: readonly string[] = ['representation', 'transportation', 'housing', 'other_taxable', 'other_non_taxable']
 
-/** Why a PhilHealth employee-share waiver can't be saved ('' = fine). */
-export function philhealthWaiverProblem(kind: string, from: string, until: string): string {
-  if (!kind) return ''
-  if (!from) return 'Enter the date the PhilHealth employee share stops being deducted.'
-  if (until && until < from) return 'The PhilHealth waiver ends before it starts.'
-  if (kind === 'solo_parent' && from < SOLO_PARENT_PHILHEALTH_FROM) {
-    return 'For solo parents the government pays the PhilHealth employee share from Sep 26, 2026 (PhilHealth Circular 2026-0015).'
-  }
-  return ''
+export const PAY_ITEM_TYPE_LABELS: Record<PayItemType, string> = {
+  christmas_bonus: 'Christmas bonus (not SSS compensation)',
+  liquidated_allowance: 'Subject to liquidation (not SSS compensation)',
+  commission: 'Commission',
+  profit_sharing: 'Profit sharing',
+  fees: 'Fees (directors’ fees included)',
 }
+
+/** Taxable supplementary pay-item types of the "Other taxable" classification (2316 items 45–47). */
+export const SUPPLEMENTARY_ITEM_TYPES = ['commission', 'profit_sharing', 'fees'] as const

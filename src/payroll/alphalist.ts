@@ -1,8 +1,11 @@
-// BIR Form 1604-C alphalist rows (RMC 73-2019 layout:
-// Schedule 1 = employees, Schedule 2 = minimum wage earners) built from a
-// client's finalized payslips for a calendar year. The figures mirror BIR
-// Form 2316; the payroll officer keys or imports them into the BIR
-// Alphalist Data Entry and Validation Module, which produces the DAT file.
+// BIR Form 1604-C (January 2018 ENCS) alphalist rows in the revised format
+// of RMC 160-2022 (with the PERA 5% tax credit; Schedule 1 = employees,
+// Schedule 2 = minimum wage earners) built from a client's finalized
+// payslips for a calendar year. The figures mirror BIR Form 2316 (September
+// 2021 ENCS, item map below); the payroll officer keys or imports them into
+// the BIR Alphalist Data Entry and Validation Module, which produces the DAT
+// file. Basis: NIRC Sec. 83; RR 2-98 Sec. 2.83.1 as amended by RR 11-2018;
+// RR 16-2021 Sec. 2; RMC 160-2022; RMC 29-2024.
 
 import type { Employee, EmployeeTaxYear, Entity } from '../lib/db'
 import { EMPLOYMENT_STATUS_BIR, SEPARATION_REASON_BIR } from '../lib/labels'
@@ -53,6 +56,8 @@ export interface AlphalistRow {
   issues: string[]
   /** Withheld vs due difference, settled by an annualizing run; normal while the year is in progress. */
   withholdingGap: string
+  /** The 2316 of an employee separated in the year is issued on the last pay day (NIRC Sec. 83(A)); else ''. */
+  issuedOn: string
 }
 
 /** The pay rate on an employee's last minimum-wage payslip of the year. */
@@ -118,6 +123,7 @@ export function buildAlphalist(params: {
       issues.push(`Separated ${e.separation_date}, paid in ${year}: check the employment dates the BIR module accepts`)
     }
 
+    const lastPay = facts.reduce((m, f) => ((f.payDate ?? '') > m ? (f.payDate ?? '') : m), '')
     rows.push({
       schedule: summary.allMwe ? 2 : 1,
       employee: e,
@@ -146,6 +152,7 @@ export function buildAlphalist(params: {
           : summary.variance < 0
             ? `Over-withheld by ₱${(-summary.variance).toLocaleString()} — refund via annualization`
             : '',
+      issuedOn: separated ? lastPay : '',
     })
   }
   return rows.sort((a, b) =>
@@ -164,7 +171,8 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
     'NT: 13th Month & Other Benefits', 'NT: De Minimis', 'NT: SSS/PHIC/HDMF & Union Dues', 'NT: Salaries & Other Compensation',
     'Total Non-Taxable',
     'TX: Basic Salary', 'TX: Representation', 'TX: Transportation', 'TX: COLA', 'TX: Housing Allowance', 'TX: Other Regular',
-    'TX: 13th Month & Other Benefits', 'TX: Hazard Pay', 'TX: Overtime Pay', 'TX: Other Supplementary',
+    'TX: Commission', 'TX: Profit Sharing', 'TX: Fees',
+    'TX: 13th Month & Other Benefits', 'TX: Hazard Pay', 'TX: Overtime Pay', 'TX: Other Supplementary', 'TX: Premium Pay (MWE)',
     'Total Taxable (present)',
     'Previous Employer TIN', 'Previous Employer', 'Prev Employment Status', 'Prev Employed From', 'Prev Employed To',
     'Prev Reason of Separation',
@@ -191,7 +199,8 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
         s.thirteenthOtherBenefitsExempt, s.deMinimis, s.contributions, s.otherNonTaxable,
         s.totalNonTaxable,
         s.taxableBasic, s.taxableRepresentation, s.taxableTransportation, s.taxableCola, s.taxableHousing, s.taxableOtherRegular,
-        s.taxable13thOtherBenefits, s.taxableHazard, s.taxableOvertime, s.taxableOtherSupplementary,
+        s.taxableCommission, s.taxableProfitSharing, s.taxableFees,
+        s.taxable13thOtherBenefits, s.taxableHazard, s.taxableOvertime, s.taxableOtherSupplementary, s.taxablePremiumMwe,
         s.totalTaxablePresent,
         r.prevEmployerTin, r.prevEmployerName, r.prevStatusCode, r.prevFrom, r.prevTo, r.prevSeparationCode,
         s.prevGross,
@@ -204,4 +213,73 @@ export function alphalistCsv(rows: AlphalistRow[], schedule: 1 | 2): (string | n
       ]
     })
   return [header, ...body]
+}
+
+/** BIR Form 2316 (September 2021 ENCS) items 29–52, Part IV-B. */
+export type Form2316Item =
+  | 29 | 30 | 31 | 32 | 33 | 34 | 35 | 36 | 37 | 38
+  | 39 | 40 | 41 | 42 | 43 | 44 | 45 | 46 | 47 | 48 | 49 | 50 | '51A' | '51B' | 52
+
+export const FORM_2316_LABELS: Record<Form2316Item, string> = {
+  29: 'Basic salary (including the exempt ₱250,000 and below) or the statutory minimum wage of the MWE',
+  30: 'Holiday pay (MWE)',
+  31: 'Overtime pay (MWE)',
+  32: 'Night shift differential (MWE)',
+  33: 'Hazard pay (MWE)',
+  34: '13th month pay and other benefits (maximum of ₱90,000)',
+  35: 'De minimis benefits',
+  36: 'SSS, GSIS, PHIC & Pag-IBIG contributions and union dues (employee share only)',
+  37: 'Salaries and other forms of compensation',
+  38: 'Total non-taxable / exempt compensation income (sum of items 29 to 37)',
+  39: 'Basic salary',
+  40: 'Representation',
+  41: 'Transportation',
+  42: 'Cost of living allowance (COLA)',
+  43: 'Fixed housing allowance',
+  44: 'Others (regular)',
+  45: 'Commission',
+  46: 'Profit sharing',
+  47: 'Fees including directors’ fees',
+  48: 'Taxable 13th month benefits and other benefits',
+  49: 'Hazard pay',
+  50: 'Overtime pay',
+  '51A': 'Others: Premium pay (MWE)',
+  '51B': 'Others (supplementary): holiday/premium pay, night shift differential, other',
+  52: 'Total taxable compensation income (sum of items 39 to 51B)',
+}
+
+/** The year's figures by 2316 item. */
+export function form2316Items(s: AnnualSummary): Record<Form2316Item, number> {
+  const items: Record<Form2316Item, number> = {
+    29: s.mweBasic, 30: s.mweHoliday, 31: s.mweOvertime, 32: s.mweNightDiff, 33: s.mweHazard,
+    34: s.thirteenthOtherBenefitsExempt, 35: s.deMinimis, 36: s.contributions, 37: s.otherNonTaxable, 38: s.totalNonTaxable,
+    39: s.taxableBasic, 40: s.taxableRepresentation, 41: s.taxableTransportation, 42: s.taxableCola, 43: s.taxableHousing,
+    44: s.taxableOtherRegular, 45: s.taxableCommission, 46: s.taxableProfitSharing, 47: s.taxableFees,
+    48: s.taxable13thOtherBenefits, 49: s.taxableHazard, 50: s.taxableOvertime,
+    '51A': s.taxablePremiumMwe, '51B': s.taxableOtherSupplementary, 52: s.totalTaxablePresent,
+  }
+  return items
+}
+
+/**
+ * RR 11-2018 Annex F: the employer's certified list of employees qualified
+ * for substituted filing of their income tax return, submitted with the
+ * BIR copies of the 2316s.
+ */
+export function annexFCsv(
+  rows: Pick<AlphalistRow, 'substitutedFiling' | 'employee'>[],
+  entity: Pick<Entity, 'name' | 'tin'>,
+  year: number,
+): (string | number)[][] {
+  const qualified = rows.filter((r) => r.substitutedFiling)
+  return [
+    [`Certified List of Employees Qualified for Substituted Filing of ITR (BIR Form 1700) — taxable year ${year}`],
+    [`Employer: ${entity.name}`, `TIN: ${entity.tin}`],
+    [
+      'This is to certify that the employees listed below received purely compensation income from this employer only during the year, their tax was correctly withheld, and they qualify for substituted filing (RR 2-98 Sec. 2.83.4 as amended by RR 11-2018).',
+    ],
+    [],
+    ['Seq', 'TIN', 'Last Name', 'First Name', 'Middle Name'],
+    ...qualified.map((r, i) => [i + 1, r.employee.tin ?? '', r.employee.last_name, r.employee.first_name, r.employee.middle_name ?? '']),
+  ]
 }

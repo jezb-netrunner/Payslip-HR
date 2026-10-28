@@ -74,7 +74,7 @@ describe('extras-only final pay', () => {
       await runAndFinalize(ent, { period_start: '2026-10-01', period_end: '2026-10-15', pay_date: '2026-10-20' }),
       await runAndFinalize(ent, { period_start: '2026-10-16', period_end: '2026-10-31', pay_date: '2026-11-05' }),
       await runAndFinalize(ent, { run_type: 'final_pay', period_start: '2026-11-01', period_end: '2026-11-15', pay_date: '2026-11-20', employee_ids: [emp.id] }, (id) => {
-        db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'SIL conversion', amount: 3776.85, category: 'de_minimis' })
+        db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: id, employee_id: emp.id, entity_id: ent.id, kind: 'earning', label: 'SIL conversion', amount: 3776.85, category: 'de_minimis', de_minimis_kind: 'monetized_vl', leave_days: 5 })
       }),
     ]
     for (const r of runs) {

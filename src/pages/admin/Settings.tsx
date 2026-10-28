@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Banknote, Building2, Coins, FileText, Hash, SlidersHorizontal } from 'lucide-react'
+import { Banknote, Building2, Coins, FileText, Hash, Scale, SlidersHorizontal } from 'lucide-react'
 import { Button, Card, Field, Input, NoClient, PageHeader, Select, Textarea, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
@@ -9,6 +9,8 @@ import { CONTRIBUTION_TIMING_LABELS, FREQUENCY_LABELS, PH_REGIONS, ROUNDING_LABE
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
 import { splitClientTin } from '../../lib/format'
+import { holidayPayExemptProblem } from '../../payroll/engine'
+import { HOURS } from '../../payroll/law'
 
 export default function Settings() {
   const { entity, reload } = useEntity()
@@ -24,13 +26,26 @@ function settingsRangeProblem(s: Entity): string | null {
   if (!(n(s.minimum_wage_daily) >= 0)) return 'Minimum wage cannot be negative.'
   if (!(n(s.working_days_divisor) > 0 && n(s.working_days_divisor) <= 366)) return 'Days-per-year factor must be between 1 and 366.'
   // normal hours of work are 8 a day at most (Labor Code Art. 83); longer days are compressed-workweek shifts
-  if (!(n(s.standard_hours_per_day) > 0 && n(s.standard_hours_per_day) <= 8)) return 'Standard hours per day must be above 0 and at most 8 (Labor Code Art. 83).'
+  if (!(n(s.standard_hours_per_day) > 0 && n(s.standard_hours_per_day) <= HOURS.normalHoursPerDay.value))
+    return `Standard hours per day must be above 0 and at most ${HOURS.normalHoursPerDay.value} (Labor Code Art. 83).`
   if (!int(s.grace_period_minutes) || n(s.grace_period_minutes) < 0 || n(s.grace_period_minutes) > 240)
     return 'Grace period must be a whole number of minutes, 0–240.'
-  if (!(n(s.night_diff_rate) >= 0.1 && n(s.night_diff_rate) <= 1))
+  if (!(n(s.night_diff_rate) >= HOURS.nightDifferentialMinimum.value && n(s.night_diff_rate) <= 1))
     return 'Night differential rate must be at least 0.10 (Labor Code Art. 86) and at most 1.'
   if (!int(s.pay_date_lag_days) || n(s.pay_date_lag_days) < 0 || n(s.pay_date_lag_days) > 31)
     return 'Days from period end to pay date must be a whole number, 0–31.'
+  if (!(n(s.paid_vl_days_per_year) >= 0 && n(s.paid_vl_days_per_year) <= 365)) return 'Paid vacation leave days must be between 0 and 365.'
+  if (s.maternity_differential_exempt && (!s.dole_exemption_ref.trim() || !s.dole_exemption_valid_until))
+    return "A DOLE exemption from the maternity salary differential needs the exemption's reference and the date it is valid until."
+  if (s.bir_filing_method === 'efps' && !s.efps_group) return 'Pick the eFPS group (A to E): it sets the 1601-C due date.'
+  const pagibigDay = s.pagibig_due_day === null || String(s.pagibig_due_day) === '' ? null : n(s.pagibig_due_day)
+  if (pagibigDay !== null && !(int(pagibigDay) && pagibigDay >= 1 && pagibigDay <= 31)) return 'The Pag-IBIG due day must be a day of the month, 1–31.'
+  const workers = s.regular_workers === null || String(s.regular_workers) === '' ? null : n(s.regular_workers)
+  if (workers !== null && !(int(workers) && workers >= 0)) return 'Workers regularly employed must be a whole number.'
+  if (s.holiday_pay_exempt) {
+    const problem = holidayPayExemptProblem({ retailOrService: s.retail_service_establishment, regularWorkers: workers })
+    if (problem) return problem
+  }
   return null
 }
 
@@ -85,6 +100,20 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           rounding_scope: s.rounding_scope,
           pay_date_lag_days: Number(s.pay_date_lag_days),
           payslip_footer_note: s.payslip_footer_note,
+          mwe_rh_restday_premium_taxable: s.mwe_rh_restday_premium_taxable,
+          paid_vl_days_per_year: Number(s.paid_vl_days_per_year),
+          sil_conversion_taxable: s.sil_conversion_taxable,
+          sss_include_13th_month: s.sss_include_13th_month,
+          maternity_differential_exempt: s.maternity_differential_exempt,
+          dole_exemption_ref: s.maternity_differential_exempt ? s.dole_exemption_ref.trim() : '',
+          dole_exemption_valid_until: s.maternity_differential_exempt ? s.dole_exemption_valid_until || null : null,
+          holiday_absence_rule: s.holiday_absence_rule,
+          retail_service_establishment: s.retail_service_establishment,
+          regular_workers: s.regular_workers === null || String(s.regular_workers) === '' ? null : Number(s.regular_workers),
+          holiday_pay_exempt: s.holiday_pay_exempt,
+          bir_filing_method: s.bir_filing_method,
+          efps_group: s.bir_filing_method === 'efps' ? s.efps_group : null,
+          pagibig_due_day: s.pagibig_due_day === null || String(s.pagibig_due_day) === '' ? null : Number(s.pagibig_due_day),
         })
         .eq('id', s.id)
       if (error) throw error
@@ -232,6 +261,25 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             <Field label="Days from period end to pay date" hint="Used to suggest the pay date of new runs">
               <Input type="number" value={s.pay_date_lag_days} onChange={(e) => set('pay_date_lag_days', e.target.value as unknown as number)} />
             </Field>
+            <Field label="BIR 1601-C filing" hint="Sets the due dates under BIR & Reports">
+              <Select value={s.bir_filing_method} onChange={(e) => set('bir_filing_method', e.target.value as Entity['bir_filing_method'])}>
+                <option value="manual">Manual / eBIRForms (10th of the next month)</option>
+                <option value="efps">eFPS</option>
+              </Select>
+            </Field>
+            {s.bir_filing_method === 'efps' && (
+              <Field label="eFPS group">
+                <Select value={s.efps_group ?? ''} onChange={(e) => set('efps_group', (e.target.value || null) as Entity['efps_group'])}>
+                  <option value="">Pick the group…</option>
+                  {(['A', 'B', 'C', 'D', 'E'] as const).map((g) => (
+                    <option key={g} value={g}>Group {g}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            <Field label="Pag-IBIG due day (next month)" hint="As your Pag-IBIG branch sets it; blank until entered">
+              <Input type="number" min={1} max={31} value={s.pagibig_due_day ?? ''} onChange={(e) => set('pagibig_due_day', e.target.value as unknown as number)} />
+            </Field>
           </div>
         </Card>
 
@@ -256,6 +304,70 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 Rounding down is not offered: keeping an employee's centavos would be an unauthorized wage
                 deduction. Carried centavos are always paid out on the final pay.
               </p>
+            </div>
+          </Card>
+          <Card title="Tax and labor rules" icon={<Scale />}>
+            <div className="space-y-3">
+              <Toggle
+                checked={s.mwe_rh_restday_premium_taxable}
+                onChange={(v) => set('mwe_rh_restday_premium_taxable', v)}
+                label="Tax a minimum wage earner's extra 30% for a regular holiday worked on the rest day"
+              />
+              <p className="text-xs text-slate-400">
+                A minimum wage earner's rest-day and special-day premiums are taxable; the minimum wage, holiday pay,
+                overtime, night differential and certified hazard pay stay exempt (NIRC Sec. 24(A)(2)).
+              </p>
+              <Field
+                label="Paid vacation leave days a year"
+                hint="5 or more: the client is outside the service incentive leave (Art. 95(b)), and unused VL converted to cash is de minimis up to the yearly ceiling"
+              >
+                <Input type="number" min={0} max={365} value={s.paid_vl_days_per_year} onChange={(e) => set('paid_vl_days_per_year', e.target.value as unknown as number)} />
+              </Field>
+              <Toggle
+                checked={s.sss_include_13th_month}
+                onChange={(v) => set('sss_include_13th_month', v)}
+                label="Count the 13th month pay as SSS compensation of its month"
+              />
+              <Toggle
+                checked={s.sil_conversion_taxable}
+                onChange={(v) => set('sil_conversion_taxable', v)}
+                label="Tax service incentive leave converted to cash (a client giving only the 5-day SIL)"
+              />
+              <Toggle
+                checked={s.maternity_differential_exempt}
+                onChange={(v) => set('maternity_differential_exempt', v)}
+                label="DOLE exempted this client from the maternity salary differential"
+              />
+              {s.maternity_differential_exempt && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="DOLE exemption reference">
+                    <Input value={s.dole_exemption_ref} onChange={(e) => set('dole_exemption_ref', e.target.value)} />
+                  </Field>
+                  <Field label="Valid until" hint="A leave starting after it is not exempt">
+                    <Input type="date" value={s.dole_exemption_valid_until ?? ''} onChange={(e) => set('dole_exemption_valid_until', e.target.value)} />
+                  </Field>
+                </div>
+              )}
+              <Toggle
+                checked={s.holiday_absence_rule}
+                onChange={(v) => set('holiday_absence_rule', v)}
+                label="No regular holiday pay after an unpaid absence on the workday before (unless the holiday is worked)"
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Toggle
+                  checked={s.retail_service_establishment}
+                  onChange={(v) => set('retail_service_establishment', v)}
+                  label="Retail or service establishment"
+                />
+                <Field label="Workers regularly employed" hint="All the establishment's workers, not only those on this payroll">
+                  <Input type="number" min={0} value={s.regular_workers ?? ''} onChange={(e) => set('regular_workers', e.target.value as unknown as number)} />
+                </Field>
+              </div>
+              <Toggle
+                checked={s.holiday_pay_exempt}
+                onChange={(v) => set('holiday_pay_exempt', v)}
+                label="Exempt from holiday pay (retail or service establishment regularly employing less than 10 workers, Art. 94)"
+              />
             </div>
           </Card>
           <Card title="Payslip" icon={<FileText />}>

@@ -70,8 +70,10 @@ import {
   EMPLOYMENT_STATUS_LABELS,
   FREQUENCY_LABELS,
   PAYMENT_METHOD_LABELS,
-  philhealthWaiverProblem,
   SEPARATION_REASON_LABELS,
+  LIQUIDATABLE_CATEGORIES,
+  PAY_ITEM_TYPE_LABELS,
+  SUPPLEMENTARY_ITEM_TYPES,
 } from '../../lib/labels'
 import { AUTHORIZED_DEDUCTIONS, DEDUCTION_CATEGORY_LABELS, repaymentText } from '../../lib/advances'
 import { leaveWorkdays } from '../../lib/leave'
@@ -81,7 +83,9 @@ import { ScheduleTab } from './EmployeeSchedule'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { dayTimeline } from '../../lib/timeline'
-import type { AllowanceBasis, AllowanceCategory, PayFrequency } from '../../payroll/types'
+import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, PayFrequency, PayItemType } from '../../payroll/types'
+import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
+import { philhealthNgProblem } from '../../payroll/philhealth'
 import { errorMessage } from '../../lib/errors'
 
 const eventLabels: Record<string, string> = {
@@ -580,16 +584,22 @@ function PayTab({
     pay_frequency: employee.pay_frequency,
     days_per_year: employee.days_per_year === null ? '' : String(employee.days_per_year),
     is_mwe: employee.is_minimum_wage_earner,
+    hazard_ref: employee.hazard_certification_ref ?? '',
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
     bank_account_no: employee.bank_account_no ?? '',
-    ph_waiver: employee.philhealth_ee_waiver ?? '',
-    ph_waiver_from: employee.philhealth_ee_waiver_from ?? '',
-    ph_waiver_until: employee.philhealth_ee_waiver_until ?? '',
+    ph_ng_type: employee.ph_ng_type ?? '',
+    ph_ng_from_month: (employee.ph_ng_from_month ?? '').slice(0, 7),
+    id_number: employee.id_number ?? '',
+    id_valid_until: employee.id_valid_until ?? '',
   })
   const [busy, setBusy] = useState(false)
   const [listBusy, setListBusy] = useState(false)
   const [editingAlw, setEditingAlw] = useState<AllowanceForm | null>(null)
+  const [deMinimis, setDeMinimis] = useState<DeMinimisData | null>(null)
+  useEffect(() => {
+    fetchDeMinimis(todayManila()).then(setDeMinimis, () => setDeMinimis(null))
+  }, [])
   const [editingDed, setEditingDed] = useState<DeductionForm | null>(null)
 
   async function savePay() {
@@ -598,9 +608,10 @@ function PayTab({
       toast('error', 'Days-per-year factor must be between 1 and 366 (or blank for the client default).')
       return
     }
-    const waiverProblem = philhealthWaiverProblem(f.ph_waiver, f.ph_waiver_from, f.ph_waiver_until)
-    if (waiverProblem) {
-      toast('error', waiverProblem)
+    const ngFrom = f.ph_ng_from_month ? `${f.ph_ng_from_month}-01` : ''
+    const ngProblem = philhealthNgProblem(f.ph_ng_type, ngFrom, f.id_number, f.id_valid_until)
+    if (ngProblem) {
+      toast('error', ngProblem)
       return
     }
     setBusy(true)
@@ -614,12 +625,14 @@ function PayTab({
           pay_frequency: f.pay_frequency,
           days_per_year: f.days_per_year ? Number(f.days_per_year) : null,
           is_minimum_wage_earner: f.is_mwe,
+          hazard_certification_ref: f.hazard_ref.trim(),
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
           bank_account_no: f.bank_account_no || null,
-          philhealth_ee_waiver: f.ph_waiver || null,
-          philhealth_ee_waiver_from: f.ph_waiver ? f.ph_waiver_from : null,
-          philhealth_ee_waiver_until: f.ph_waiver ? f.ph_waiver_until || null : null,
+          ph_ng_type: f.ph_ng_type || null,
+          ph_ng_from_month: f.ph_ng_type ? ngFrom : null,
+          id_number: f.ph_ng_type ? f.id_number.trim() : '',
+          id_valid_until: f.ph_ng_type ? f.id_valid_until || null : null,
         })
         .eq('id', employee.id)
       if (error) throw error
@@ -656,7 +669,18 @@ function PayTab({
       toast('error', 'Enter a label and an amount above zero.')
       return
     }
-    const row = { label: a.label.trim(), amount, category: a.category, basis: a.basis }
+    if (a.category === 'de_minimis' && !a.dm) {
+      toast('error', 'Pick the de minimis benefit: only the benefits on the BIR list are de minimis (any other benefit is taxable).')
+      return
+    }
+    const row = {
+      label: a.label.trim(),
+      amount,
+      category: a.category,
+      basis: a.basis,
+      de_minimis_kind: a.category === 'de_minimis' ? a.dm || null : null,
+      pay_item_type: itemTypeFor(a.category, a.itemType),
+    }
     const done = await listWrite(
       () =>
         a.id
@@ -766,8 +790,17 @@ function PayTab({
           />
           <p className="text-xs text-slate-500">
             Daily equivalent {money(daily)} vs client minimum {money(Number(entity.minimum_wage_daily))}
-            {entity.minimum_wage_region ? ` (${entity.minimum_wage_region})` : ''}.
+            {entity.minimum_wage_region ? ` (${entity.minimum_wage_region})` : ''}. Rest-day and special-day premiums
+            of a minimum wage earner are taxable.
           </p>
+          {f.is_mwe && (
+            <Field
+              label="Hazardous assignment certification (optional)"
+              hint="DOLE or allied agency certification of an actual assignment to a danger, strife-torn or disease-infested area, or a distressed or isolated station. Without it, hazard pay is taxable."
+            >
+              <Input value={f.hazard_ref} maxLength={200} placeholder="Certification reference" onChange={(e) => setF({ ...f, hazard_ref: e.target.value })} />
+            </Field>
+          )}
           {Number(employee.rounding_balance) > 0 && (
             <p className="text-xs text-slate-500">
               Cash-rounding centavos owed to this employee: {money(Number(employee.rounding_balance))} (paid on the next payroll).
@@ -776,22 +809,36 @@ function PayTab({
         </div>
         <div className="mt-4 space-y-3 rounded-lg bg-slate-50 p-3">
           <Field
-            label="PhilHealth employee share"
-            hint="The national government pays it for an employed PWD (RA 11228) and, from Sep 26, 2026, a solo parent (RA 11861; PhilHealth Circular 2026-0015). The employer share is unchanged. Keep a copy of the PWD or Solo Parent ID."
+            label="PhilHealth employee half"
+            hint="For a solo parent or a PWD the national government pays the employee half: nothing is deducted, the employer pays its usual half, and the government's half shows on the payslip as NG share – non-collectible (PhilHealth Circulars 2026-0015 and 2026-0017)."
           >
-            <Select value={f.ph_waiver} onChange={(e) => setF({ ...f, ph_waiver: e.target.value as typeof f.ph_waiver })}>
+            <Select value={f.ph_ng_type} onChange={(e) => setF({ ...f, ph_ng_type: e.target.value as typeof f.ph_ng_type })}>
               <option value="">Deducted from pay</option>
-              <option value="pwd">Paid by the government — person with disability</option>
               <option value="solo_parent">Paid by the government — solo parent</option>
+              <option value="pwd">Paid by the government — person with disability</option>
             </Select>
           </Field>
-          {f.ph_waiver && (
+          {f.ph_ng_type && (
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="From">
-                <Input type="date" value={f.ph_waiver_from} onChange={(e) => setF({ ...f, ph_waiver_from: e.target.value })} />
+              <Field
+                label="First month"
+                hint={
+                  f.ph_ng_type === 'solo_parent'
+                    ? 'The first month PhilHealth billing (SPA/EPRS) shows the solo-parent tag — not earlier than October 2026'
+                    : 'The month the complete requirements were submitted to PhilHealth'
+                }
+              >
+                <Input type="month" value={f.ph_ng_from_month} onChange={(e) => setF({ ...f, ph_ng_from_month: e.target.value })} />
               </Field>
-              <Field label="Until (optional)" hint="e.g. when the ID expires">
-                <Input type="date" value={f.ph_waiver_until} onChange={(e) => setF({ ...f, ph_waiver_until: e.target.value })} />
+              <Field label={f.ph_ng_type === 'solo_parent' ? 'Solo Parent ID (SPIC) no.' : 'PWD ID no.'}>
+                <Input value={f.id_number} maxLength={60} onChange={(e) => setF({ ...f, id_number: e.target.value })} />
+              </Field>
+              <Field
+                label={f.ph_ng_type === 'solo_parent' ? 'ID valid until' : 'ID valid until (optional)'}
+                hint="The government share stops the month the ID expires; enter the renewed ID to continue it"
+                className="sm:col-span-2"
+              >
+                <Input type="date" value={f.id_valid_until} onChange={(e) => setF({ ...f, id_valid_until: e.target.value })} />
               </Field>
             </div>
           )}
@@ -805,7 +852,7 @@ function PayTab({
         title="Allowances and benefits"
         icon={<Gift />}
         actions={
-          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly' })}>
+          <Button variant="secondary" onClick={() => setEditingAlw({ label: '', amount: '', category: 'de_minimis', basis: 'monthly', dm: 'rice', itemType: '' })}>
             <Plus className="size-4" /> Add
           </Button>
         }
@@ -818,13 +865,15 @@ function PayTab({
                 <p className="break-words text-sm font-semibold text-slate-700">{a.label}</p>
                 <p className="text-xs text-slate-400">
                   {money(Number(a.amount))} {ALLOWANCE_BASIS_LABELS[a.basis]} · {ALLOWANCE_CATEGORY_LABELS[a.category]}
+                  {a.de_minimis_kind && ` · ${DE_MINIMIS_LABELS[a.de_minimis_kind]} (up to ${ceilingText(deMinimis?.ceilings[a.de_minimis_kind])})`}
+                  {a.pay_item_type && ` · ${PAY_ITEM_TYPE_LABELS[a.pay_item_type]}`}
                   {!a.active && ' · inactive'}
                 </p>
               </div>
               <div className="flex shrink-0 gap-3">
                 <button
                   type="button"
-                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis })}
+                  onClick={() => setEditingAlw({ id: a.id, label: a.label, amount: String(a.amount), category: a.category, basis: a.basis, dm: a.de_minimis_kind ?? '', itemType: a.pay_item_type ?? '' })}
                   className="text-xs font-semibold text-brand-600"
                 >
                   Edit
@@ -847,9 +896,9 @@ function PayTab({
           ))}
         </div>
         <p className="mt-2 text-[11px] text-slate-400">
-          De minimis benefits within BIR ceilings (RR 29-2025 for 2026: rice ₱2,500/mo, uniform ₱8,000/yr,
-          laundry ₱400/mo, etc.) are non-taxable; bonuses share the ₱90,000 cap with the 13th month pay.
-          COLA is exempt for minimum wage earners.
+          De minimis benefits are non-taxable up to their BIR ceilings (RR 29-2025); the list is exclusive, so any other
+          benefit, and pay above a ceiling, is taxable. Bonuses share the ₱90,000 cap with the 13th month pay. COLA is
+          exempt for minimum wage earners.
         </p>
       </Card>
 
@@ -975,6 +1024,46 @@ function PayTab({
                 ))}
               </Select>
             </Field>
+            {editingAlw.category === 'other_benefits' && (
+              <Toggle
+                checked={editingAlw.itemType === 'christmas_bonus'}
+                onChange={(v) => setEditingAlw({ ...editingAlw, itemType: v ? 'christmas_bonus' : '' })}
+                label="This is the Christmas bonus (not SSS compensation)"
+              />
+            )}
+            {editingAlw.category === 'other_taxable' && (
+              <Field label="Kind" hint="Commissions, profit sharing and fees are supplementary pay with their own BIR 2316 items">
+                <Select
+                  value={(SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(editingAlw.itemType) ? editingAlw.itemType : ''}
+                  onChange={(e) => setEditingAlw({ ...editingAlw, itemType: e.target.value as PayItemType | '' })}
+                >
+                  <option value="">Other taxable allowance (regular)</option>
+                  {SUPPLEMENTARY_ITEM_TYPES.map((t) => (
+                    <option key={t} value={t}>{PAY_ITEM_TYPE_LABELS[t]}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {LIQUIDATABLE_CATEGORIES.includes(editingAlw.category) && !(SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(editingAlw.itemType) && (
+              <Toggle
+                checked={editingAlw.itemType === 'liquidated_allowance'}
+                onChange={(v) => setEditingAlw({ ...editingAlw, itemType: v ? 'liquidated_allowance' : '' })}
+                label="Subject to liquidation: a reimbursement of expenses (not SSS compensation)"
+              />
+            )}
+            {editingAlw.category === 'de_minimis' && (
+              <Field
+                label="De minimis benefit"
+                hint={editingAlw.dm ? `Non-taxable up to ${ceilingText(deMinimis?.ceilings[editingAlw.dm])}; anything above is taxable.` : undefined}
+              >
+                <Select value={editingAlw.dm} onChange={(e) => setEditingAlw({ ...editingAlw, dm: e.target.value as DeMinimisKind | '' })}>
+                  <option value="">Pick the benefit…</option>
+                  {ALLOWANCE_DE_MINIMIS.map((k) => (
+                    <option key={k} value={k}>{DE_MINIMIS_LABELS[k]}</option>
+                  ))}
+                </Select>
+              </Field>
+            )}
             <Button className="w-full" disabled={listBusy} onClick={() => saveAllowance(editingAlw)}>
               {listBusy ? 'Saving…' : 'Save'}
             </Button>
@@ -1032,12 +1121,24 @@ function PayTab({
   )
 }
 
+/** The pay-item type to store: only one that fits the classification. */
+function itemTypeFor(category: string, t: PayItemType | ''): PayItemType | null {
+  if (t === 'christmas_bonus' && category === 'other_benefits') return t
+  if (t === 'liquidated_allowance' && LIQUIDATABLE_CATEGORIES.includes(category)) return t
+  if ((SUPPLEMENTARY_ITEM_TYPES as readonly string[]).includes(t) && category === 'other_taxable') return t as PayItemType
+  return null
+}
+
 interface AllowanceForm {
   id?: string
   label: string
   amount: string
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** which de minimis benefit (category de_minimis) */
+  dm: DeMinimisKind | ''
+  /** not SSS compensation: the Christmas bonus, an allowance subject to liquidation */
+  itemType: PayItemType | ''
 }
 
 interface DeductionForm {

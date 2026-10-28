@@ -246,6 +246,18 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
     })
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8
   }
+  // the PhilHealth half the national government pays (solo parents, PWDs)
+  if (Number(slip.philhealth_ng ?? 0) > 0) {
+    doc.setFontSize(7.5)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(...SLATE)
+    doc.text(
+      `PhilHealth NG share – non-collectible: ${php(Number(slip.philhealth_ng))} (the national government pays the employee half; neither deducted nor remitted)`,
+      margin,
+      y,
+    )
+    y += 6
+  }
 
   // ---- footer ----
   doc.setFontSize(7.5)

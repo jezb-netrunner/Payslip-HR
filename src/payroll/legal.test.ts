@@ -34,6 +34,15 @@ const WORKDAYS = [
   '2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21',
   '2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28', '2026-08-31',
 ]
+// a month on leave without pay (not maternity leave, whose months contribute
+// the usual amounts: compliance.test.ts, C6)
+const unpaid = (start: string, end = '2026-11-29'): LeaveLite => ({
+  start_date: start,
+  end_date: end,
+  paid: false,
+  type_name: 'Leave Without Pay',
+  type_code: 'LWOP',
+})
 const maternity = (start: string, end = '2026-11-29'): LeaveLite => ({
   start_date: start,
   end_date: end,
@@ -112,7 +121,7 @@ describe('maternity leave is paid as the maternity benefit, not as salary (RA 11
 describe('PhilHealth employee share paid by the national government', () => {
   it('drops the employee share for a PWD and keeps the employer share', () => {
     const base = pay(monthly, WORKDAYS)
-    const pwd = pay({ ...monthly, philhealthEeWaiver: 'pwd' }, WORKDAYS)
+    const pwd = pay({ ...monthly, philhealthNg: 'pwd' }, WORKDAYS)
     expect(base.philhealthEe).toBe(375)
     expect(pwd.philhealthEe).toBe(0)
     expect(pwd.philhealthEr).toBe(base.philhealthEr)
@@ -121,7 +130,7 @@ describe('PhilHealth employee share paid by the national government', () => {
   })
 
   it('does the same for a solo parent', () => {
-    const slip = pay({ ...monthly, philhealthEeWaiver: 'solo_parent' }, WORKDAYS)
+    const slip = pay({ ...monthly, philhealthNg: 'solo_parent' }, WORKDAYS)
     expect(slip.philhealthEe).toBe(0)
     expect(slip.trace.notes.some((n) => n.includes('PhilHealth Circular 2026-0015'))).toBe(true)
   })
@@ -169,8 +178,8 @@ describe('SSS on the month\'s actual compensation (RA 11199 Sec. 8(f))', () => {
   })
 
   it('refunds what the first half over-deducted when the month paid less', () => {
-    // on maternity leave the whole second half: the month paid ₱15,000 → MSC 15,000, no MPF
-    const slip = closing([], {}, 15000, [maternity('2026-08-16')])
+    // on leave without pay the whole second half: the month paid ₱15,000 → MSC 15,000, no MPF
+    const slip = closing([], {}, 15000, [unpaid('2026-08-16')])
     expect(slip.sssEe).toBe(250)
     expect(slip.sssMpfEe).toBe(-250)
     expect(slip.deductions.find((l) => l.code === 'sss_mpf')?.label).toBe('SSS MySSS Pension Booster (MPF) refund')
@@ -190,7 +199,7 @@ describe('SSS on the month\'s actual compensation (RA 11199 Sec. 8(f))', () => {
         gracePeriodMinutes: 0,
         entries: [],
         holidays: [],
-        approvedLeaves: [maternity('2026-07-20')],
+        approvedLeaves: [unpaid('2026-07-20')],
       }),
       runType: 'regular',
       monthContributions: {
@@ -276,7 +285,7 @@ describe('review fixes (2026-10-24)', () => {
         gracePeriodMinutes: 0,
         entries: [],
         holidays: [],
-        approvedLeaves: [maternity('2026-08-10')],
+        approvedLeaves: [unpaid('2026-08-10')],
       }),
       runType: 'regular',
       monthContributions: {

@@ -9,6 +9,7 @@
 // insights, chart series and the tables behind them — so the page, the CSV
 // and the PDF all show the same numbers.
 
+import { EMPLOYMENT } from '../payroll/law'
 import type { Employee, LeaveType, PayslipLine } from './db'
 import { fmtDate, fmtHours, fmtNum, fullName, money, plural } from './format'
 import { EMPLOYMENT_STATUS_LABELS, SEPARATION_REASON_LABELS } from './labels'
@@ -247,7 +248,7 @@ export function whoOf(employeeId: string, snap: Record<string, unknown> | null |
 }
 
 const BASIC_CODES = new Set(['basic', 'absence', 'late', 'undertime', 'extra_hours'])
-const PREMIUM_CODES = new Set(['restday', 'special', 'holiday'])
+const PREMIUM_CODES = new Set(['restday', 'special', 'holiday', 'restday_wage', 'restday_premium', 'special_premium', 'holiday_premium'])
 const LOAN_CODES = new Set(['other:sss_loan', 'other:pagibig_loan', 'other:company_loan'])
 
 export function toSlipFact(r: SlipRow): SlipFact {
@@ -1001,7 +1002,7 @@ const employedOn = (e: PersonRow, d: string) => e.hire_date <= d && (!e.separati
  * (Civil Code Art. 13; Mitsubishi Motors v. Chrysler Phils. Labor Union,
  * G.R. 148738: hired May 27, 1996, probation ended Nov 23, 1996).
  */
-export const PROBATION_DAYS = 180
+export const PROBATION_DAYS = EMPLOYMENT.probationDays.value
 /** The last day of a probationary period that started on the hire date. */
 export const probationEnds = (hire: string) => addDays(hire, PROBATION_DAYS)
 
@@ -1153,7 +1154,7 @@ export function headcountReport(all: PersonRow[], range: MonthRange, today: stri
   }
   if (pay.minimumWageDaily > 0) {
     // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
-    const floorOf = (e: PersonRow) => pay.minimumWageDaily * (e.employment_status === 'apprentice' ? 0.75 : 1)
+    const floorOf = (e: PersonRow) => pay.minimumWageDaily * (e.employment_status === 'apprentice' ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
     const below = activeNow.filter((e) => dailyEquivalent(e, pay.workingDaysPerYear) + 0.005 < floorOf(e))
     if (below.length) {
       insights.push({

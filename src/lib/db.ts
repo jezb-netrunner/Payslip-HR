@@ -6,8 +6,10 @@ import type {
   AllowanceCategory,
   BirBucket,
   ContributionTiming,
+  DeMinimisKind,
   MaternityBenefit,
   PayFrequency,
+  PayItemType,
   RoundingMode,
   WorkSchedule,
 } from '../payroll/types'
@@ -55,6 +57,29 @@ export interface Entity {
   rounding_scope: 'cash_only' | 'all'
   pay_date_lag_days: number
   payslip_footer_note: string
+  /** an MWE's extra 30% for a regular holiday worked on the rest day is taxable */
+  mwe_rh_restday_premium_taxable: boolean
+  /** paid vacation leave days granted a year (5 or more: outside SIL, Labor Code Art. 95(b)) */
+  paid_vl_days_per_year: number
+  /** a SIL-only client's leave converted to cash is taxable */
+  sil_conversion_taxable: boolean
+  /** the 13th month pay is SSS compensation of its month */
+  sss_include_13th_month: boolean
+  /** DOLE exemption from the maternity salary differential (RA 11210 Sec. 5(c); DOLE DA 01-19) */
+  maternity_differential_exempt: boolean
+  dole_exemption_ref: string
+  dole_exemption_valid_until: string | null
+  /** no regular holiday pay after unpaid absence on the workday before (default off) */
+  holiday_absence_rule: boolean
+  /** a retail or service establishment regularly employing less than 10 workers: no holiday pay (Art. 94) */
+  holiday_pay_exempt: boolean
+  retail_service_establishment: boolean
+  regular_workers: number | null
+  /** BIR 1601-C filing: manual (eBIRForms) or eFPS, and the eFPS group */
+  bir_filing_method: 'manual' | 'efps'
+  efps_group: 'A' | 'B' | 'C' | 'D' | 'E' | null
+  /** Pag-IBIG due day of the following month, as the client enters it */
+  pagibig_due_day: number | null
   is_active: boolean
   created_at: string
 }
@@ -119,10 +144,18 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
-  /** the national government pays the PhilHealth employee share (RA 11228 PWD; RA 11861 solo parent) */
-  philhealth_ee_waiver?: 'pwd' | 'solo_parent' | null
-  philhealth_ee_waiver_from?: string | null
-  philhealth_ee_waiver_until?: string | null
+  /** DOLE or allied agency certification of a hazardous assignment (an MWE's hazard pay is exempt only with it) */
+  hazard_certification_ref?: string
+  /**
+   * The national government pays the PhilHealth employee half (PhilHealth
+   * Circulars 2026-0015 and 2026-0017): from ph_ng_from_month through the
+   * month before the ID's expiry month.
+   */
+  ph_ng_type?: 'solo_parent' | 'pwd' | null
+  ph_ng_from_month?: string | null
+  /** Solo Parent ID (SPIC) or PWD ID */
+  id_number?: string
+  id_valid_until?: string | null
   payment_method: PaymentMethod
   work_schedule: WorkSchedule
   bank_name: string | null
@@ -158,6 +191,10 @@ export interface EmployeeAllowance {
   amount: number
   category: AllowanceCategory
   basis: AllowanceBasis
+  /** which de minimis benefit (category de_minimis) */
+  de_minimis_kind?: DeMinimisKind | null
+  /** not SSS compensation: an allowance subject to liquidation, a Christmas bonus */
+  pay_item_type?: PayItemType | null
   active: boolean
 }
 
@@ -318,6 +355,11 @@ export interface PayslipLine {
   bir?: BirBucket
   hours?: number
   meta?: string
+  /** the de minimis benefit the line is, and the leave days it converts */
+  dm?: DeMinimisKind
+  leaveDays?: number
+  /** a maternity payout's contribution deduction: the leave months it covers */
+  covers?: { month: string; amount: number }[]
 }
 
 export interface Payslip {
@@ -355,6 +397,8 @@ export interface Payslip {
   sss_mpf_er: number
   philhealth_ee: number
   philhealth_er: number
+  /** PhilHealth's employee half paid by the national government: neither deducted nor remitted */
+  philhealth_ng: number
   pagibig_ee: number
   pagibig_er: number
   withholding_tax: number
@@ -392,6 +436,12 @@ export interface PayrollAdjustment {
   benefit?: MaternityBenefit | null
   /** date the employee signed the written authorization ('other' deductions, Labor Code Art. 113) */
   authorized_on?: string | null
+  /** which de minimis benefit (category de_minimis) */
+  de_minimis_kind?: DeMinimisKind | null
+  /** unused leave converted to cash: the days converted */
+  leave_days?: number | null
+  /** not SSS compensation: a Christmas bonus, an allowance subject to liquidation */
+  pay_item_type?: PayItemType | null
   created_at: string
 }
 
