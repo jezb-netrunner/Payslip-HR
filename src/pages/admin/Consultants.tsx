@@ -248,6 +248,12 @@ function ConsultantsPage({ entity }: { entity: Entity }) {
   )
 }
 
+/** A billing's usual fee: a retainer's month (half of it when billed twice a month), or a deliverable's fee. */
+function usualFee(c: Consultant): number {
+  if (!c.fee_amount) return 0
+  return c.fee_basis === 'retainer' && c.billing === 'semi_monthly' ? round2(Number(c.fee_amount) / 2) : Number(c.fee_amount)
+}
+
 /** Quarters with billings, the current one and the selected one, newest first. */
 function quarterOptions(data: Data, selected: string): Quarter[] {
   const starts = new Set([quarterOf(todayManila()).start, selected, ...data.billings.map((b) => quarterOf(b.billed_on).start)])
@@ -297,8 +303,11 @@ function ConsultantList({
     <div className="space-y-3">
       {sorted.map((c) => {
         const declaration = data.declarations.find((d) => d.consultant_id === c.id && d.year === year)
-        const ytd = data.billings.filter((b) => b.consultant_id === c.id && b.billed_on.startsWith(String(year))).reduce((s, b) => s + Number(b.gross_amount), 0)
-        const rule = version ? ewtRuleFor(version.data, c, declaration, ytd) : undefined
+        // the next billing: what was billed this year to date, plus its usual fee
+        const ytd = data.billings
+          .filter((b) => b.consultant_id === c.id && b.billed_on.startsWith(String(year)) && b.billed_on <= today)
+          .reduce((s, b) => s + Number(b.gross_amount), 0)
+        const rule = version ? ewtRuleFor(version.data, c, declaration, round2(ytd + usualFee(c))) : undefined
         const kind = version?.data.fees[c.fee_kind]?.label
         const concerns = checklistConcerns(c.checklist)
         return (
@@ -347,7 +356,7 @@ function ConsultantList({
               )}
               {rule && (
                 <Badge tone="blue">
-                  EWT {pct(rule.rate)} ({rule.atc}) in {year}: {ewtReasonText(rule.reason, rule.threshold)}
+                  Next billing: EWT {pct(rule.rate)} ({rule.atc}), {ewtReasonText(rule.reason, rule.threshold)}
                 </Badge>
               )}
             </div>
@@ -931,8 +940,7 @@ function BillingModal({
   const [f, setF] = useState<BillingForm>(() => blank())
   function feeFor(id: string): string {
     const c = data.consultants.find((x) => x.id === id)
-    if (!c?.fee_amount) return ''
-    return String(c.fee_basis === 'retainer' && c.billing === 'semi_monthly' ? round2(Number(c.fee_amount) / 2) : Number(c.fee_amount))
+    return c && usualFee(c) > 0 ? String(usualFee(c)) : ''
   }
   function blank(): BillingForm {
     if (editing) {

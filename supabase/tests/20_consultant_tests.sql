@@ -90,6 +90,14 @@ values ('71000000-0000-0000-0000-0000000020b2', '70000000-0000-0000-0000-0000000
 update consultant_declarations set over_threshold = true where consultant_id = '70000000-0000-0000-0000-0000000020a1' and year = 2026;
 select pg_temp.check((select ewt_rate = pg_temp.band('individual', 'above', '2026-07-15') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b1'), 'an unpaid billing takes the new declaration');
 select pg_temp.check((select ewt_rate = pg_temp.band('individual', 'within', '2026-07-31') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b2'), 'a paid one keeps what was withheld');
+update consultant_billings set note = 'paid by check' where id = '71000000-0000-0000-0000-0000000020b2';
+select pg_temp.check((select ewt_rate = pg_temp.band('individual', 'within', '2026-07-31') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b2'), 'and a note on it changes nothing');
+-- the kind of fee re-codes the unpaid billings
+update consultants set fee_kind = 'professional' where id = '70000000-0000-0000-0000-0000000020a1';
+select pg_temp.check((select atc = 'WI011' from consultant_billings where id = '71000000-0000-0000-0000-0000000020b1'), 'a professional fee: WI011');
+select pg_temp.check((select atc = 'WI050' from consultant_billings where id = '71000000-0000-0000-0000-0000000020b2'), 'the paid one keeps WI050');
+update consultants set fee_kind = 'consultancy' where id = '70000000-0000-0000-0000-0000000020a1';
+select pg_temp.check((select atc = 'WI051' from consultant_billings where id = '71000000-0000-0000-0000-0000000020b1'), 'back to consultancy: WI051');
 select pg_temp.expect_error($$insert into consultant_billings (consultant_id, invoice_no, billed_on, gross_amount, vat_amount) values ('70000000-0000-0000-0000-0000000020a1', 'INV-3', '2026-08-15', 30000, 3600)$$, '%VAT-registered consultant%');
 select pg_temp.expect_error($$insert into consultant_billings (consultant_id, invoice_no, billed_on, gross_amount) values ('70000000-0000-0000-0000-0000000020a1', 'INV-1', '2026-08-15', 30000)$$, '%consultant_billings_invoice_unique%');
 -- a firm
@@ -125,6 +133,11 @@ values ('71000000-0000-0000-0000-0000000020b7', '70000000-0000-0000-0000-0000000
 select pg_temp.check((select ewt_rate = pg_temp.band('juridical', 'above', '2026-09-30') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b6'), 'a February billing entered later moves September past the threshold');
 delete from consultant_billings where id in ('71000000-0000-0000-0000-0000000020b6', '71000000-0000-0000-0000-0000000020b7');
 update consultant_declarations set over_threshold = true where consultant_id = '70000000-0000-0000-0000-0000000020a2';
+-- a consultant no longer VAT-registered: its unpaid VAT invoice stays, and so does the change
+update consultants set vat_registered = false where id = '70000000-0000-0000-0000-0000000020a2';
+select pg_temp.check((select vat_amount = 12000 from consultant_billings where id = '71000000-0000-0000-0000-0000000020b3'), 'the VAT invoice stays as billed');
+select pg_temp.expect_error($$update consultant_billings set gross_amount = 90000 where id = '71000000-0000-0000-0000-0000000020b3'$$, '%VAT-registered consultant%');
+update consultants set vat_registered = true where id = '70000000-0000-0000-0000-0000000020a2';
 commit;
 
 \echo '--- 20.3 admins only; the EWT tables are read-only'
@@ -152,8 +165,11 @@ select pg_temp.expect_error($$insert into consultant_billings (consultant_id, in
 -- a declaration doesn't re-rate an unpaid billing of a filed quarter
 update consultant_declarations set over_threshold = false where consultant_id = '70000000-0000-0000-0000-0000000020a1' and year = 2026;
 select pg_temp.check((select ewt_rate = pg_temp.band('individual', 'above', '2026-07-15') and paid_on is null from consultant_billings where id = '71000000-0000-0000-0000-0000000020b1'), 'a filed quarter keeps its rates');
--- the payment can still be recorded
+-- the payment can still be recorded, and doesn't re-rate it
 update consultant_billings set paid_on = '2026-11-03', payment_ref = 'CHK 1002' where id = '71000000-0000-0000-0000-0000000020b1';
+select pg_temp.check((select ewt_rate = pg_temp.band('individual', 'above', '2026-07-15') from consultant_billings where id = '71000000-0000-0000-0000-0000000020b1'), 'paid in a filed quarter: as withheld');
+-- removing a consultant with a filed quarter keeps its billings
+select pg_temp.expect_error($$delete from consultants where id = '70000000-0000-0000-0000-0000000020a1'$$, '%are kept: reopen the quarter%');
 select pg_temp.expect_error($$insert into ewt_quarter_filings (entity_id, quarter, filed_on) values ('10000000-0000-0000-0000-0000000020f0', '2026-08-01', '2026-10-30')$$, '%ewt_quarter_filings_quarter_check%');
 delete from ewt_quarter_filings where id = '72000000-0000-0000-0000-0000000020c1';
 update consultant_billings set gross_amount = 40000 where id = '71000000-0000-0000-0000-0000000020b1';

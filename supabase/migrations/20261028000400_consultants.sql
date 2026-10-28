@@ -297,6 +297,8 @@ declare
   v_vat boolean;
   v_signed timestamptz;
   v_ytd numeric;
+  -- a re-rating of the year's unpaid billings (recompute_consultant_billings)
+  v_rerate boolean := coalesce(current_setting('consultants.rerate', true), '') = 'on';
   v_pay_changes boolean := tg_op = 'INSERT'
     or (tg_op = 'UPDATE' and (new.billed_on, new.gross_amount, new.vat_amount, new.invoice_no)
         is distinct from (old.billed_on, old.gross_amount, old.vat_amount, old.invoice_no));
@@ -307,6 +309,9 @@ begin
   end if;
   if tg_op in ('UPDATE', 'DELETE') and (tg_op = 'DELETE' or v_pay_changes)
      and public.ewt_quarter_filed(old.entity_id, old.billed_on) then
+    if tg_op = 'DELETE' and not exists (select 1 from consultants c where c.id = old.consultant_id) then
+      raise exception 'Billings of a quarter whose BIR 1601-EQ is marked filed are kept: reopen the quarter of % on the Consultants page first.', old.billed_on;
+    end if;
     raise exception 'The BIR 1601-EQ for the quarter of % is marked filed: its billings are locked. Reopen the quarter to change it.', old.billed_on;
   end if;
   if tg_op = 'DELETE' then
@@ -325,21 +330,24 @@ begin
       raise exception 'The BIR 1601-EQ for the quarter of % is marked filed: date the billing in an open quarter, or reopen that quarter.', new.billed_on;
     end if;
   end if;
-  if new.vat_amount > 0 and not v_vat then
+  if v_pay_changes and new.vat_amount > 0 and not v_vat then
     raise exception 'VAT on a billing needs a VAT-registered consultant.';
   end if;
   -- the withholding follows the table, the payee, the declaration and the
-  -- year's billings so far (recomputed on any change)
-  select coalesce(sum(b.gross_amount), 0) + new.gross_amount into v_ytd
-    from consultant_billings b
-    where b.consultant_id = new.consultant_id and b.id <> new.id
-      and extract(year from b.billed_on) = extract(year from new.billed_on)
-      and (b.billed_on, b.created_at, b.id) < (new.billed_on, new.created_at, new.id);
-  select x.atc, x.rate into e from public.consultant_billing_ewt(new.consultant_id, new.billed_on, v_ytd) x;
-  new.atc := e.atc;
-  new.ewt_rate := e.rate;
-  new.ewt_amount := round(new.gross_amount * e.rate, 2);
-  new.net_amount := new.gross_amount + new.vat_amount - new.ewt_amount;
+  -- year's billings so far: worked out when the fee or its date changes and
+  -- on a re-rating, never on a payment or a note (what was withheld stays)
+  if v_pay_changes or v_rerate then
+    select coalesce(sum(b.gross_amount), 0) + new.gross_amount into v_ytd
+      from consultant_billings b
+      where b.consultant_id = new.consultant_id and b.id <> new.id
+        and extract(year from b.billed_on) = extract(year from new.billed_on)
+        and (b.billed_on, b.created_at, b.id) < (new.billed_on, new.created_at, new.id);
+    select x.atc, x.rate into e from public.consultant_billing_ewt(new.consultant_id, new.billed_on, v_ytd) x;
+    new.atc := e.atc;
+    new.ewt_rate := e.rate;
+    new.ewt_amount := round(new.gross_amount * e.rate, 2);
+    new.net_amount := new.gross_amount + new.vat_amount - new.ewt_amount;
+  end if;
   new.created_by := case when tg_op = 'INSERT' then coalesce(auth.uid(), new.created_by) else old.created_by end;
   return new;
 end
@@ -351,12 +359,16 @@ create trigger consultant_billings_guard before insert or update or delete on pu
 -- billings not paid yet in an open quarter (of that year, for a declaration)
 create or replace function public.recompute_consultant_billings(p_consultant uuid, p_year int)
 returns void
-language sql security definer set search_path = public
+language plpgsql security definer set search_path = public
 as $$
+begin
+  perform set_config('consultants.rerate', 'on', true);
   update consultant_billings b set gross_amount = b.gross_amount
     where b.consultant_id = p_consultant and b.paid_on is null
       and (p_year is null or extract(year from b.billed_on)::int = p_year)
-      and not public.ewt_quarter_filed(b.entity_id, b.billed_on)
+      and not public.ewt_quarter_filed(b.entity_id, b.billed_on);
+  perform set_config('consultants.rerate', 'off', true);
+end
 $$;
 
 create or replace function public.consultant_profile_changed()
@@ -364,7 +376,7 @@ returns trigger
 language plpgsql security definer set search_path = public
 as $$
 begin
-  if (new.payee_type, new.vat_registered) is distinct from (old.payee_type, old.vat_registered) then
+  if (new.payee_type, new.vat_registered, new.fee_kind) is distinct from (old.payee_type, old.vat_registered, old.fee_kind) then
     perform public.recompute_consultant_billings(new.id, null);
   end if;
   return null;
@@ -397,7 +409,8 @@ returns trigger
 language plpgsql security definer set search_path = public
 as $$
 begin
-  if pg_trigger_depth() > 1 then
+  if pg_trigger_depth() > 1
+     or (tg_op = 'UPDATE' and (new.billed_on, new.gross_amount) is not distinct from (old.billed_on, old.gross_amount)) then
     return null;
   end if;
   if tg_op <> 'INSERT' then

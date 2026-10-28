@@ -222,7 +222,6 @@ export interface QapRow {
 }
 
 export function qapRows(payees: PayeeFacts[], billings: BillingFact[], quarter: Quarter): QapRow[] {
-  const byId = new Map(payees.map((p) => [p.id, p]))
   const sorted = [...payees].sort((a, b) => payeeName(a).localeCompare(payeeName(b)))
   const rows: QapRow[] = []
   for (const p of sorted) {
@@ -236,7 +235,7 @@ export function qapRows(payees: PayeeFacts[], billings: BillingFact[], quarter: 
         firstName: p.payee_type === 'individual' ? p.first_name : '',
         middleName: p.payee_type === 'individual' ? p.middle_name : '',
         atc: r.atc,
-        nature: byId.get(p.id)?.service ?? '',
+        nature: p.service,
         income: r.total,
         rate: r.rate,
         withheld: r.withheld,

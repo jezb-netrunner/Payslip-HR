@@ -5,7 +5,8 @@
 // (DEADLINES). A date on a weekend or a holiday is shown with a note, never
 // moved (as on the filing calendar).
 
-import { endOfMonth } from '../lib/manila'
+import { addDays, endOfMonth } from '../lib/manila'
+import { withDayNote } from './dueDates'
 import type { Quarter } from './ewt'
 import { DEADLINES } from './law'
 
@@ -33,14 +34,12 @@ export interface EwtDueDates {
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
-const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 /** the YYYY-MM month after a YYYY-MM month */
 const nextMonth = (m: string) => {
   const y = Number(m.slice(0, 4))
   const mm = Number(m.slice(5, 7))
   return mm === 12 ? `${y + 1}-01` : `${y}-${pad(mm + 1)}`
 }
-const addDaysIso = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10)
 const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 
 export function ewtDueDates(
@@ -54,7 +53,7 @@ export function ewtDueDates(
     (m) => `${nextMonth(m)}-${pad(efps ? D.ewt0619eEfpsDays.value[client.efpsGroup as 'A'] : D.ewt0619eManualDay.value)}`,
   ) as [string, string]
   const return1601eq = endOfMonth(`${nextMonth(quarter.months[2])}-01`)
-  const form2307 = addDaysIso(quarter.end, D.form2307DaysAfterQuarter.value)
+  const form2307 = addDays(quarter.end, D.form2307DaysAfterQuarter.value)
   const year = Number(quarter.start.slice(0, 4))
   const rows: EwtDue[] = [
     ...monthly.map((due, k) => ({
@@ -73,18 +72,10 @@ export function ewtDueDates(
     },
     { label: `BIR 1604-E for ${year}`, due: `${year + 1}-03-${pad(D.form1604eMarchDay.value)}`, basis: D.form1604eMarchDay.source, note: '' },
   ]
-  const holidayOn = new Map(holidays.map((h) => [h.holiday_date, h.name]))
   return {
     monthly,
     return1601eq,
     form2307,
-    rows: rows
-      .map((r) => {
-        const day = new Date(`${r.due}T00:00:00Z`).getUTCDay()
-        const holiday = holidayOn.get(r.due)
-        const why = holiday ? `Falls on ${holiday}` : day === 0 || day === 6 ? `Falls on a ${WEEKDAYS[day]}` : ''
-        return why ? { ...r, note: r.note ? `${r.note}. ${why}` : why } : r
-      })
-      .sort((a, b) => a.due.localeCompare(b.due)),
+    rows: rows.map((r) => withDayNote(r, holidays)).sort((a, b) => a.due.localeCompare(b.due)),
   }
 }
