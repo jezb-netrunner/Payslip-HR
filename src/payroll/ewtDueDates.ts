@@ -6,7 +6,8 @@
 // a date on a weekend or a holiday is shown with a note, never moved (as on
 // the filing calendar).
 
-import { addDays, endOfMonth } from '../lib/manila'
+import { fmtMonth } from '../lib/format'
+import { addDays, addMonths, endOfMonth } from '../lib/manila'
 import { withDayNote } from './dueDates'
 import { quarterOf, type Quarter } from './ewt'
 import { DEADLINES } from './law'
@@ -49,12 +50,7 @@ export interface EwtDueDates {
 
 const pad = (n: number) => String(n).padStart(2, '0')
 /** the YYYY-MM month after a YYYY-MM month */
-const nextMonth = (m: string) => {
-  const y = Number(m.slice(0, 4))
-  const mm = Number(m.slice(5, 7))
-  return mm === 12 ? `${y + 1}-01` : `${y}-${pad(mm + 1)}`
-}
-const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-PH', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+const nextMonth = (m: string) => addMonths(`${m}-01`, 1).slice(0, 7)
 
 function quarterRows(quarter: Quarter, client: EwtFilingClient): EwtDue[] {
   const D = DEADLINES
@@ -63,7 +59,7 @@ function quarterRows(quarter: Quarter, client: EwtFilingClient): EwtDue[] {
     ...quarter.months.slice(0, 2).map((m) => ({
       filing: '0619e' as const,
       period: `${m}-01`,
-      label: `BIR 0619-E for ${monthName(m)}`,
+      label: `BIR 0619-E for ${fmtMonth(m)}`,
       due: `${nextMonth(m)}-${pad(efps ? D.ewt0619eEfpsDays.value[client.efpsGroup as 'A'] : D.ewt0619eManualDay.value)}`,
       basis: efps ? `eFPS group ${client.efpsGroup}: ${D.ewt0619eEfpsDays.source}` : D.ewt0619eManualDay.source,
       note: client.filing === 'efps' && !client.efpsGroup ? 'Set the eFPS group in Client Settings' : '',

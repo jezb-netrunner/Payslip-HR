@@ -159,13 +159,40 @@ describe('a pay rate that changes inside the period', () => {
     ])
   })
 
-  it('daily to monthly from Sep 9 (regularization): the days before stay on the daily rate', () => {
+  it('daily to monthly from Sep 9 (regularization): mostly daily-rated, each day at its own rate', () => {
     const slip = pay([daily('2026-09-01', 700), monthly('2026-09-09', 20000)])
-    // monthly: 10,000 − 6 days before Sep 9 × 919.54 = 4,482.76
+    // 6 of the 11 weekdays daily-rated: the 5 monthly days at 20,000 × 12 ÷ 261 = 919.54
     expect(basic(slip.earnings)).toEqual([
       ['Basic Pay to Sep 8 (6 day/s at 700.00)', 4200],
-      ['Basic Pay from Sep 9 (20,000.00 a month)', 4482.76],
+      ['Basic Pay from Sep 9 (20,000.00 a month)', 4597.7],
     ])
+  })
+
+  it('daily to monthly from Sep 7: monthly-rated for most of the period, its salary less the daily days', () => {
+    const slip = pay([daily('2026-09-01', 700), monthly('2026-09-07', 20000)])
+    // monthly: 10,000 − 4 days before Sep 7 × 919.54 = 6,321.84
+    expect(basic(slip.earnings)).toEqual([
+      ['Basic Pay to Sep 6 (4 day/s at 700.00)', 2800],
+      ['Basic Pay from Sep 7 (20,000.00 a month)', 6321.84],
+    ])
+  })
+
+  it('monthly to daily from Sep 3: the 2 monthly days at their daily rate, never a salary less 9 days', () => {
+    const slip = pay([monthly('2026-09-01', 30000), daily('2026-09-03', 1500)])
+    expect(basic(slip.earnings)).toEqual([
+      ['Basic Pay to Sep 2 (30,000.00 a month)', 2758.62],
+      ['Basic Pay from Sep 3 (9 day/s at 1,500.00)', 13500],
+    ])
+  })
+
+  it("an absence and lateness on the daily days aren't in the monthly deductions' counts", () => {
+    const days = september(['2026-09-14']).map((d) =>
+      d.date === '2026-09-02' ? { ...d, lateMinutes: 10 } : d.date === '2026-09-10' ? { ...d, lateMinutes: 30 } : d,
+    )
+    const slip = pay([monthly('2026-09-01', 30000), daily('2026-09-09', 1500)], days)
+    // monthly to Sep 8 (6 of 11 weekdays): only its 10 minutes are docked
+    expect(slip.earnings.find((l) => l.code === 'late')).toMatchObject({ label: 'Tardiness (10 min)', amount: -28.74 })
+    expect(slip.earnings.find((l) => l.code === 'absence')).toBeUndefined()
   })
 
   it('one rate over the period pays as before', () => {

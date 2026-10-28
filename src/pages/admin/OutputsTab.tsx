@@ -104,8 +104,10 @@ function OutputModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing?.id])
 
-  const quantity = Number(f.quantity)
-  const unitRate = Number(f.unit_rate)
+  // as the database keeps them (units to 2 decimals, the rate to 4), so the
+  // total shown is the total paid
+  const quantity = round2(Number(f.quantity))
+  const unitRate = Math.round(Number(f.unit_rate) * 10000) / 10000
   const total = f.basis === 'units' ? (quantity > 0 && unitRate > 0 ? round2(quantity * unitRate) : 0) : Number(f.amount)
   const hasReport = !!editing?.report_path && !f.removeReport
 

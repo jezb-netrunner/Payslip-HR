@@ -1278,6 +1278,12 @@ function CareerTab({
       if (newRate !== null && f.effective_date < employee.hire_date) {
         throw new Error(`A pay rate can't start before the hire date (${fmtDate(employee.hire_date)}).`)
       }
+      if (newRate !== null && rates.some((r) => r.effective_from === f.effective_date)) {
+        throw new Error('A pay rate from that date already exists: change it on the Pay History tab, or record the event without a rate.')
+      }
+      if (newRate !== null && employee.fixed_salary && f.pay_type === 'daily') {
+        throw new Error('A fixed-salary employee is monthly-rated: turn off fixed salary first.')
+      }
       // a new rate goes to the pay history (admins only), linked to the event
       const { data: ev, error } = await supabase
         .from('career_events')
@@ -1306,10 +1312,12 @@ function CareerTab({
           career_event_id: ev.id,
         })
         if (rateErr) {
+          // the event and its rate are recorded together or not at all
+          await supabase.from('career_events').delete().eq('id', ev.id)
           throw new Error(
             /one_per_date/.test(errorMessage(rateErr, ''))
-              ? 'Event recorded, but a pay rate from that date already exists: change it on the Pay History tab.'
-              : `Event recorded, but the pay rate was not: ${errorMessage(rateErr, 'save failed')}`,
+              ? 'Nothing recorded: a pay rate from that date already exists. Change it on the Pay History tab.'
+              : `Nothing recorded: ${errorMessage(rateErr, 'the pay rate could not be saved')}`,
           )
         }
       }
@@ -1410,7 +1418,7 @@ function CareerTab({
             )}
           </div>
           <Field label="Details"><Textarea rows={2} value={f.details} onChange={(e) => setF({ ...f, details: e.target.value })} /></Field>
-          <Toggle checked={f.apply} onChange={(v) => setF({ ...f, apply: v })} label="Also update the employee's current record" />
+          <Toggle checked={f.apply} onChange={(v) => setF({ ...f, apply: v })} label="Also update the employee's position, department and status" />
           <Button className="w-full" disabled={busy} onClick={save}>
             {busy ? 'Saving…' : 'Record event'}
           </Button>

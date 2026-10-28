@@ -5,6 +5,7 @@
 // as migrations); the database withholds each billing with the same rule as
 // ewtRuleFor (consultant_billing_ewt), which the app uses for previews.
 
+import { endOfMonth } from '../lib/manila'
 import { round2 } from './types'
 
 export type PayeeType = 'individual' | 'juridical'
@@ -120,7 +121,6 @@ export interface Quarter {
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
-const MONTH_DAYS = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate()
 
 export function quarterOf(date: string): Quarter {
   const y = Number(date.slice(0, 4))
@@ -128,7 +128,7 @@ export function quarterOf(date: string): Quarter {
   const m1 = q * 3 + 1
   return {
     start: `${y}-${pad(m1)}-01`,
-    end: `${y}-${pad(m1 + 2)}-${pad(MONTH_DAYS(y, m1 + 2))}`,
+    end: endOfMonth(`${y}-${pad(m1 + 2)}-01`),
     label: `Q${q + 1} ${y}`,
     months: [`${y}-${pad(m1)}`, `${y}-${pad(m1 + 1)}`, `${y}-${pad(m1 + 2)}`],
   }

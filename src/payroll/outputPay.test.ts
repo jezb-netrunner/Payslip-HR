@@ -229,6 +229,16 @@ describe('a worker paid by results', () => {
     expect(slip.earnings.find((l) => l.label.startsWith('Holiday Pay, Sep 8'))?.amount).toBe(195)
   })
 
+  it("warns that output made on a worked holiday or rest day is paid without the day's premium", () => {
+    const days = sept({
+      '2026-09-08': { dayType: 'regular_holiday', holidayName: 'Test holiday' },
+      '2026-09-12': { dayType: 'rest_day', scheduled: false, workedMinutes: 480, payableMinutes: 480, absent: false },
+    })
+    const slip = pay(sewer, shirts(400), { days })
+    expect(slip.trace.warnings.some((w) => w.startsWith('Worked on a holiday or rest day (Sep 8, Sep 12): output pay is at its own rates'))).toBe(true)
+    expect(pay(sewer, shirts(400)).trace.warnings.some((w) => w.startsWith('Worked on a holiday or rest day'))).toBe(false)
+  })
+
   it('takes PhilHealth on at least the minimum wage, and settles both on the month at its close', () => {
     const first = pay(sewer, shirts(400))
     // ₱695 × 261 ÷ 12 = ₱15,116.25 → ₱755.81 a month, ₱377.90 the employee's, half of it now

@@ -81,24 +81,37 @@ cross join lateral (select case
 where ce.monthly_rate is not null or ce.daily_rate is not null
 order by ce.employee_id, ce.effective_date, ce.created_at desc;
 
--- the rate on record today, where the history doesn't already end on it
--- (a rate edited directly, or an employee without a recorded rate)
+-- the rate on record today, where the history doesn't already end on it:
+-- an employee without a recorded rate from the hire date, a rate edited
+-- directly from the day after the last finalized payroll paid at another
+-- rate (the payrolls paid at it and any draft keep it), never before the
+-- history's last change (which it then replaces) nor after today
 insert into public.employee_pay_rates (employee_id, entity_id, effective_from, pay_type, rate, reason, note)
 select e.id, e.entity_id,
-  case when last.employee_id is null then e.hire_date else d.today end,
-  e.pay_type,
-  case when e.pay_type = 'monthly' then e.monthly_rate else e.daily_rate end,
+  case when last.employee_id is null then e.hire_date
+       else greatest(e.hire_date, last.effective_from, least(coalesce(paid.after_other, e.hire_date), d.today)) end,
+  e.pay_type, cur.rate,
   case when last.employee_id is null then 'hired' else 'adjustment' end,
   'Rate on record when the pay history started'
 from public.employees e
 cross join (select (now() at time zone 'Asia/Manila')::date as today) d
+cross join lateral (select case when e.pay_type = 'monthly' then e.monthly_rate else e.daily_rate end as rate) cur
 left join lateral (
-  select r.employee_id, r.pay_type, r.rate from public.employee_pay_rates r
+  select r.employee_id, r.effective_from, r.pay_type, r.rate from public.employee_pay_rates r
   where r.employee_id = e.id and r.effective_from <= d.today
   order by r.effective_from desc limit 1) last on true
+left join lateral (
+  select max(pr.period_end) + 1 as after_other
+  from public.payslips p
+  join public.payroll_runs pr on pr.id = p.payroll_run_id
+  where p.employee_id = e.id
+    and pr.status in ('finalized', 'paid') and pr.run_type in ('regular', 'final_pay')
+    and p.employee_snapshot ? 'pay_type'
+    and (p.employee_snapshot->>'pay_type',
+         (p.employee_snapshot->>case when p.employee_snapshot->>'pay_type' = 'monthly' then 'monthly_rate' else 'daily_rate' end)::numeric)
+        is distinct from (e.pay_type, cur.rate)) paid on true
 where last.employee_id is null
-   or (last.pay_type, last.rate) is distinct from
-      (e.pay_type, case when e.pay_type = 'monthly' then e.monthly_rate else e.daily_rate end)
+   or (last.pay_type, last.rate) is distinct from (e.pay_type, cur.rate)
 on conflict (employee_id, effective_from) do update
   set pay_type = excluded.pay_type, rate = excluded.rate, note = excluded.note;
 

@@ -96,6 +96,34 @@ describe('fixed salary without timekeeping', () => {
     })
   })
 
+  it("keeps the holiday absence rule to leave without pay: the workdays it doesn't time count as worked", () => {
+    const holiday = { dayType: 'regular_holiday' as const, holidayName: 'Test holiday', absent: false }
+    const ruled = (days: DayComputation[]) =>
+      computePayslip({
+        employee: executive,
+        settings: { ...settings, holidayAbsenceRule: true },
+        period: { start: '2026-09-01', end: '2026-09-15', index: 1, count: 2 },
+        tables: DEFAULT_TABLES,
+        days,
+        runType: 'regular',
+      })
+    const unpaid = (w: string[]) => w.some((x) => x.startsWith('Regular holiday not paid'))
+    const plain = ruled(noEntries({ '2026-09-08': holiday }))
+    expect(unpaid(plain.trace.warnings)).toBe(false)
+    expect(plain.grossPay).toBe(40000)
+    // leave without pay from the holiday on: the holiday itself is paid
+    const leaveFrom = ruled(
+      noEntries({
+        '2026-09-08': { ...holiday, onUnpaidLeave: true },
+        '2026-09-09': { onUnpaidLeave: true, absent: false },
+      }),
+    )
+    expect(leaveFrom.earnings.find((l) => l.code === 'absence')).toMatchObject({ label: 'Leave without pay (1 day/s)', amount: -3678.16 })
+    // leave without pay on the workday before: the rule applies
+    const before = ruled(noEntries({ '2026-09-07': { onUnpaidLeave: true, absent: false }, '2026-09-08': holiday }))
+    expect(unpaid(before.trace.warnings)).toBe(true)
+  })
+
   it('needs a monthly rate: a daily-rated employee is paid on attendance, with a warning', () => {
     const slip = pay({ ...executive, payType: 'daily', monthlyRate: 0, dailyRate: 3000 }, noEntries())
     expect(slip.grossPay).toBe(0)
