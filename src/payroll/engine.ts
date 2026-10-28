@@ -472,6 +472,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const segOf = (date: string) => segs.reduce((k, s, i) => (s.from <= date ? i : k), 0)
   const { daily, hourly, statutoryMonthlyBase } = segRates[segs.length - 1]
   const isMwe = employee.isMinimumWageEarner
+  // fixed salary without timekeeping (a choice per employee): the monthly
+  // rate pays the period, attendance docks and premiums nothing
+  const fixed = employee.fixedSalary === true && segs.every((g) => g.payType === 'monthly')
+  if (employee.fixedSalary && !fixed) {
+    warnings.push('Fixed salary needs a monthly rate: this payroll used attendance as usual.')
+  } else if (fixed && !extrasOnly) {
+    notes.push('Fixed salary, no timekeeping: the monthly rate pays the period. Leave without pay and days outside the employment are deducted; no overtime, night differential or holiday premium.')
+  }
 
   // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
   const wageFloor = settings.minimumWageDaily * (employee.apprentice ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
@@ -494,7 +502,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // hire or after the separation are absences too, but no one's missing time.
   const employed = (d: string) =>
     (!employee.hireDate || d >= employee.hireDate) && (!employee.separationDate || d <= employee.separationDate)
-  const absentDates = days.filter((d) => d.absent && employed(d.date)).map((d) => d.date)
+  const absentDates = fixed ? [] : days.filter((d) => d.absent && employed(d.date)).map((d) => d.date)
   if (absentDates.length > 0) {
     const shown = absentDates.slice(0, 6).map(shortDate).join(', ') + (absentDates.length > 6 ? ', …' : '')
     warnings.push(
@@ -587,7 +595,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   }))
 
   for (const d of days) {
-    const worked = d.workedMinutes > 0
+    const worked = !fixed && d.workedMinutes > 0
     // regular hours as a share of the standard day; above 1 only on a
     // longer compressed-workweek shift
     const fraction = d.payableMinutes / stdMin
@@ -619,7 +627,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       c.late += d.lateMinutes
       c.undertime += d.undertimeMinutes
     }
-    if (d.absent) {
+    if (d.absent && !fixed) {
       absentDays += 1
       absencePayDays += dayShare(d)
       c.absence += dayShare(d)
@@ -639,9 +647,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // date or after the last day
     const employedThen = employed(d.date)
     const holidayOk = employedThen && holidayPaid.get(d.date) !== false
-    if (!worked && !employedThen && !d.absent && !d.onUnpaidLeave && payType === 'monthly' && builtIn > 0) {
+    if (!worked && !employedThen && (!d.absent || fixed) && !d.onUnpaidLeave && payType === 'monthly' && builtIn > 0) {
       outsideEmploymentDays += 1
-      c.outside += 1
+      c.outside += fixed ? dayShare(d) : 1
+    }
+    // a fixed salary presumes the scheduled workdays worked (allowances per day)
+    if (fixed && employedThen && d.scheduled && d.dayType === 'regular' && !d.onPaidLeave && !d.onUnpaidLeave) {
+      daysWorked += 1
+      c.worked += 1
     }
     if (d.onUnpaidLeave && !worked && !(isRegularHolidayType(d.dayType) && holidayOk)) {
       if (unpaidLeaveCharged(d.dayType, payType, settings.workingDaysDivisor)) {
@@ -681,8 +694,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         // 94); a covered day is already paid inside the monthly rate. Not
         // paid: a covered day is deducted (on leave without pay over it, the
         // unpaid-leave rule above already did).
-        if (holidayOk && builtIn === 0) holidayPremium += daily
-        else if (!holidayOk && builtIn > 0 && !d.onUnpaidLeave && employedThen) {
+        if (holidayOk && builtIn === 0 && !fixed) holidayPremium += daily
+        else if (!holidayOk && builtIn > 0 && !d.onUnpaidLeave && employedThen && !fixed) {
           unpaidHolidayDays += 1
           c.unpaidHoliday += 1
         }
@@ -890,7 +903,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     if (absenceDeduction > 0) {
       const n = absentDays + unpaidLeaveDays
       const share = round2(absencePayDays)
-      earn('absence', `Absences (${n} day/s${share !== n ? `, ${share} days' pay` : ''})`, -absenceDeduction, 'basic')
+      earn('absence', `${fixed ? 'Leave without pay' : 'Absences'} (${n} day/s${share !== n ? `, ${share} days' pay` : ''})`, -absenceDeduction, 'basic')
     }
     const unpaidHolidayDeduction = dock(valued((g) => g.unpaidHoliday, perDay))
     if (unpaidHolidayDeduction > 0) {
@@ -898,7 +911,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
     const outsideDeduction = dock(valued((g) => g.outside, perDay))
     if (outsideDeduction > 0) {
-      earn('outside_employment', `Holidays before the hire date or after the last day (${outsideEmploymentDays} day/s)`, -outsideDeduction, 'basic')
+      earn('outside_employment', `${fixed ? 'Days' : 'Holidays'} before the hire date or after the last day (${outsideEmploymentDays} day/s)`, -outsideDeduction, 'basic')
     }
     const lateDeduction = dock(valued((g) => g.late, perMin))
     if (lateDeduction > 0) {

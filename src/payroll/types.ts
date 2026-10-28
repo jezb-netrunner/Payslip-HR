@@ -301,6 +301,13 @@ export interface PayrollEmployeeInput {
   /** Employment dates: days outside them are no one's missing time (warnings only; pay is unchanged). */
   hireDate?: string
   separationDate?: string | null
+  /**
+   * Fixed salary without timekeeping (a monthly rate): the rate pays the
+   * period; nothing is docked for absence or lateness and no overtime,
+   * night differential or holiday premium is computed. Unpaid leave and
+   * days outside the employment are still deducted.
+   */
+  fixedSalary?: boolean
 }
 
 export interface AllowanceInput {

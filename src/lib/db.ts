@@ -145,6 +145,10 @@ export interface Employee {
   daily_rate: number
   days_per_year: number | null
   is_minimum_wage_earner: boolean
+  /** Fixed salary without timekeeping (monthly-rated): no time in/out, no docking for absence or lateness, no premiums. */
+  fixed_salary?: boolean
+  /** Company policy for a fixed-salary employee: false = no 13th month pay. */
+  thirteenth_month_eligible?: boolean
   /** DOLE or allied agency certification of a hazardous assignment (an MWE's hazard pay is exempt only with it) */
   hazard_certification_ref?: string
   /**

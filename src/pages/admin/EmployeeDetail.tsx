@@ -595,6 +595,8 @@ function PayTab({
     pay_frequency: employee.pay_frequency,
     days_per_year: employee.days_per_year === null ? '' : String(employee.days_per_year),
     is_mwe: employee.is_minimum_wage_earner,
+    fixed_salary: employee.fixed_salary === true,
+    thirteenth: employee.thirteenth_month_eligible !== false,
     hazard_ref: employee.hazard_certification_ref ?? '',
     payment_method: employee.payment_method,
     bank_name: employee.bank_name ?? '',
@@ -633,6 +635,9 @@ function PayTab({
           pay_frequency: f.pay_frequency,
           days_per_year: f.days_per_year ? Number(f.days_per_year) : null,
           is_minimum_wage_earner: f.is_mwe,
+          fixed_salary: f.fixed_salary,
+          // the 13th month policy applies to a fixed salary only
+          thirteenth_month_eligible: f.fixed_salary ? f.thirteenth : true,
           hazard_certification_ref: f.hazard_ref.trim(),
           payment_method: f.payment_method,
           bank_name: f.bank_name || null,
@@ -792,6 +797,27 @@ function PayTab({
                 <Input value={f.bank_account_no} onChange={(e) => setF({ ...f, bank_account_no: e.target.value })} />
               </Field>
             </>
+          )}
+        </div>
+        <div className="mt-4 space-y-2 rounded-lg bg-slate-50 p-3">
+          {employee.pay_type === 'monthly' ? (
+            <>
+              <Toggle
+                checked={f.fixed_salary}
+                onChange={(v) => setF({ ...f, fixed_salary: v })}
+                label="Fixed salary, no timekeeping (executives, managers, field staff, consultants on an employee retainer)"
+              />
+              <p className="text-xs text-slate-500">
+                The monthly rate pays each payroll: no time in/out needed, nothing docked for absence or lateness, no overtime,
+                night differential or holiday premium. Leave without pay is still deducted. Service incentive leave follows
+                the leave entitlements.
+              </p>
+              {f.fixed_salary && (
+                <Toggle checked={f.thirteenth} onChange={(v) => setF({ ...f, thirteenth: v })} label="Gets 13th month pay (company policy)" />
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">A fixed salary without timekeeping needs a monthly rate (Pay History → Change pay rate).</p>
           )}
         </div>
         <div className="mt-4 space-y-2 rounded-lg bg-slate-50 p-3">

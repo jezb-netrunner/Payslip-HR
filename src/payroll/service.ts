@@ -355,7 +355,17 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   // Never pay the same days twice: anyone a finalized run already paid for
   // part of this period is left out (finalize enforces the same rule).
   let employees = candidates
-  if (!isThirteenth) {
+  if (isThirteenth) {
+    // a fixed-salary employee's 13th month is the client's policy for them
+    employees = candidates.filter((e) => {
+      if (e.thirteenth_month_eligible !== false) return true
+      warnings.push({
+        employee: `${e.first_name} ${e.last_name}`,
+        warnings: ['Left out: no 13th month pay under the client\'s policy for this fixed-salary employee (Pay & Policy).'],
+      })
+      return false
+    })
+  } else {
     const paid = await fetchAll<{ employee_id: string; period_start: string; period_end: string }>((from, to) =>
       supabase
         .from('payslips')
@@ -736,6 +746,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         schedule: emp.work_schedule,
         hireDate: emp.hire_date,
         separationDate: emp.separation_date,
+        fixedSalary: emp.fixed_salary === true,
         allowances: (allowancesBy.get(emp.id) ?? []).map((a) => ({
           label: a.label,
           amount: Number(a.amount),

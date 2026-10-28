@@ -868,6 +868,9 @@ function EmployeeSheet({
           {employee && (
             <p className="mb-2 text-sm font-semibold text-slate-700">
               {fullName(employee)} <span className="font-normal text-slate-400">{employee.employee_no}</span>
+              {employee.fixed_salary && (
+                <span className="ml-2 font-normal text-slate-500">· Fixed salary: no time in/out needed, payroll doesn't use it</span>
+              )}
             </p>
           )}
           <TableShell>

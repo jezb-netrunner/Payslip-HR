@@ -100,4 +100,24 @@ delete from payroll_runs where id = '30000000-0000-0000-0000-0000000018f1';
 delete from employees where id = '20000000-0000-0000-0000-0000000018f1';
 select pg_temp.check((select count(*) from employee_pay_rates where employee_id = '20000000-0000-0000-0000-0000000018f1') = 0, 'history removed with the employee');
 
+\echo '--- 18.5 fixed salary: monthly-rated only, the 13th month policy only for it'
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :na, true);
+insert into employees (id, entity_id, employee_no, first_name, last_name, hire_date, pay_type, daily_rate)
+values ('20000000-0000-0000-0000-0000000018f2', '10000000-0000-0000-0000-0000000018f0', 'N-002', 'Omar', 'Dos', '2026-02-02', 'daily', 900);
+select pg_temp.expect_error($$update employees set fixed_salary = true where id = '20000000-0000-0000-0000-0000000018f2'$$, '%employees_fixed_salary_monthly%');
+select pg_temp.expect_error($$update employees set thirteenth_month_eligible = false where id = '20000000-0000-0000-0000-0000000018f2'$$, '%employees_thirteenth_month_policy%');
+-- monthly from today, a daily rate dated ahead: fixed salary can't start
+insert into employee_pay_rates (employee_id, effective_from, pay_type, rate, reason)
+values ('20000000-0000-0000-0000-0000000018f2', current_date, 'monthly', 90000, 'promotion'),
+       ('20000000-0000-0000-0000-0000000018f2', current_date + 40, 'daily', 3500, 'adjustment');
+select pg_temp.expect_error($$update employees set fixed_salary = true where id = '20000000-0000-0000-0000-0000000018f2'$$, '%daily rate is dated ahead%');
+delete from employee_pay_rates where employee_id = '20000000-0000-0000-0000-0000000018f2' and pay_type = 'daily' and effective_from > current_date;
+update employees set fixed_salary = true, thirteenth_month_eligible = false where id = '20000000-0000-0000-0000-0000000018f2';
+select pg_temp.expect_error($$insert into employee_pay_rates (employee_id, effective_from, pay_type, rate, reason) values ('20000000-0000-0000-0000-0000000018f2', current_date + 10, 'daily', 4000, 'adjustment')$$, '%turn off fixed salary first%');
+insert into employee_pay_rates (employee_id, effective_from, pay_type, rate, reason)
+values ('20000000-0000-0000-0000-0000000018f2', current_date + 10, 'monthly', 95000, 'merit_increase');
+commit;
+
 \echo 'PASSED 18'

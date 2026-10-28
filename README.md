@@ -48,6 +48,11 @@ are refused; the Generate button makes random ones.
   raise dated ahead starts on its date; payrolls already final that were
   paid at another rate are flagged. **BIR & Reports → Pay changes** lists a
   year's changes with the monthly cost
+- **Fixed salary without timekeeping** (per employee, monthly-rated:
+  executives, managers, field staff, consultants on an employee retainer):
+  the rate pays each period, no attendance docking or premiums; leave
+  without pay and days outside the employment are deducted; the 13th month
+  is the client's policy for them
 - **Schedules**: client shift templates (start, end, meal break, flexible
   start, compressed-workweek days of up to 12 hours — DOLE Department
   Advisory 02-04); each employee's weekly pattern is set *from a date on*

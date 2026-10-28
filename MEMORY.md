@@ -414,11 +414,19 @@ History tab (step chart, table, payrolls paid at another rate, gross by
 month), rates on career events moved into the history, **Reports → Pay
 changes**. Tests 352 → 363, SQL suite 18.
 
+**Did (part 2, fixed salary):** `employees.fixed_salary` and
+`thirteenth_month_eligible` (migration `20261028000200`, NOT live): a
+monthly-rated employee paid without timekeeping (no absence or lateness
+docking, no overtime or premiums; leave without pay and days outside the
+employment deducted, presumed workdays count for per-day allowances), and
+a 13th month run leaves out one whose policy says no. The time report
+shows no absences for them. Tests 369, SQL 18.5.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**2026-10-28: `20261028000100_pay_rate_history` is in the repo, NOT live**
+**2026-10-28: `20261028000100_pay_rate_history` and `…0200_fixed_salary` are in the repo, NOT live**
 (placeholder version). It enables pg_cron on Supabase (the nightly
 refresh of today's rate). PR #7 deployed: Pages workflow run 10 green,
 2026-10-28 03:04 UTC.
