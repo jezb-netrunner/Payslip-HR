@@ -448,11 +448,30 @@ $$;
 create trigger consultant_declarations_guard before insert or update on public.consultant_declarations
   for each row execute function public.guard_consultant_declaration();
 
+-- ---------- the client's own EWT filing dates ----------
+-- A date the BIR moved (an extension) replaces the computed one for that
+-- client: the month a 0619-E covers, the quarter of a 2307 or 1601-EQ, or
+-- 1 January of the year of the payees' declarations list and the 1604-E.
+create table public.ewt_due_dates (
+  id uuid primary key default gen_random_uuid(),
+  entity_id uuid not null references public.entities(id) on delete cascade,
+  filing text not null constraint ewt_due_dates_filing_check check (filing in ('0619e', '2307', '1601eq', 'declarations', '1604e')),
+  period date not null constraint ewt_due_dates_period_check check (period = date_trunc('month', period)::date),
+  due_date date not null,
+  note text not null default '' constraint ewt_due_dates_note_check check (length(note) <= 200),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint ewt_due_dates_one unique (entity_id, filing, period)
+);
+create trigger ewt_due_dates_updated_at before update on public.ewt_due_dates
+  for each row execute function public.set_updated_at();
+
 -- ---------- access: the client's admins ----------
 alter table public.consultants enable row level security;
 alter table public.consultant_declarations enable row level security;
 alter table public.consultant_billings enable row level security;
 alter table public.ewt_quarter_filings enable row level security;
+alter table public.ewt_due_dates enable row level security;
 create policy "consultants: admins manage" on public.consultants
   for all to authenticated
   using (public.can_manage_entity(entity_id)) with check (public.can_manage_entity(entity_id));
@@ -465,7 +484,10 @@ create policy "consultant_billings: admins manage" on public.consultant_billings
 create policy "ewt_quarter_filings: admins manage" on public.ewt_quarter_filings
   for all to authenticated
   using (public.can_manage_entity(entity_id)) with check (public.can_manage_entity(entity_id));
-revoke all on public.consultants, public.consultant_declarations, public.consultant_billings, public.ewt_quarter_filings from anon;
+create policy "ewt_due_dates: admins manage" on public.ewt_due_dates
+  for all to authenticated
+  using (public.can_manage_entity(entity_id)) with check (public.can_manage_entity(entity_id));
+revoke all on public.consultants, public.consultant_declarations, public.consultant_billings, public.ewt_quarter_filings, public.ewt_due_dates from anon;
 
 create trigger audit_consultants after insert or update or delete on public.consultants
   for each row execute function public.audit_trigger();
@@ -474,6 +496,8 @@ create trigger audit_consultant_declarations after insert or update or delete on
 create trigger audit_consultant_billings after insert or update or delete on public.consultant_billings
   for each row execute function public.audit_trigger();
 create trigger audit_ewt_quarter_filings after insert or update or delete on public.ewt_quarter_filings
+  for each row execute function public.audit_trigger();
+create trigger audit_ewt_due_dates after insert or update or delete on public.ewt_due_dates
   for each row execute function public.audit_trigger();
 
 revoke execute on function public.guard_consultant() from public, anon, authenticated;

@@ -32,6 +32,7 @@ import {
   Toggle,
 } from '../../components/ui'
 import { useToast } from '../../components/toast'
+import { EwtFilingDates } from './EwtFilingDates'
 import { downloadCsv, getHolidaysBetween } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import {
@@ -63,7 +64,7 @@ import {
   type EwtVersion,
   type Quarter,
 } from '../../payroll/ewt'
-import { ewtDueDates } from '../../payroll/ewtDueDates'
+import { ewtDueDates, type EwtDueOverride } from '../../payroll/ewtDueDates'
 import { round2 } from '../../payroll/types'
 
 interface Data {
@@ -1152,17 +1153,27 @@ function BirTab({
   const payees = data.consultants.filter((c) => facts.some((b) => b.consultant_id === c.id && b.billed_on >= quarter.start && b.billed_on <= quarter.end))
   const qap = qapRows(payees, facts, quarter)
   const year = Number(quarter.start.slice(0, 4))
-  const [holidays, setHolidays] = useState<{ holiday_date: string; name: string }[]>([])
+  const [calendar, setCalendar] = useState<{ holidays: { holiday_date: string; name: string }[]; overrides: EwtDueOverride[] }>({
+    holidays: [],
+    overrides: [],
+  })
+  const [calendarReload, setCalendarReload] = useState(0)
   useEffect(() => {
     let cancelled = false
-    getHolidaysBetween(entity.id, `${year}-01-01`, `${year + 1}-03-31`)
-      .then((h) => !cancelled && setHolidays(h))
-      .catch(() => !cancelled && setHolidays([]))
+    Promise.all([
+      getHolidaysBetween(entity.id, `${year}-01-01`, `${year + 1}-03-31`),
+      supabase.from('ewt_due_dates').select('filing, period, due_date, note').eq('entity_id', entity.id).gte('period', `${year}-01-01`).lte('period', `${year}-12-01`),
+    ])
+      .then(([holidays, overrides]) => {
+        if (overrides.error) throw overrides.error
+        if (!cancelled) setCalendar({ holidays, overrides: (overrides.data ?? []) as EwtDueOverride[] })
+      })
+      .catch((err) => !cancelled && toast('error', errorMessage(err, 'Could not load the filing dates')))
     return () => {
       cancelled = true
     }
-  }, [entity.id, year])
-  const due = ewtDueDates(quarter, { filing: entity.bir_filing_method, efpsGroup: entity.efps_group }, holidays)
+  }, [entity.id, year, calendarReload, toast])
+  const due = ewtDueDates(quarter, { filing: entity.bir_filing_method, efpsGroup: entity.efps_group }, calendar.holidays, calendar.overrides)
   const declared = data.declarations
     .filter((d) => d.year === year)
     .map((d) => ({ d, c: data.consultants.find((c) => c.id === d.consultant_id) }))
@@ -1271,22 +1282,10 @@ function BirTab({
       </Card>
 
       <Card title={`Filing dates — ${quarter.label} and ${year}`} icon={<Landmark />}>
-        <ul className="divide-y divide-slate-100 text-sm">
-          {due.rows.map((r) => (
-            <li key={r.label} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
-              <span className="text-slate-700">
-                {r.label}
-                <span className="block text-xs text-slate-500">
-                  {r.basis}
-                  {r.note ? ` · ${r.note}` : ''}
-                </span>
-              </span>
-              <span className="whitespace-nowrap font-semibold text-ink-900">{fmtDate(r.due)}</span>
-            </li>
-          ))}
-        </ul>
+        <EwtFilingDates entityId={entity.id} rows={due.rows} onChanged={() => setCalendarReload((n) => n + 1)} />
         <p className="mt-2 text-xs text-slate-500">
-          The BIR often extends dates (calamities, system changes): check its advisories. A date on a weekend or holiday is shown as is.
+          The BIR often extends dates (calamities, system changes): change a date when it does. A date on a weekend or holiday is
+          shown with a note, not moved.
         </p>
       </Card>
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, CalendarClock, Download, FileText, Landmark, Lightbulb, ListOrdered, Pencil, Printer, ShieldCheck, TrendingUp } from 'lucide-react'
 import { PayChanges } from './PayChangesReport'
+import { EwtFilingDates } from './EwtFilingDates'
 import { Badge, Button, Card, EmptyState, Field, Input, LoadFailed, Modal, NoClient, PageHeader, Select, Spinner, StatCard, TableShell, Tabs, Td, Th, StatGroup } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees, getHolidaysBetween, getStatutoryTables } from '../../lib/api'
@@ -14,6 +15,7 @@ import { supabase } from '../../lib/supabase'
 import { alphalistCsv, annexFCsv, buildAlphalist, form2316Items, FORM_2316_LABELS, type AlphalistRow, type Form2316Item, type YearEndRate } from '../../payroll/alphalist'
 import { remittances1601C, type RemittanceMonth } from '../../payroll/remittance'
 import { FILING_LABELS, filingCalendar, type DueDate, type DueDateOverride } from '../../payroll/dueDates'
+import { ewtYearCalendar, type EwtDue, type EwtDueOverride } from '../../payroll/ewtDueDates'
 import { round2 } from '../../payroll/types'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
@@ -892,6 +894,8 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
 function DueDates({ entity, year }: { entity: Entity; year: number }) {
   const toast = useToast()
   const [rows, setRows] = useState<DueDate[] | null>(null)
+  // consultants' EWT filings, for a client that has consultants
+  const [ewtRows, setEwtRows] = useState<EwtDue[]>([])
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<{ row: DueDate; due: string; note: string } | null>(null)
   const [reload, setReload] = useState(0)
@@ -901,10 +905,24 @@ function DueDates({ entity, year }: { entity: Entity; year: number }) {
     Promise.all([
       getHolidaysBetween(entity.id, `${year}-01-01`, `${year + 1}-03-31`),
       supabase.from('filing_due_dates').select('filing, period, due_date, note').eq('entity_id', entity.id).gte('period', `${year}-01-01`).lte('period', `${year}-12-01`),
+      supabase.from('consultants').select('id', { count: 'exact', head: true }).eq('entity_id', entity.id),
+      supabase.from('ewt_due_dates').select('filing, period, due_date, note').eq('entity_id', entity.id).gte('period', `${year}-01-01`).lte('period', `${year}-12-01`),
     ])
-      .then(([holidays, overrides]) => {
+      .then(([holidays, overrides, consultants, ewtOverrides]) => {
         if (overrides.error) throw overrides.error
+        if (consultants.error) throw consultants.error
+        if (ewtOverrides.error) throw ewtOverrides.error
         if (cancelled) return
+        setEwtRows(
+          (consultants.count ?? 0) > 0
+            ? ewtYearCalendar(
+                year,
+                { filing: entity.bir_filing_method ?? 'manual', efpsGroup: entity.efps_group ?? null },
+                holidays,
+                (ewtOverrides.data ?? []) as EwtDueOverride[],
+              )
+            : [],
+        )
         setRows(
           filingCalendar(
             year,
@@ -992,6 +1010,12 @@ function DueDates({ entity, year }: { entity: Entity; year: number }) {
           Pag-IBIG due day in Client Settings.
         </p>
       </Card>
+      {ewtRows.length > 0 && (
+        <Card title={`Expanded withholding on consultants' fees — ${year}`} icon={<CalendarClock />}>
+          <EwtFilingDates entityId={entity.id} rows={ewtRows} onChanged={() => setReload((n) => n + 1)} />
+          <p className="mt-3 text-[11px] text-slate-400">The quarter's figures and forms are on the Consultants page, BIR (EWT) tab.</p>
+        </Card>
+      )}
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={editing ? `${FILING_LABELS[editing.row.filing]} — ${fmtMonth(editing.row.period)}` : ''}>
         {editing && (
           <div className="space-y-4">

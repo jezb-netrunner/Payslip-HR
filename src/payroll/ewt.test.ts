@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_EWT } from './defaults'
 import { billedBefore, ewtAmount, ewtRuleFor, ewtVersionOn, form2307Rows, qapRows, quarterOf, return1601Eq, type BillingFact } from './ewt'
-import { ewtDueDates } from './ewtDueDates'
+import { ewtDueDates, ewtYearCalendar } from './ewtDueDates'
 
 const data = DEFAULT_EWT.data
 const consultancy = data.fees.consultancy
@@ -79,6 +79,28 @@ describe('the quarter', () => {
     expect(due.monthly[1].slice(0, 7)).toBe('2026-09')
     // the year's last quarter files in the next year
     expect(ewtDueDates(quarterOf('2026-12-01')).return1601eq).toBe('2027-01-31')
+  })
+
+  it('takes the eFPS group for 0619-E, a date the client changed, and notes weekends', () => {
+    const q3 = quarterOf('2026-08-15')
+    const due = ewtDueDates(q3, { filing: 'efps', efpsGroup: 'C' }, [], [
+      { filing: '1601eq', period: '2026-07-01', due_date: '2026-11-03', note: 'RMC 95-2026 extension' },
+    ])
+    expect(due.monthly).toEqual(['2026-08-13', '2026-09-13'])
+    expect(due.return1601eq).toBe('2026-11-03')
+    const row = due.rows.find((r) => r.filing === '1601eq')!
+    expect([row.overridden, row.note]).toEqual([true, 'RMC 95-2026 extension'])
+    // 13 September 2026 is a Sunday: noted, not moved
+    expect(due.rows.find((r) => r.period === '2026-08-01')?.note).toBe('Falls on a Sunday')
+    expect(due.form2307).toBe('2026-10-20')
+  })
+
+  it("lists a year's filings: 8 0619-E, 4 2307, 4 1601-EQ, the declarations list and the 1604-E", () => {
+    const rows = ewtYearCalendar(2026, { filing: 'manual', efpsGroup: null })
+    const count = (f: string) => rows.filter((r) => r.filing === f).length
+    expect([count('0619e'), count('2307'), count('1601eq'), count('declarations'), count('1604e')]).toEqual([8, 4, 4, 1, 1])
+    expect(rows.find((r) => r.filing === '1604e')?.due).toBe('2027-03-01')
+    expect(rows.map((r) => r.due)).toEqual([...rows.map((r) => r.due)].sort())
   })
 })
 

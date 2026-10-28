@@ -176,4 +176,17 @@ update consultant_billings set gross_amount = 40000 where id = '71000000-0000-00
 select pg_temp.check((select ewt_amount = round(40000 * ewt_rate, 2) from consultant_billings where id = '71000000-0000-0000-0000-0000000020b1'), 'reopened: the billing changes and is withheld again');
 commit;
 
+\echo '--- 20.5 a client''s own EWT filing dates: its admins only'
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :ca, true);
+insert into ewt_due_dates (entity_id, filing, period, due_date, note)
+values ('10000000-0000-0000-0000-0000000020f0', '1601eq', '2026-07-01', '2026-11-03', 'extension');
+select pg_temp.expect_error($$insert into ewt_due_dates (entity_id, filing, period, due_date) values ('10000000-0000-0000-0000-0000000020f0', '1601eq', '2026-07-01', '2026-11-04')$$, '%ewt_due_dates_one%');
+select pg_temp.expect_error($$insert into ewt_due_dates (entity_id, filing, period, due_date) values ('10000000-0000-0000-0000-0000000020f0', '1601-eq', '2026-07-01', '2026-11-04')$$, '%ewt_due_dates_filing_check%');
+select set_config('request.jwt.claim.sub', :other, true);
+select pg_temp.check((select count(*) from ewt_due_dates where entity_id = '10000000-0000-0000-0000-0000000020f0') = 0, 'another client''s admin sees none');
+select pg_temp.expect_error($$insert into ewt_due_dates (entity_id, filing, period, due_date) values ('10000000-0000-0000-0000-0000000020f0', '2307', '2026-07-01', '2026-10-21')$$, '%row-level security%');
+commit;
+
 \echo 'PASSED 20'
