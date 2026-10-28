@@ -79,6 +79,12 @@ export const DEADLINES = {
   form1604cJanuaryDay: { value: 31, effectiveFrom: '2018-01-01', source: 'NIRC Sec. 83(B); BIR Form 1604-C (January 2018 ENCS) page' },
   /** BIR copies of the 2316s and the Annex F list: day of February */
   form2316BirFebruaryDay: { value: 28, effectiveFrom: '2018-01-01', source: 'RR 2-98 Sec. 2.83.1 as amended by RR 11-2018' },
+  /** BIR 0619-E (EWT of a quarter's first two months), filed manually: day of the following month */
+  ewt0619eManualDay: { value: 10, effectiveFrom: '2018-01-01', source: 'BIR Form 0619-E; RR 2-98 Sec. 2.58(A)(2) as amended by RR 11-2018' },
+  /** BIR 1601-EQ with the Quarterly Alphalist of Payees: the last day of the month after the quarter */
+  ewt1601eqLastDayOfNextMonth: { value: true, effectiveFrom: '2018-01-01', source: 'BIR Form 1601-EQ (January 2019 ENCS); RR 2-98 Sec. 2.58(A)(2) as amended by RR 11-2018' },
+  /** BIR 2307 to the payee: days after the close of the quarter */
+  form2307DaysAfterQuarter: { value: 20, effectiveFrom: '2018-01-01', source: 'RR 2-98 Sec. 2.58.3(B) as amended' },
   /** SSS (regular employer): the last day of the month after the applicable month */
   sssLastDayOfNextMonth: { value: true, effectiveFrom: '2019-01-01', source: 'SSS release citing SSS Circular 2019-012' },
   /** PhilHealth: by the last digit of the employer number, windows in the following month */

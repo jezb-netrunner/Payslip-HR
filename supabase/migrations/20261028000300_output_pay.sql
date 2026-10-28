@@ -72,7 +72,7 @@ begin
   if tg_op <> 'DELETE' and auth.uid() is not null and not public.can_manage_employee(new.employee_id) then
     raise exception 'Employee not found.';
   end if;
-  -- a paid output keeps its pay; its report, approver and note can still be filed
+  -- a paid output keeps its pay (its report, approver and note can still be filed)
   if tg_op in ('UPDATE', 'DELETE') and (tg_op = 'DELETE' or v_pay_changes)
      and public.attendance_locked(old.employee_id, old.output_date) then
     raise exception 'The output of % was paid in a finalized payroll and is locked. Reopen that payroll to change it.', old.output_date;
@@ -152,7 +152,7 @@ create trigger employees_output_pay_off before update of output_pay on public.em
 -- ---------- output reports ----------
 -- Private: PDFs, images, Word, Excel and CSV files (a CSV can come as
 -- Excel's type) up to 10 MB, at
--- <client id>/<employee id>/<file>; the admins who manage that client's
+-- <client id>/<employee id>/<file>. The admins who manage that client's
 -- employee may store, read and remove them.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('output-reports', 'output-reports', false, 10485760, array[

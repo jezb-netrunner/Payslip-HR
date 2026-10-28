@@ -25,6 +25,7 @@ import type {
   SssTableData,
   StatutoryTables,
 } from './types'
+import type { EwtVersion } from './ewt'
 
 export const SSS_2025: SssTableData = {
   rate_ee: 0.05,
@@ -127,4 +128,33 @@ export const DEFAULT_TABLES: StatutoryTables = {
   bir_wht: BIR_WHT_2023,
   bir_annual: BIR_ANNUAL_2023,
   de_minimis: DE_MINIMIS_2026,
+}
+
+// Expanded withholding on professional fees (RR 2-98 Sec. 2.57.2 as amended
+// by RR 11-2018; ATCs as on BIR Form 1601-EQ). Mirrors ewt_versions
+// 2018-01-01 (migration 20261028000400).
+export const DEFAULT_EWT: EwtVersion = {
+  effective_from: '2018-01-01',
+  description: 'Expanded withholding on professional fees',
+  legal_basis: 'RR 2-98 Sec. 2.57.2 as amended by RR 11-2018',
+  source_url: 'https://bir-cdn.bir.gov.ph/local/pdf/RR%20No.%2011-2018.pdf',
+  verified_on: null,
+  data: {
+    professional_fees: {
+      individual: {
+        threshold: 3000000,
+        within: { rate: 0.05, atc: 'WI010' },
+        above: { rate: 0.1, atc: 'WI011' },
+        vat_registered_above: true,
+        no_declaration_above: true,
+      },
+      juridical: {
+        threshold: 720000,
+        within: { rate: 0.1, atc: 'WC010' },
+        above: { rate: 0.15, atc: 'WC011' },
+        vat_registered_above: false,
+        no_declaration_above: true,
+      },
+    },
+  },
 }

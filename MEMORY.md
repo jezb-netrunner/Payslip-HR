@@ -431,11 +431,22 @@ the engine, Pag-IBIG/PhilHealth settled on the month's output pay. Tests
 379, SQL suite 19. The local QA gateway emulates Storage (rows under the
 caller's RLS, bytes on disk) — `/tmp/claude-0/stack/gateway.mjs`.
 
+**Doing (part 4, consultants — in progress):** `consultants`,
+`consultant_declarations`, `consultant_billings`, `ewt_quarter_filings` and
+the read-only `ewt_versions` (migration `20261028000400`, NOT live); the
+Consultants page (checklist sign-off before billing, yearly sworn
+declaration, billings withheld by the database, the BIR tab: 1601-EQ with
+the 0619-E months, QAP CSV, 2307 figures; a filed quarter locks its
+billings). The EWT seed (RR 11-2018: individuals 5%/10% at ₱3M, firms
+10%/15% at ₱720K, WI010/WI011/WC010/WC011) is `verified_on` null pending
+the adversarial research pass. `supabase/tests/run.sh` now runs suites 10–99
+(it globbed `1*` only, so suite 20 never ran).
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**2026-10-28: `20261028000100_pay_rate_history`, `…0200_fixed_salary` and `…0300_output_pay` are in the repo, NOT live**
+**2026-10-28: `20261028000100_pay_rate_history`, `…0200_fixed_salary`, `…0300_output_pay` and `…0400_consultants` are in the repo, NOT live**
 (placeholder version). It enables pg_cron on Supabase (the nightly
 refresh of today's rate). PR #7 deployed: Pages workflow run 10 green,
 2026-10-28 03:04 UTC.

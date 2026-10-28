@@ -231,6 +231,82 @@ export interface EmployeeOutput {
   updated_at: string
 }
 
+/** An independent consultant (not an employee): kept off payroll, paid on billings with EWT withheld. */
+export interface Consultant {
+  id: string
+  entity_id: string
+  payee_type: 'individual' | 'juridical'
+  last_name: string
+  first_name: string
+  middle_name: string
+  registered_name: string
+  tin: string
+  tin_branch_code: string
+  address: string
+  zip_code: string
+  vat_registered: boolean
+  /** the nature of the service (the BIR forms' nature of income payment) */
+  service: string
+  fee_basis: 'retainer' | 'per_deliverable'
+  /** a retainer's monthly fee, or a deliverable's usual fee */
+  fee_amount: number | null
+  billing: 'monthly' | 'semi_monthly' | 'per_deliverable'
+  contract_ref: string
+  contract_start: string
+  contract_end: string | null
+  /** the employee-or-contractor checklist: answers by question key */
+  checklist: Record<string, boolean>
+  checklist_note: string
+  signed_off_by: string | null
+  signed_off_at: string | null
+  active: boolean
+  notes: string
+  created_at: string
+}
+
+/** The payee's sworn declaration of gross income for a year. */
+export interface ConsultantDeclaration {
+  id: string
+  consultant_id: string
+  entity_id: string
+  year: number
+  over_threshold: boolean
+  submitted_on: string
+  note: string
+}
+
+/** A consultant's billing: EWT withheld at the rate the database set. */
+export interface ConsultantBilling {
+  id: string
+  consultant_id: string
+  entity_id: string
+  invoice_no: string
+  /** when the fee became payable: its month and quarter carry the withholding */
+  billed_on: string
+  service_from: string | null
+  service_to: string | null
+  description: string
+  gross_amount: number
+  vat_amount: number
+  atc: string
+  ewt_rate: number
+  ewt_amount: number
+  net_amount: number
+  paid_on: string | null
+  payment_ref: string
+  note: string
+  created_at: string
+}
+
+/** A quarter whose BIR 1601-EQ was filed: its billings are locked. */
+export interface EwtQuarterFiling {
+  id: string
+  entity_id: string
+  quarter: string
+  filed_on: string
+  reference: string
+}
+
 export interface EmployeeAllowance {
   id: string
   employee_id: string

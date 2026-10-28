@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-router-dom'
 import {
   Briefcase,
+  BriefcaseBusiness,
   CalendarDays,
   ChevronDown,
   ChevronsLeft,
@@ -74,6 +75,7 @@ const adminGroups: NavGroup[] = [
     items: [
       { to: '/admin/payroll', label: 'Pay Runs', icon: <Wallet className={ic} /> },
       { to: '/admin/advances', label: 'Cash Advances', icon: <HandCoins className={ic} />, counter: 'advances' },
+      { to: '/admin/consultants', label: 'Consultants', icon: <BriefcaseBusiness className={ic} /> },
       { to: '/admin/reports', label: 'BIR & Reports', icon: <FileBarChart className={ic} /> },
     ],
   },

@@ -16,6 +16,7 @@ import LeavesAdmin from './pages/admin/LeavesAdmin'
 import Payroll from './pages/admin/Payroll'
 import PayrollRunDetail from './pages/admin/PayrollRunDetail'
 import CashAdvances from './pages/admin/CashAdvances'
+import Consultants from './pages/admin/Consultants'
 import Announcements from './pages/admin/Announcements'
 import Reports from './pages/admin/Reports'
 import Statutory from './pages/admin/Statutory'
@@ -143,6 +144,7 @@ export default function App() {
           <Route path="payroll" element={<Payroll />} />
           <Route path="payroll/:id" element={<PayrollRunDetail />} />
           <Route path="advances" element={<CashAdvances />} />
+          <Route path="consultants" element={<Consultants />} />
           <Route path="announcements" element={<Announcements />} />
           <Route path="reports" element={<Reports />} />
           <Route path="statutory" element={<Statutory />} />
