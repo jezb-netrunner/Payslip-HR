@@ -133,7 +133,7 @@ export const DEFAULT_TABLES: StatutoryTables = {
 // Expanded withholding on professional and consultancy fees (RR 2-98 Sec.
 // 2.57.2 as amended by RR 11-2018 and RR 14-2018; ATCs of BIR Form 1601-EQ
 // and RMO 38-2018). Mirrors ewt_versions 2018-05-01 (migration
-// 20261028000400).
+// 20261028114218).
 const INDIVIDUAL = { threshold: 3000000, vat_registered_above: true, no_declaration_above: true }
 const JURIDICAL = { threshold: 720000, vat_registered_above: false, no_declaration_above: true }
 export const DEFAULT_EWT: EwtVersion = {

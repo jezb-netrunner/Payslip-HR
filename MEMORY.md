@@ -409,13 +409,13 @@ retainer and independent contractors, admins approve outputs, employees
 don't see their pay history.
 
 **Did (part 1, pay history):** `employee_pay_rates` (migration
-`20261028000100`, NOT live), payroll by the rate of each day, the Pay
+`20261028113903`, live), payroll by the rate of each day, the Pay
 History tab (step chart, table, payrolls paid at another rate, gross by
 month), rates on career events moved into the history, **Reports → Pay
 changes**. Tests 352 → 363, SQL suite 18.
 
 **Did (part 2, fixed salary):** `employees.fixed_salary` and
-`thirteenth_month_eligible` (migration `20261028000200`, NOT live): a
+`thirteenth_month_eligible` (migration `20261028113953`, live): a
 monthly-rated employee paid without timekeeping (no absence or lateness
 docking, no overtime or premiums; leave without pay and days outside the
 employment deducted, presumed workdays count for per-day allowances), and
@@ -426,14 +426,14 @@ shows no absences for them. Tests 369, SQL 18.5.
 results, or fees / commission / other supplementary on top of the salary)
 and `output_thirteenth_month`, `employee_outputs` (admins only, guard,
 locks with the finalized payroll) and the private `output-reports` bucket
-(migration `20261028000300`, NOT live); the Outputs tab, output lines in
+(migration `20261028114041`, live); the Outputs tab, output lines in
 the engine, Pag-IBIG/PhilHealth settled on the month's output pay. Tests
 379, SQL suite 19. The local QA gateway emulates Storage (rows under the
 caller's RLS, bytes on disk) — `/tmp/claude-0/stack/gateway.mjs`.
 
 **Did (part 4, consultants):** `consultants` (with `fee_kind`),
 `consultant_declarations`, `consultant_billings`, `ewt_quarter_filings` and
-the read-only `ewt_versions` (migration `20261028000400`, NOT live); the
+the read-only `ewt_versions` (migration `20261028114218`, live); the
 Consultants page (checklist sign-off before billing, yearly sworn
 declaration, billings withheld by the database, the BIR tab: 1601-EQ with
 the 0619-E months, QAP CSV, 2307 figures, filing dates, the declarations
@@ -442,18 +442,43 @@ Tables. Tests 390, SQL suite 20. `supabase/tests/run.sh` now runs suites
 10–99 (it globbed `1*` only, so suite 20 never ran at first).
 
 **Did (follow-ups):** EWT filing dates a client can change
-(`ewt_due_dates`, in `20261028000400`), shown on Reports → Due dates too;
+(`ewt_due_dates`, in `20261028114218`), shown on Reports → Due dates too;
 the unworked regular holiday of a worker paid by results computed (Sec.
 8(b)) instead of warned about. Tests 395, SQL suite 20.
+
+**Did (review, walkthrough, live):** a high-effort review of the branch
+found 10 items, 8 fixed: mid-period monthly→daily segments, deduction
+labels counting daily days, the holiday absence rule docking a fixed
+salary that keeps no time, career events recorded without their rate
+(now refused up front or removed when the rate fails), the toggle label,
+the backfill date, the output preview's rounding, duplicated date helpers
+(plus a dead counter); the pg_cron drift needs no change (pg_cron is
+live). Added: a warning for output made on a worked holiday or rest day.
+Playwright walkthrough on the local stack (pay history, career events,
+outputs, a weekly run paying by-results holiday pay from the weeks before,
+EWT date overrides, the employee portal and its REST access) found no
+further bugs. Migrations applied live (see deployed state). Tests 400.
 
 ---
 
 ## Current deployed state (update when it changes)
 
-**2026-10-28: `20261028000100_pay_rate_history`, `…0200_fixed_salary`, `…0300_output_pay` and `…0400_consultants` are in the repo, NOT live**
-(placeholder version). It enables pg_cron on Supabase (the nightly
-refresh of today's rate). PR #7 deployed: Pages workflow run 10 green,
-2026-10-28 03:04 UTC.
+**2026-10-28: the four pay-diversity migrations are live** (owner's
+approval), through MCP `apply_migration` as `20261028113903
+pay_rate_history`, `20261028113953 fixed_salary`, `20261028114041
+output_pay` and `20261028114218 consultants`; repo files renamed to those
+versions. `fingerprint.sql` matches the local replica on all eight hashes
+(37 tables, 552 columns, 292 constraints, 103 indexes, 68 policies, 72
+functions, 117 triggers). pg_cron is installed and `refresh-current-pay-rates`
+runs at 16:05 UTC (00:05 Manila). The backfill gave each of the 2 live
+employees one `hired` row from its hire event (= its current rate); the
+career events' rates were moved off. Security advisors: the 10 intentional
+WARNs plus `can_manage_output_report` (executable by `authenticated` by
+design: the output-reports storage policies call it as the caller), and
+the leaked-password setting. Performance: INFO only (one new unindexed FK,
+`consultant_declarations.entity_id`, on a tiny table). Until the PR is
+merged and deployed, the live site (main) can't change a pay rate from the
+old Pay tab or a career event (the history guard refuses it): merge soon.
 
 **2026-10-26: the seven compliance migrations are live** (owner's
 approval), as `20261026084112 mwe_premium_pay` … `20261026084508
@@ -1021,6 +1046,12 @@ up to an hour after it was "replaced".
 
 > Supabase Auth (GoTrue v2.180.0 binary) + PostgREST 12.2.12 + a tiny Node gateway (routes /auth/v1, /rest/v1, /functions/v1; answers CORS) + the edge function under Deno + Vite, all against the local PG16 with every migration, let Playwright drive the real app as each role.
 
+The Claude built-in browser can't open this container's localhost (and a
+cloud session has no link to it): drive the stack with the pre-installed
+Playwright. After the QA DB falls behind the migrations, compare
+`fingerprint.sql` (and a per-object listing) with `phr_test` and apply the
+missing pieces rather than rebuilding (the auth users and seed survive).
+
 Gotchas: GoTrue needs an existing `auth` schema and `search_path=auth` in
 its DATABASE_URL (quote `&` in env files); kill services by pid file —
 `pkill -f` matches its own shell; after a session/worker restart start
@@ -1453,16 +1484,32 @@ tooling can't run.
 
 > `employee_pay_rates` (from a date, reason, approver; admins only) is the source of truth. Payroll resolves the period's rates from it (`rateSegments`) and pays each day at its own; the employee row's `pay_type`/`monthly_rate`/`daily_rate` hold today's rate, refreshed by a trigger on the history and nightly by pg_cron, and a direct edit of them is refused.
 
-When the rate changes inside a period, the monthly rate in effect for most
-of it pays the period's salary less the other days at its daily rate, and
-each other day is paid at its own rate — so an absence after a raise nets
-to zero and a daily→monthly regularization mid-period works like a
-mid-period hire. Contributions use the rate at the period end (the payslip
+When the rate changes inside a period and monthly rates cover at least
+half of it, the monthly rate in effect longest pays the period's salary
+less the other days at its daily rate, and each other day is paid at its
+own rate — so a change to an equivalent rate pays the same salary and an
+absence after a raise nets to zero. Mostly daily-rated, every day is paid
+at its own rate (a monthly rate's days at its daily rate): the salary less
+9–11 daily days left the 1–2 monthly days next to nothing, or ₱0 (code
+review, 2026-10-28). The deduction lines count only the monthly segments'
+days and minutes. Contributions use the rate at the period end (the payslip
 snapshot records it). A rate dated back over finalized payrolls doesn't
 touch them: the Pay History tab lists payrolls whose snapshot rate differs
 from the history's for their period. Why: a single current rate prorated
 nothing, recomputing an old draft used today's rate, and the career-event
-rates were readable by employees through RLS.
+rates were readable by employees through RLS. The backfill dates a rate
+edited directly (not on a career event) from the day after the last
+finalized payroll paid at another rate, so drafts and the payrolls paid at
+it keep it (it first used the migration day).
+
+### least() and greatest() skip NULLs: coalesce an optional bound first (correction, 2026-10-28)
+
+> `least(NULL, today)` is `today`, not NULL: an optional bound inside `least`/`greatest` silently becomes "no bound" in the wrong direction.
+
+The pay-history backfill computed `least(paid.after_other, today)` where
+no payroll paid at another rate gave NULL, so a corrected rate started on
+the migration day instead of at the history's last change. Caught by
+seeding four scenarios on a replay stopped before the migration.
 
 ### Output pay: how each contribution and benefit treats it (verified 2026-10-28)
 
@@ -1484,7 +1531,10 @@ Sec. 8(b): holiday pay of a worker paid by results ≥ average daily earnings
 of the last 7 working days, never below the minimum wage — computed: the
 rate's pay for the 7 days worked before it plus the outputs dated from the
 first of them to its eve, less what the rate already pays for the holiday
-(the service reads three weeks back, `outputsBefore` / `daysBefore`). Why it mattered: a 0-rate output worker had
+(the service reads three weeks back, `outputsBefore` / `daysBefore`). Output
+made on a worked holiday or rest day carries no premium: a warning asks
+for an adjustment when one is due (not computed: outputs are dated when
+accepted, not when made). Why it mattered: a 0-rate output worker had
 no Pag-IBIG at all and PhilHealth on the ₱10,000 floor.
 
 ### EWT on consultants' fees: verified rules and the decisions behind them (verified 2026-10-28)
