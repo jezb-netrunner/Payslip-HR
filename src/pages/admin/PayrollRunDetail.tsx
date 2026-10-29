@@ -48,7 +48,7 @@ import { useToast } from '../../components/toast'
 import { downloadBlob, downloadCsv, getEmployees } from '../../lib/api'
 import { buildPayslipsDoc, buildPayslipsZip, type PayslipPdfOptions } from '../../pdf/payslipPdf'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
-import type { Employee, Payslip, PayrollAdjustment, PayrollRun, PayrollVoid } from '../../lib/db'
+import type { Employee, Payslip, PayrollAdjustment, PayrollRun, PayrollVoid, PayrollVoidSummary } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
@@ -56,7 +56,6 @@ import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_
 import { computeRun, employeesForRun, finalizeRun, voidRun, type RunComputationResult } from '../../payroll/service'
 import { controlTotals } from '../../payroll/controlTotals'
 import { useReportStamp } from '../../lib/useReportStamp'
-import type { ReportStamp } from '../../lib/reportStamp'
 import { logActivity } from '../../lib/activity'
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
@@ -95,7 +94,7 @@ export default function PayrollRunDetail() {
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [exporting, setExporting] = useState(false)
   // posted versions of this run voided earlier, newest first
-  const [voids, setVoids] = useState<PayrollVoid[]>([])
+  const [voids, setVoids] = useState<PayrollVoidSummary[]>([])
   const [voiding, setVoiding] = useState(false)
   const [voidExport, setVoidExport] = useState<PayrollVoid | null>(null)
 
@@ -113,11 +112,16 @@ export default function PayrollRunDetail() {
         fetchAll<PayrollAdjustment>((from, to) =>
           supabase.from('payroll_adjustments').select('*').eq('payroll_run_id', id).order('created_at').order('id').range(from, to),
         ),
-        supabase.from('payroll_voids').select('*').eq('payroll_run_id', id).order('voided_at', { ascending: false }),
+        // the archived payslips are big: they load when a version is downloaded
+        supabase
+          .from('payroll_voids')
+          .select('id, entity_id, payroll_run_id, run_control_no, run_snapshot, reason, voided_by, voided_by_email, voided_at')
+          .eq('payroll_run_id', id)
+          .order('voided_at', { ascending: false }),
       ])
       if (runErr) throw runErr
       if (v.error) throw v.error
-      setVoids((v.data ?? []) as PayrollVoid[])
+      setVoids((v.data ?? []) as PayrollVoidSummary[])
       const runRow = (r as PayrollRun) ?? null
       setRun(runRow)
       setSlips(s.sort((x, y) =>
@@ -212,7 +216,17 @@ export default function PayrollRunDetail() {
     else await load()
   }
 
-  function exportRegister(list: Payslip[] = slips, version: PayrollVoid | null = null) {
+  /** A voided version with its payslips. */
+  async function withPayslips(v: PayrollVoidSummary): Promise<PayrollVoid | null> {
+    const { data, error } = await supabase.from('payroll_voids').select('payslips').eq('id', v.id).single()
+    if (error) {
+      toast('error', errorMessage(error, 'Could not load the voided payslips'))
+      return null
+    }
+    return { ...v, payslips: (data?.payslips ?? []) as Payslip[] }
+  }
+
+  function exportRegister(list: Payslip[] = slips, version: PayrollVoidSummary | null = null) {
     if (!run) return
     const header = [
       'Payslip No', 'Employee No', 'Employee', 'Position', 'Paid by', 'Days', 'OT Hrs', 'Basic (earned)', 'Gross', 'SSS EE', 'SSS MPF EE',
@@ -664,7 +678,8 @@ export default function PayrollRunDetail() {
               </p>
               <ul className="divide-y divide-slate-100">
                 {voids.map((v) => {
-                  const net = round2(v.payslips.reduce((sum, x) => sum + Number(x.net_pay), 0))
+                  // the run's totals as posted
+                  const posted = v.run_snapshot.totals ?? {}
                   return (
                     <li key={v.id} className="flex flex-wrap items-start justify-between gap-3 py-3 text-sm">
                       <div className="min-w-0">
@@ -672,16 +687,32 @@ export default function PayrollRunDetail() {
                           {v.run_control_no ?? 'Unnumbered'} <Badge tone="red" dot={false}>VOID</Badge>
                         </p>
                         <p className="text-xs text-slate-500">
-                          Voided {fmtDateTime(v.voided_at)} by {v.voided_by_email ?? 'unknown'} · {plural(v.payslips.length, 'payslip')} ·
-                          net {money(net)}
+                          Voided {fmtDateTime(v.voided_at)} by {v.voided_by_email ?? 'unknown'} · {plural(posted.employees ?? 0, 'payslip')} ·
+                          net {money(posted.net ?? 0)}
                         </p>
                         <p className="mt-1 break-words text-xs text-slate-600">Reason: {v.reason}</p>
                       </div>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="secondary" onClick={() => exportRegister(v.payslips, v)}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={async () => {
+                            const full = await withPayslips(v)
+                            if (full) exportRegister(full.payslips, full)
+                          }}
+                        >
                           <Download className="size-4" /> Register
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={() => setVoidExport(v)}>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={async () => {
+                            const full = await withPayslips(v)
+                            if (full) setVoidExport(full)
+                          }}
+                        >
                           <FileDown className="size-4" /> Payslips
                         </Button>
                       </div>
@@ -856,7 +887,7 @@ export default function PayrollRunDetail() {
           run={run}
           company={entity}
           fileBase={`payslips_${entity.code}_${run.period_end}`}
-          stamp={stamp(`Payslips ${run.control_no ?? '(draft)'}, ${runLabel(run)}`)}
+          title={`Payslips ${run.control_no ?? '(draft)'}, ${runLabel(run)}`}
           onClose={() => setExporting(false)}
         />
       )}
@@ -868,7 +899,7 @@ export default function PayrollRunDetail() {
           run={{ ...voidExport.run_snapshot, status: 'finalized' }}
           company={entity}
           fileBase={`payslips_${entity.code}_${run.period_end}_${voidExport.run_control_no ?? 'unnumbered'}_VOID`}
-          stamp={stamp(`Voided payslips ${voidExport.run_control_no ?? '(unnumbered)'}, ${runLabel(voidExport.run_snapshot)}`)}
+          title={`Voided payslips ${voidExport.run_control_no ?? '(unnumbered)'}, ${runLabel(voidExport.run_snapshot)}`}
           voided={{ at: voidExport.voided_at, by: voidExport.voided_by_email, reason: voidExport.reason }}
           onClose={() => setVoidExport(null)}
         />
@@ -1271,7 +1302,7 @@ function PayslipExportModal({
   run,
   company,
   fileBase,
-  stamp,
+  title,
   voided,
   onClose,
 }: {
@@ -1280,12 +1311,14 @@ function PayslipExportModal({
   run: PayslipRunInfo
   company: PayslipCompany
   fileBase: string
-  stamp: ReportStamp
+  /** the report title on each payslip's stamp */
+  title: string
   /** an archived version of a voided payroll: every page is marked VOID */
   voided?: PayslipPdfOptions['voided']
   onClose: () => void
 }) {
   const toast = useToast()
+  const stamp = useReportStamp(company)
   const [scope, setScope] = useState<'picked' | 'all'>(picked.length > 0 ? 'picked' : 'all')
   const [format, setFormat] = useState<'pdf' | 'zip'>('pdf')
   const [done, setDone] = useState<number | null>(null)
@@ -1296,7 +1329,8 @@ function PayslipExportModal({
     if (busy || chosen.length === 0) return
     setDone(0)
     try {
-      const opts = { stamp, voided }
+      // stamped when the file is made, not when the dialog opened
+      const opts = { stamp: stamp(title), voided }
       if (format === 'pdf') {
         const doc = await buildPayslipsDoc(chosen, run, company, setDone, opts)
         downloadBlob(`${fileBase}.pdf`, doc.output('blob'))
@@ -1304,7 +1338,7 @@ function PayslipExportModal({
         const zip = await buildPayslipsZip(chosen, run, company, setDone, opts)
         downloadBlob(`${fileBase}.zip`, new Blob([zip as BlobPart], { type: 'application/zip' }))
       }
-      void logActivity('export', company.id, { report: stamp.title, file: `${fileBase}.${format}`, payslips: chosen.length })
+      void logActivity('export', company.id, { report: title, file: `${fileBase}.${format}`, payslips: chosen.length })
       toast('success', `Downloaded ${plural(chosen.length, 'payslip')}.`)
       onClose()
     } catch (err) {

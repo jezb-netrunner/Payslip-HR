@@ -464,6 +464,21 @@ further bugs. Migrations applied live (see deployed state). Tests 400.
 **Asked:** is the app compliant with Annex B (the CAS checklist)? Then: fix
 every code-side gap; for backups, an Excel export the users keep.
 
+**Review round:** two independent reviews (DB + edge, front end) found 10
++ 7 items, all fixed: a race that let concurrent wrong passwords count as
+one (now `guard_sign_in`, one transaction per attempt under the guard row's
+lock), the lockout's Auth ban (it ended live sessions too: dropped), guessing
+straight at the Auth API (admin passwords now kept keyed, HMAC under
+`ADMIN_PASSWORD_PEPPER`), a promotion to admin that left the session
+unrestricted (trigger now sets a random `admin_session_id`), silent failures
+of security writes, unlogged resets and unlocks, `$2b$` hashes misread by
+pgcrypto, control numbers truncated past 999,999, forgeable `log_activity`
+rows; in the app, self password reset through Admin Users (it ended the
+admin's own session), a watcher race during a password change, a Users page
+stuck loading, the reason a reset link was refused, the VOID note overflowing,
+voided payslips reloaded on every page load. Edge tests now in the repo
+(`npm run test:edge`, 12 scenarios).
+
 **Did:** migration `20261029000100_cas_controls.sql` (placeholder version,
 **not live**): control numbers PR-/PS-000001 per client assigned at
 finalize (`document_counters`), the finalize cross-check
@@ -493,9 +508,11 @@ new `auth-guard` edge function (deploy with **verify_jwt off**) and
 `admin-users` v6 must go live **together with the front end**: after the
 migration only a session the guard admitted has admin access, so the old
 front end can't sign admins in, and the new one needs the migration. Order:
-deploy both functions → apply the migration (MCP: no DROP, every UPDATE has
-a WHERE) → run the advisors → merge to `main`. Every admin then signs in
-once more and, having no guard record yet, chooses a new password.
+set the edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random characters,
+never rotated: admin passwords are kept keyed with it) → deploy both
+functions → apply the migration (MCP: no DROP, every UPDATE has a WHERE) →
+run the advisors → merge to `main`. Every admin then signs in once more and,
+having no guard record yet, chooses a new password (from then on kept keyed).
 
 **2026-10-28: the four pay-diversity migrations are live** (owner's
 approval), through MCP `apply_migration` as `20261028113903
@@ -1653,18 +1670,25 @@ API (skipping lockout, password expiry and the one-session rule) keep full
 admin access. Null means "not yet through the guard": the migration fills
 every existing admin with a random id (all sign in once more), and
 `supabase/tests/run.sh` clears it for the suites, which act through
-`request.jwt.claim.sub` without a session id.
+`request.jwt.claim.sub` without a session id. Keep null from ever meaning
+"unrestricted" again: `guard_profile_sessions` gives a random id to any
+profile promoted to an admin role, create_admin sets one (and deletes the
+Auth user if the profile write fails), and `admit()` refuses a token without
+a `session_id`. Only the very first sign-up of a deployment starts null.
 
-### The sign-in guard checks passwords in the database, not at the Auth server (correction, 2026-10-29)
+### The sign-in guard checks passwords in the database, and Auth keeps them keyed (correction, 2026-10-29)
 
-> Supabase Auth rate-limits `/auth/v1/token` per IP, and every request the guard makes comes from the edge function's IP. `guard_check_password` (service role only) compares the password with the account's bcrypt hash via pgcrypto first, so only a right password reaches Auth; an unknown email gets the wrong-password answer and stores nothing; no "attempts left" count (it told which emails exist); attempts during a lock aren't logged again.
+> Supabase Auth rate-limits `/auth/v1/token` per IP, and every request the guard makes comes from the edge function's IP. `guard_sign_in` (service role only) takes the account's guard row lock, refuses while locked, compares the password with the bcrypt hash via pgcrypto (only `$2a$`/`$2x$`: pgcrypto misreads `$2b$`/`$2y$`), and counts a failure with its audit row in the same transaction. Only a right password reaches Auth. Passwords the guard or admin-users set are stored at Auth as `k1.` + HMAC-SHA256(`ADMIN_PASSWORD_PEPPER`, password), so the Auth API alone can't confirm a guess.
 
-Why it mattered: as first built, anyone could flood the guard with wrong
-passwords, drain that one shared bucket and lock every admin out. Forwarding
-the user's IP (`Sb-Forwarded-For`) needs a secret API key and a dashboard
-setting, so it wasn't used. Residual: guessing straight against the Auth API
-isn't counted by the guard's lockout (Auth's own per-IP limit applies), but a
-session made that way gets no admin access.
+Why it mattered: first built, the guard asked Auth with every password — a
+flood of wrong ones would drain that one shared bucket and lock every admin
+out; then counting read-then-wrote, so concurrent guesses counted as one;
+and guessing straight at the Auth API was never counted at all. The lock
+no longer bans the user at Auth (a ban also kills the user's live sessions
+at their next refresh, so five anonymous requests could kick an admin out).
+Deliberate residual: an unknown email answers after a jittered delay instead
+of a dummy bcrypt (which would let anyone burn DB CPU), and only real
+accounts ever lock.
 
 ### The finalize cross-check holds for every engine output (confirmed, 2026-10-29)
 

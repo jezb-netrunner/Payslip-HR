@@ -41,6 +41,15 @@ end
 $$;
 revoke execute on function public.take_document_numbers(uuid, text, int) from public, anon, authenticated;
 
+-- PR-000001: at least six running digits, more once a client passes 999,999
+create or replace function public.format_control_no(p_prefix text, p_no bigint)
+returns text
+language sql immutable set search_path = public
+as $$
+  select p_prefix || '-' || lpad(p_no::text, greatest(6, length(p_no::text)), '0')
+$$;
+revoke execute on function public.format_control_no(text, bigint) from public, anon, authenticated;
+
 alter table public.payroll_runs add column if not exists control_no text
   constraint payroll_runs_control_no_check check (control_no ~ '^PR-[0-9]{6,}$');
 alter table public.payslips add column if not exists control_no text
@@ -103,13 +112,13 @@ begin
     order by entity_id, finalized_at nulls first, pay_date, created_at, id
   loop
     update payroll_runs
-      set control_no = 'PR-' || lpad(public.take_document_numbers(r.entity_id, 'payroll_run', 1)::text, 6, '0')
+      set control_no = public.format_control_no('PR', public.take_document_numbers(r.entity_id, 'payroll_run', 1))
       where id = r.id;
     select count(*) into v_count from payslips where payroll_run_id = r.id;
     if v_count > 0 then
       v_first := public.take_document_numbers(r.entity_id, 'payslip', v_count);
       update payslips p
-        set control_no = 'PS-' || lpad((v_first + o.rn - 1)::text, 6, '0')
+        set control_no = public.format_control_no('PS', v_first + o.rn - 1)
         from (select p2.id, row_number() over (order by e.last_name, e.first_name, e.employee_no, p2.id) as rn
               from payslips p2 join employees e on e.id = p2.employee_id
               where p2.payroll_run_id = r.id) o
@@ -239,14 +248,14 @@ begin
   perform set_config('payroll.lifecycle', 'on', true);
   v_first := public.take_document_numbers(v_run.entity_id, 'payslip', v_count);
   update payslips p
-    set control_no = 'PS-' || lpad((v_first + o.rn - 1)::text, 6, '0')
+    set control_no = public.format_control_no('PS', v_first + o.rn - 1)
     from (select p2.id, row_number() over (order by e.last_name, e.first_name, e.employee_no, p2.id) as rn
           from payslips p2 join employees e on e.id = p2.employee_id
           where p2.payroll_run_id = p_run) o
     where p.id = o.id;
   update payroll_runs
     set status = 'finalized', finalized_at = now(), finalized_by = auth.uid(),
-        control_no = 'PR-' || lpad(public.take_document_numbers(v_run.entity_id, 'payroll_run', 1)::text, 6, '0')
+        control_no = public.format_control_no('PR', public.take_document_numbers(v_run.entity_id, 'payroll_run', 1))
     where id = p_run
     returning * into v_run;
   update employees e
@@ -474,14 +483,23 @@ begin
   if jsonb_typeof(coalesce(p_detail, '{}'::jsonb)) <> 'object' or length(coalesce(p_detail, '{}'::jsonb)::text) > 2000 then
     raise exception 'The activity detail must be a short object.';
   end if;
+  -- the app reports these: at most 120 in ten minutes per user
+  if (select count(*) from audit_logs
+       where actor_id = auth.uid() and table_name = 'activity' and created_at > now() - interval '10 minutes') >= 120 then
+    raise exception 'Too many activity entries: try again in a few minutes.';
+  end if;
   select coalesce(p.email, nullif(p.full_name, ''), nullif(btrim(e.first_name || ' ' || e.last_name), '')) into v_email
     from profiles p left join employees e on e.id = p.employee_id
     where p.id = auth.uid();
   insert into audit_logs (actor_id, actor_email, action, table_name, record_id, entity_id, new_data)
-  -- an employee's sign-in and sign-out are filed under their own client
-  values (auth.uid(), v_email, p_action, 'activity', null, coalesce(p_entity, public.current_employee_entity_id()), coalesce(p_detail, '{}'::jsonb));
+  -- an employee's sign-in and sign-out are filed under their own client.
+  -- Reported by the app, and marked so: the keys only the sign-in guard
+  -- writes (the caller's address and browser) can't be supplied here
+  values (auth.uid(), v_email, p_action, 'activity', null, coalesce(p_entity, public.current_employee_entity_id()),
+          (coalesce(p_detail, '{}'::jsonb) - 'ip' - 'user_agent' - 'via' - 'source') || jsonb_build_object('source', 'app'));
 end
 $$;
+create index if not exists audit_logs_actor_created_idx on public.audit_logs (actor_id, created_at desc);
 revoke execute on function public.log_activity(text, uuid, jsonb) from public, anon;
 grant execute on function public.log_activity(text, uuid, jsonb) to authenticated;
 
@@ -501,38 +519,98 @@ create table public.auth_guard (
 alter table public.auth_guard enable row level security;
 revoke all on public.auth_guard from anon, authenticated;
 
--- The guard checks a password here, against the account's own bcrypt hash,
--- before it asks the Auth server for a session: a wrong password never
--- reaches the Auth server, whose per-IP sign-in limit all of the guard's
--- requests share (a flood of wrong passwords would use it up for every
--- admin). Answers ok, invalid, no_account, or upstream (a hash this check
--- doesn't read, which the Auth server then checks).
-create or replace function public.guard_check_password(p_email text, p_password text)
-returns text
-language plpgsql stable security definer set search_path = public, extensions
+-- A wrong password of an admin account: counted, and the fifth in a row
+-- within the lock period locks the account. Counted under the account's row
+-- lock, so concurrent attempts count one by one, and logged in the same
+-- transaction (no count without its audit row).
+create or replace function public.guard_record_failure(p_email text, p_max int, p_lock_minutes int, p_ip text, p_agent text)
+returns jsonb
+language plpgsql security definer set search_path = public
 as $$
 declare
-  v_hash text;
+  v_email text := lower(btrim(p_email));
+  v_guard auth_guard;
+  v_failures int;
+  v_locked timestamptz;
 begin
-  select u.encrypted_password into v_hash
-    from auth.users u
-    where lower(u.email) = lower(btrim(p_email)) and u.deleted_at is null
-    order by u.created_at
-    limit 1;
-  if not found then
-    return 'no_account';
+  insert into auth_guard (email) values (v_email) on conflict (email) do nothing;
+  select * into v_guard from auth_guard where email = v_email for update;
+  -- a run of failures ends after a lock period without one
+  v_failures := case when v_guard.last_failed_at is null
+                       or v_guard.last_failed_at < now() - make_interval(mins => p_lock_minutes)
+                     then 0 else v_guard.failed_attempts end + 1;
+  if v_failures >= p_max then
+    v_locked := now() + make_interval(mins => p_lock_minutes);
   end if;
-  if coalesce(v_hash, '') = '' or p_password is null or p_password = '' then
-    return 'invalid';
+  update auth_guard
+     set failed_attempts = case when v_locked is null then v_failures else 0 end,
+         last_failed_at = now(),
+         locked_until = v_locked,
+         updated_at = now()
+   where email = v_email;
+  insert into audit_logs (actor_id, actor_email, action, table_name, record_id, entity_id, new_data)
+  values (null, v_email, case when v_locked is null then 'sign_in_failed' else 'sign_in_locked' end, 'activity', null, null,
+          jsonb_build_object('attempt', v_failures, 'ip', p_ip, 'user_agent', p_agent, 'via', 'admin sign-in'));
+  if v_locked is not null then
+    return jsonb_build_object('result', 'locked', 'locked_until', v_locked);
   end if;
-  if v_hash not like '$2_$%' then
-    return 'upstream';
-  end if;
-  return case when extensions.crypt(p_password, v_hash) = v_hash then 'ok' else 'invalid' end;
+  return jsonb_build_object('result', 'invalid');
 end
 $$;
-revoke execute on function public.guard_check_password(text, text) from public, anon, authenticated;
-grant execute on function public.guard_check_password(text, text) to service_role;
+revoke execute on function public.guard_record_failure(text, int, int, text, text) from public, anon, authenticated;
+grant execute on function public.guard_record_failure(text, int, int, text, text) to service_role;
+
+-- The sign-in guard's password check, one attempt at a time per account:
+-- the guard row stays locked from the lock check through the password check
+-- to the count. The password is checked here, against the account's bcrypt
+-- hash, so a wrong one never reaches the Auth server (whose per-IP sign-in
+-- limit all of the guard's requests share). A password set through the guard
+-- is kept at the Auth server keyed (p_keyed, an HMAC only the edge functions
+-- can make), so guessing straight against the Auth API gets nowhere: either
+-- form is tried, and the answer says which one matched. Only $2a$ and $2x$
+-- bcrypt hashes are read here (pgcrypto takes $2b$ and $2y$ for DES salts):
+-- any other is upstream, for the Auth server to check.
+-- Answers result ok (with keyed), invalid, locked (with locked_until),
+-- no_account or upstream.
+create or replace function public.guard_sign_in(p_email text, p_password text, p_keyed text, p_max int, p_lock_minutes int, p_ip text, p_agent text)
+returns jsonb
+language plpgsql security definer set search_path = public, extensions
+as $$
+declare
+  v_email text := lower(btrim(p_email));
+  v_id uuid;
+  v_hash text;
+  v_guard auth_guard;
+begin
+  select u.id, u.encrypted_password into v_id, v_hash
+    from auth.users u
+    where lower(u.email) = v_email and u.deleted_at is null
+    order by u.created_at
+    limit 1;
+  if v_id is null then
+    return jsonb_build_object('result', 'no_account');
+  end if;
+  insert into auth_guard (email) values (v_email) on conflict (email) do nothing;
+  select * into v_guard from auth_guard where email = v_email for update;
+  if v_guard.locked_until is not null and v_guard.locked_until > now() then
+    return jsonb_build_object('result', 'locked', 'locked_until', v_guard.locked_until);
+  end if;
+  if coalesce(v_hash, '') <> '' and v_hash not like '$2a$%' and v_hash not like '$2x$%' then
+    return jsonb_build_object('result', 'upstream');
+  end if;
+  if coalesce(v_hash, '') <> '' and coalesce(p_keyed, '') <> '' and extensions.crypt(p_keyed, v_hash) = v_hash then
+    update auth_guard set failed_attempts = 0, last_failed_at = null, updated_at = now() where email = v_email;
+    return jsonb_build_object('result', 'ok', 'keyed', true);
+  end if;
+  if coalesce(v_hash, '') <> '' and coalesce(p_password, '') <> '' and extensions.crypt(p_password, v_hash) = v_hash then
+    update auth_guard set failed_attempts = 0, last_failed_at = null, updated_at = now() where email = v_email;
+    return jsonb_build_object('result', 'ok', 'keyed', false);
+  end if;
+  return public.guard_record_failure(v_email, p_max, p_lock_minutes, p_ip, p_agent);
+end
+$$;
+revoke execute on function public.guard_sign_in(text, text, text, int, int, text, text) from public, anon, authenticated;
+grant execute on function public.guard_sign_in(text, text, text, int, int, text, text) to service_role;
 
 -- the one admin session the sign-in guard admitted. A session it did not
 -- admit (a sign-in made straight against the Auth API, which would skip the
@@ -556,6 +634,12 @@ begin
      and (new.admin_session_id is distinct from old.admin_session_id
           or new.sessions_revoked_at is distinct from old.sessions_revoked_at) then
     raise exception 'Sign-in sessions are managed by the system.';
+  end if;
+  -- an account made an admin has no admin session until it signs in through
+  -- the guard (null would let any session act as an admin)
+  if new.role in ('company_admin', 'entity_admin') and old.role not in ('company_admin', 'entity_admin')
+     and new.admin_session_id is null then
+    new.admin_session_id := gen_random_uuid();
   end if;
   return new;
 end

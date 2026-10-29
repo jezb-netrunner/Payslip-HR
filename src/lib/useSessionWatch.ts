@@ -1,5 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { supabase } from './supabase'
+import { passwordChangeUnderWay } from './authGuard'
+
+/** The access token in use now (the session it belongs to). */
+async function currentToken(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession()
+  return data.session?.access_token ?? null
+}
 
 /**
  * One active admin session (BIR RMO 9-2021 Annex B): a sign-in elsewhere, or
@@ -18,14 +25,16 @@ export function useSessionWatch(enabled: boolean, onEnded: () => void): void {
     let stopped = false
     let checking = false
     const check = async () => {
-      if (stopped || checking || document.visibilityState === 'hidden') return
+      if (stopped || checking || document.visibilityState === 'hidden' || passwordChangeUnderWay()) return
       checking = true
       try {
+        const before = await currentToken()
         const { data, error } = await supabase.rpc('my_session_active')
-        if (!stopped && !error && data === false) {
-          stopped = true
-          ended.current()
-        }
+        // the answer is about the session it was asked with: a password change
+        // or a refresh in between gets the next check instead
+        if (stopped || error || data !== false || passwordChangeUnderWay() || (await currentToken()) !== before) return
+        stopped = true
+        ended.current()
       } finally {
         checking = false
       }

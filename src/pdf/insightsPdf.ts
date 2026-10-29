@@ -92,7 +92,9 @@ export function generateInsightsPdf(company: ReportCompany, title: string, perio
     doc.setFontSize(7)
     doc.setTextColor(...SLATE)
     const h = doc.internal.pageSize.getHeight()
-    doc.text(`${generatedLine(stamp)} • from finalized payroll and HR records`, MARGIN, h - 7, { maxWidth: pageW - MARGIN * 2 - 24 })
+    // a long name wraps upward, never toward the page edge
+    const foot = doc.splitTextToSize(`${generatedLine(stamp)} • from finalized payroll and HR records`, pageW - MARGIN * 2 - 24) as string[]
+    doc.text(foot, MARGIN, h - 7 - (foot.length - 1) * 3)
     doc.text(`Page ${p} of ${pages}`, pageW - MARGIN, h - 7, { align: 'right' })
   }
   doc.save(`${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${period.replace(/[^\w]+/g, '-')}.pdf`)

@@ -30,7 +30,7 @@ export function guardProblem(status: number, p: GuardPayload): string {
     case 'invalid':
       return 'Wrong email or password. Five failed sign-ins in a row lock the account for 30 minutes.'
     case 'deactivated':
-      return 'This account is deactivated or locked. Ask a company admin.'
+      return 'This account is deactivated. Ask a company admin.'
     case 'rate_limited':
       return 'Too many sign-in attempts from this network. Wait a few minutes, then try again.'
     case 'not_admin':
@@ -82,11 +82,21 @@ export async function guardChangePassword(email: string, password: string, newPa
   await adopt(await post({ action: 'change_password', email, password, new_password: newPassword }))
 }
 
+// While a password change is under way the server ends this session a moment
+// before the new one arrives: the session watcher waits it out.
+let changing = 0
+export const passwordChangeUnderWay = () => changing > 0
+
 /** Signed in (or arrived through a reset link, which needs no current password). */
 export async function guardSetPassword(newPassword: string, currentPassword?: string): Promise<void> {
   const { data } = await supabase.auth.getSession()
   if (!data.session) throw new Error('Your sign-in has ended. Sign in again.')
-  await adopt(await post({ action: 'set_password', new_password: newPassword, current_password: currentPassword }, data.session.access_token))
+  changing++
+  try {
+    await adopt(await post({ action: 'set_password', new_password: newPassword, current_password: currentPassword }, data.session.access_token))
+  } finally {
+    changing--
+  }
 }
 
 const NOTICE_KEY = 'payslip-hr:signin-notice'

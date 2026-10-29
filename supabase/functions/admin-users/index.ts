@@ -9,7 +9,9 @@
 //   admin_security             {}         lockouts, last sign-in, password age
 //   unlock_admin               {user_id}  ends a lockout after failed sign-ins
 // A password set here for someone else is temporary: the sign-in guard
-// (auth-guard) makes them change it at their next sign-in.
+// (auth-guard) makes them change it at their next sign-in. It is kept at
+// the Auth server keyed (HMAC under ADMIN_PASSWORD_PEPPER), as the guard
+// keeps every admin password. Resets and unlocks are on the audit trail.
 //
 // Employee login codes are "<CLIENT CODE>-<PART>". Supabase Auth needs an
 // email, so each code maps to a synthetic address derived from a SHA-256 of
@@ -86,6 +88,16 @@ function passwordProblem(password: string, email = ""): string | null {
   return null;
 }
 
+/**
+ * The password as the Auth server keeps it: an HMAC of it under a server
+ * secret. KEEP IN SYNC with keyedPassword in auth-guard.
+ */
+async function keyedPassword(password: string, pepper: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(password)));
+  return "k1." + btoa(String.fromCharCode(...mac)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 function tokenClaims(token: string): { iat?: number; session_id?: string } {
   try {
     const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
@@ -124,7 +136,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: caller } = await admin
       .from("profiles")
-      .select("id, role, is_active, sessions_revoked_at, admin_session_id")
+      .select("id, role, is_active, email, sessions_revoked_at, admin_session_id")
       .eq("id", callerId)
       .single();
     if (
@@ -150,6 +162,22 @@ Deno.serve(async (req: Request) => {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { "x-actor-id": callerId } },
     });
+    const pepper = Deno.env.get("ADMIN_PASSWORD_PEPPER") ?? "";
+    const callerEmail = (caller.email as string | null) ?? null;
+
+    // an admin account's action on the audit trail (the account rows hold no trace of it)
+    async function auditAccount(action: string, target: string, detail: Record<string, unknown> = {}) {
+      const { error } = await db.from("audit_logs").insert({
+        actor_id: callerId,
+        actor_email: callerEmail,
+        action,
+        table_name: "activity",
+        record_id: null,
+        entity_id: null,
+        new_data: { ...detail, account: target, via: "admin users" },
+      });
+      if (error) throw error;
+    }
 
     async function canManageEntity(entityId: string): Promise<boolean> {
       if (isCompanyAdmin) return true;
@@ -309,9 +337,10 @@ Deno.serve(async (req: Request) => {
       if (role !== "company_admin" && role !== "entity_admin") {
         return json({ error: "Role must be company_admin or entity_admin" }, 400);
       }
+      if (pepper.length < 32) return json({ error: "Admin passwords can't be set: the ADMIN_PASSWORD_PEPPER secret is missing." }, 500);
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email,
-        password,
+        password: await keyedPassword(password, pepper),
         email_confirm: true,
         app_metadata: { role },
         user_metadata: { full_name: fullName },
@@ -319,7 +348,7 @@ Deno.serve(async (req: Request) => {
       if (createErr || !created?.user) {
         return json({ error: createErr?.message ?? "Failed to create user" }, 400);
       }
-      await db.from("profiles").upsert({
+      const { error: profErr } = await db.from("profiles").upsert({
         id: created.user.id,
         role,
         employee_id: null,
@@ -329,9 +358,15 @@ Deno.serve(async (req: Request) => {
         // no session has admin access until the first sign-in through the guard
         admin_session_id: crypto.randomUUID(),
       });
+      if (profErr) {
+        // no half-made admin: the account goes with its profile
+        await admin.auth.admin.deleteUser(created.user.id);
+        return json({ error: profErr.message }, 400);
+      }
       if (role === "entity_admin") await setAssignments(created.user.id, body.entity_ids);
       // a temporary password: changed at the first sign-in
-      await db.from("auth_guard").upsert({ email, password_changed_at: null, updated_at: new Date().toISOString() });
+      const { error: guardErr } = await db.from("auth_guard").upsert({ email, password_changed_at: null, updated_at: new Date().toISOString() });
+      if (guardErr) return json({ error: guardErr.message }, 400);
       return json({ ok: true, user_id: created.user.id });
     }
 
@@ -362,23 +397,32 @@ Deno.serve(async (req: Request) => {
         if (!body.active) await db.rpc("revoke_user_sessions", { p_user: userId });
       }
       if (typeof body.password === "string" && body.password.length > 0) {
+        // your own password changes through the sign-in guard (account menu):
+        // it asks for the current one and starts the new session; set here,
+        // the Auth server would end this session with nothing to replace it
+        if (userId === callerId) {
+          return json({ error: "Change your own password from the account menu (the key icon by your name)." }, 400);
+        }
         const targetEmail = String(target.email ?? "").toLowerCase();
         const weak = passwordProblem(body.password, targetEmail);
         if (weak) return json({ error: `Password: ${weak}` }, 400);
+        if (pepper.length < 32) return json({ error: "Admin passwords can't be set: the ADMIN_PASSWORD_PEPPER secret is missing." }, 500);
         const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
-          password: body.password,
+          password: await keyedPassword(body.password, pepper),
         });
         if (pwErr) return json({ error: pwErr.message }, 400);
         if (targetEmail) {
-          // someone else's password set here is temporary (changed at the next
-          // sign-in), and their sessions end now
-          await db.from("auth_guard").upsert({
+          // a password set here is temporary (changed at the next sign-in),
+          // and the account's sessions end now
+          const { error: guardErr } = await db.from("auth_guard").upsert({
             email: targetEmail,
-            password_changed_at: userId === callerId ? new Date().toISOString() : null,
+            password_changed_at: null,
             updated_at: new Date().toISOString(),
           });
+          if (guardErr) return json({ error: guardErr.message }, 400);
         }
-        if (userId !== callerId) await db.rpc("revoke_user_sessions", { p_user: userId });
+        await db.rpc("revoke_user_sessions", { p_user: userId });
+        await auditAccount("password_reset", targetEmail || userId);
       }
       if (typeof body.full_name === "string" && body.full_name.trim()) {
         await db.from("profiles").update({ full_name: body.full_name.trim() }).eq("id", userId);
@@ -417,17 +461,15 @@ Deno.serve(async (req: Request) => {
       if (!target || (target.role !== "company_admin" && target.role !== "entity_admin") || !target.email) {
         return json({ error: "Admin account not found" }, 404);
       }
-      await db.from("auth_guard").upsert({
+      const { error: guardErr } = await db.from("auth_guard").upsert({
         email: String(target.email).toLowerCase(),
         failed_attempts: 0,
         locked_until: null,
         last_failed_at: null,
         updated_at: new Date().toISOString(),
       });
-      if (target.is_active) {
-        const { error: banErr } = await admin.auth.admin.updateUserById(userId, { ban_duration: "none" });
-        if (banErr) return json({ error: banErr.message }, 400);
-      }
+      if (guardErr) return json({ error: guardErr.message }, 400);
+      await auditAccount("unlock", String(target.email).toLowerCase());
       return json({ ok: true });
     }
 

@@ -182,38 +182,89 @@ update profiles set email = null, full_name = '' where id = '00000000-0000-0000-
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000021e1', true);
-select public.log_activity('sign_in', null, '{"via": "login code"}');
+select public.log_activity('sign_in', null, '{"method": "login code", "via": "admin sign-in", "ip": "198.51.100.1"}');
 select pg_temp.expect_error($$select public.log_activity('export', '10000000-0000-0000-0000-0000000021f9', '{}')$$, '%Client not found%');
 commit;
 select pg_temp.check((select count(*) = 1 from audit_logs where action = 'sign_in' and actor_id = '00000000-0000-0000-0000-0000000021e1'
                              and entity_id = '10000000-0000-0000-0000-0000000021f0' and actor_email = 'Ana Bautista'),
   'an employee sign-in is filed under their client and names them');
+select pg_temp.check((select new_data = '{"method": "login code", "source": "app"}' from audit_logs where action = 'sign_in' and actor_id = '00000000-0000-0000-0000-0000000021e1'),
+  'the app''s entry is marked as such, without the keys only the sign-in guard writes');
 begin;
 set local role anon;
 select pg_temp.expect_error($$select public.log_activity('sign_in', null, '{}')$$, '%permission denied%');
 select pg_temp.expect_error($$select * from payroll_voids$$, '%permission denied%');
 commit;
 
-\echo '--- 21.4b the guard checks passwords in the database (bcrypt), for the service role only'
-update auth.users set encrypted_password = extensions.crypt('Right2026pw', extensions.gen_salt('bf', 4)) where id = :xa;
-insert into auth.users (id, email, encrypted_password) values ('00000000-0000-0000-0000-0000000021e2', 'argon@cx.test', '$argon2id$v=19$m=65536,t=3,p=4$abc$def');
+-- the app's entries are capped: 120 in ten minutes per user (xa has one already)
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :xa, true);
+select public.log_activity('report', null, '{}') from generate_series(1, 119);
+select pg_temp.expect_error($$select public.log_activity('report', null, '{}')$$, '%Too many activity entries%');
+commit;
+
+\echo '--- 21.4b the guard checks passwords in the database, counts failures and locks, for the service role only'
+-- xa's Auth password is the keyed form of Right2026pw (set through the guard)
+update auth.users set encrypted_password = extensions.crypt('k1.keyed-Right2026pw', extensions.gen_salt('bf', 4)) where id = :xa;
+insert into auth.users (id, email, encrypted_password) values
+  ('00000000-0000-0000-0000-0000000021e2', 'argon@cx.test', '$argon2id$v=19$m=65536,t=3,p=4$abc$def'),
+  ('00000000-0000-0000-0000-0000000021e3', 'bcrypt2b@cx.test', '$2b$10$abcdefghijklmnopqrstuuJ4bqUeRfAqG1nVv7v1o9tYxYxYxYxYx'),
+  ('00000000-0000-0000-0000-0000000021e4', 'legacy@cx.test', extensions.crypt('Plain2026pw', extensions.gen_salt('bf', 4)));
 begin;
 set local role service_role;
-select pg_temp.check(public.guard_check_password('xa@cx.test', 'Right2026pw') = 'ok', 'the right password');
-select pg_temp.check(public.guard_check_password('  XA@cx.test ', 'Right2026pw') = 'ok', 'the email matched as typed, any case');
-select pg_temp.check(public.guard_check_password('xa@cx.test', 'right2026pw') = 'invalid', 'a wrong password');
-select pg_temp.check(public.guard_check_password('xa@cx.test', '') = 'invalid', 'an empty password');
-select pg_temp.check(public.guard_check_password('nobody@cx.test', 'Right2026pw') = 'no_account', 'no such account');
-select pg_temp.check(public.guard_check_password('argon@cx.test', 'x') = 'upstream', 'a hash only the Auth server reads');
+select pg_temp.check(public.guard_sign_in('xa@cx.test', 'Right2026pw', 'k1.keyed-Right2026pw', 5, 30, '203.0.113.7', 'test') = '{"result": "ok", "keyed": true}', 'the keyed password');
+select pg_temp.check(public.guard_sign_in('  XA@cx.test ', 'x', 'k1.keyed-Right2026pw', 5, 30, null, null)->>'result' = 'ok', 'the email matched as typed, any case');
+select pg_temp.check(public.guard_sign_in('xa@cx.test', 'k1.keyed-Right2026pw', 'k1.other', 5, 30, null, null)->>'result' = 'ok', 'either form is tried');
+select pg_temp.check(public.guard_sign_in('legacy@cx.test', 'Plain2026pw', 'k1.keyed-Plain2026pw', 5, 30, null, null) = '{"result": "ok", "keyed": false}', 'a password set before the guard (plain at the Auth server)');
+select pg_temp.check(public.guard_sign_in('nobody@cx.test', 'x', 'y', 5, 30, null, null) = '{"result": "no_account"}', 'no such account');
+select pg_temp.check((select count(*) = 0 from auth_guard where email = 'nobody@cx.test'), 'and nothing stored for it');
+select pg_temp.check(public.guard_sign_in('argon@cx.test', 'x', 'y', 5, 30, null, null)->>'result' = 'upstream', 'an argon2 hash goes to the Auth server');
+select pg_temp.check(public.guard_sign_in('bcrypt2b@cx.test', 'x', 'y', 5, 30, null, null)->>'result' = 'upstream', 'so does $2b$, which pgcrypto misreads');
+-- four wrong passwords are counted and logged, the fifth locks
+select pg_temp.check(public.guard_sign_in('legacy@cx.test', 'Wrong' || n || 'pw', 'k1.w', 5, 30, '203.0.113.9', 'test') = '{"result": "invalid"}', 'wrong password ' || n) from generate_series(1, 4) n;
+select pg_temp.check((select failed_attempts = 4 from auth_guard where email = 'legacy@cx.test'), 'four failures counted');
+select pg_temp.check(public.guard_sign_in('legacy@cx.test', 'Wrong5pw', 'k1.w', 5, 30, null, null)->>'result' = 'locked', 'the fifth locks');
+select pg_temp.check(public.guard_sign_in('legacy@cx.test', 'Plain2026pw', 'k1.keyed-Plain2026pw', 5, 30, null, null)->>'result' = 'locked', 'even the right password waits out the lock');
+select pg_temp.check((select count(*) = 4 from audit_logs where action = 'sign_in_failed' and actor_email = 'legacy@cx.test' and new_data->>'ip' = '203.0.113.9'), 'the failures are on the trail');
+select pg_temp.check((select count(*) = 1 from audit_logs where action = 'sign_in_locked' and actor_email = 'legacy@cx.test'), 'the lock is on the trail once');
+commit;
+-- a lock ends after its period; a right password then clears the count
+update auth_guard set locked_until = now() - interval '1 minute', failed_attempts = 0, last_failed_at = now() - interval '31 minutes' where email = 'legacy@cx.test';
+begin;
+set local role service_role;
+select pg_temp.check(public.guard_sign_in('legacy@cx.test', 'Wrong6pw', 'k1.w', 5, 30, null, null) = '{"result": "invalid"}', 'after the lock, a wrong password counts from one');
+select pg_temp.check((select failed_attempts = 1 from auth_guard where email = 'legacy@cx.test'), 'a new run of failures');
+select pg_temp.check(public.guard_sign_in('legacy@cx.test', 'Plain2026pw', 'k1.x', 5, 30, null, null)->>'result' = 'ok', 'then the right password');
+select pg_temp.check((select failed_attempts = 0 and last_failed_at is null from auth_guard where email = 'legacy@cx.test'), 'clears the count');
+-- a failure the Auth server found (an upstream hash) counts the same way
+select pg_temp.check(public.guard_record_failure('argon@cx.test', 5, 30, null, null) = '{"result": "invalid"}', 'an upstream failure counts');
 commit;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :xa, true);
-select pg_temp.expect_error($$select public.guard_check_password('xa@cx.test', 'Right2026pw')$$, '%permission denied%');
+select pg_temp.expect_error($$select public.guard_sign_in('xa@cx.test', 'Right2026pw', 'k', 5, 30, null, null)$$, '%permission denied%');
+select pg_temp.expect_error($$select public.guard_record_failure('xa@cx.test', 5, 30, null, null)$$, '%permission denied%');
 commit;
 begin;
 set local role anon;
-select pg_temp.expect_error($$select public.guard_check_password('xa@cx.test', 'Right2026pw')$$, '%permission denied%');
+select pg_temp.expect_error($$select public.guard_sign_in('xa@cx.test', 'Right2026pw', 'k', 5, 30, null, null)$$, '%permission denied%');
+commit;
+
+\echo '--- 21.4c control numbers keep six digits and grow past them; an account made an admin starts without an admin session'
+select pg_temp.check(public.format_control_no('PS', 7) = 'PS-000007', 'six running digits');
+select pg_temp.check(public.format_control_no('PS', 1000000) = 'PS-1000000', 'a seventh digit past 999,999, never truncated');
+-- a company admin promotes an employee login: it is no admin until it signs in through the guard
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :owner, true);
+update profiles set role = 'entity_admin', employee_id = null where id = '00000000-0000-0000-0000-0000000021e1';
+commit;
+select pg_temp.check((select admin_session_id is not null from profiles where id = '00000000-0000-0000-0000-0000000021e1'), 'the promoted account has no admin session yet');
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', json_build_object('sub', '00000000-0000-0000-0000-0000000021e1', 'session_id', '40000000-0000-0000-0000-0000000021d1')::text, true);
+select pg_temp.check(not public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'so none of its sessions manages a client');
 commit;
 
 \echo '--- 21.5 one active admin session: only the session the sign-in guard admitted'

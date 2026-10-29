@@ -476,6 +476,9 @@ export interface PayrollRun {
   control_no: string | null
 }
 
+/** A voided version without its payslips (they load when downloaded). */
+export type PayrollVoidSummary = Omit<PayrollVoid, 'payslips'>
+
 /** A posted payroll voided for reissue: the run and its payslips as they were posted. */
 export interface PayrollVoid {
   id: string

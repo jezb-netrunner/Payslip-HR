@@ -298,6 +298,8 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
   // the note is free text from client settings, and the generated-by line
   // names the user: wrap both, each below however many lines the last took
   const textW = pageW - margin * 2
+  // wrapped in the bold it prints in
+  doc.setFont('helvetica', 'bold')
   const voidNote: string[] = opts.voided
     ? doc.splitTextToSize(
         `VOIDED ${manilaStamp(new Date(opts.voided.at))}${opts.voided.by ? ` by ${opts.voided.by}` : ''}: ${opts.voided.reason}. ` +
@@ -305,6 +307,7 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
         textW,
       )
     : []
+  doc.setFont('helvetica', 'italic')
   const note: string[] = doc.splitTextToSize(company.payslip_footer_note ?? '', textW)
   const generated = opts.stamp
     ? stampFooter(opts.stamp)

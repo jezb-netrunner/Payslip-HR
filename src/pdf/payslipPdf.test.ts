@@ -99,6 +99,20 @@ describe('bulk payslip PDFs', () => {
     expect(text).not.toContain('DRAFT')
   })
 
+  it('wraps a long void reason inside the margins, in the bold it prints in', async () => {
+    const reason = 'Overtime of the whole warehouse team was entered twice for the second week, and the night shift allowance was missed for everyone on the new roster'
+    const doc = await buildPayslipsDoc([slip('A-001', 'Ana Reyes')], run, company, undefined, { voided: { at: '2026-10-30T02:00:00Z', by: 'liza.santos@acmetrading.ph', reason } })
+    const stream = (doc.internal as unknown as { pages: string[][] }).pages[1].join('\n')
+    // the footer note, not the VOIDED PAYSLIP title
+    const block = stream.split('BT').find((b) => b.includes('(VOIDED ') && !b.includes('(VOIDED PAYSLIP)'))!
+    const lines = [...block.matchAll(/\(((?:\\.|[^\\)])*)\)\s*Tj/g)].map((m) => m[1].replace(/\\(.)/g, '$1'))
+    expect(lines.length).toBeGreaterThan(1)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7.5)
+    const textW = doc.internal.pageSize.getWidth() - 14 * 2
+    for (const l of lines) expect(doc.getTextWidth(l)).toBeLessThanOrEqual(textW + 0.01)
+  })
+
   it('names files safely', () => {
     expect(payslipFileName(slip('A/01 x', 'X'), run)).toBe('payslip_A_01_x_2026-10-31.pdf')
   })

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, FileSpreadsheet, Printer } from 'lucide-react'
-import { Badge, Button, Card, EmptyState, Input, PageHeader, Select, Spinner, TableShell, Td, Th } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, Input, LoadFailed, PageHeader, Select, Spinner, TableShell, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
 import type { AuditLog as AuditRow } from '../../lib/db'
@@ -26,6 +26,8 @@ const ACTIONS: Record<string, { label: string; tone: string }> = {
   sign_in_failed: { label: 'failed sign-in', tone: 'amber' },
   sign_in_locked: { label: 'locked out', tone: 'red' },
   password_change: { label: 'password changed', tone: 'violet' },
+  password_reset: { label: 'reset a password', tone: 'violet' },
+  unlock: { label: 'unlocked an account', tone: 'violet' },
   sign_out: { label: 'signed out', tone: 'slate' },
   report: { label: 'ran report', tone: 'blue' },
   print: { label: 'printed', tone: 'blue' },
@@ -96,6 +98,8 @@ export default function AuditLog() {
   const [from, setFrom] = useState(addDays(today, -30))
   const [to, setTo] = useState(today)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [reloads, setReloads] = useState(0)
   const [busy, setBusy] = useState(false)
 
   const query = useCallback(() => {
@@ -121,14 +125,20 @@ export default function AuditLog() {
     }
     setLoading(true)
     void Promise.resolve(query().order('created_at', { ascending: false }).order('id', { ascending: false }).limit(SHOWN)).then(
-      ({ data, count }) => {
+      ({ data, count, error }) => {
         if (mine !== latest.current) return // a newer filter/client superseded this request
+        setLoadError(error ? errorMessage(error, 'Could not load the audit log') : '')
         setRows((data ?? []) as AuditRow[])
         setTotal(count ?? 0)
         setLoading(false)
       },
+      (err) => {
+        if (mine !== latest.current) return
+        setLoadError(errorMessage(err, 'Could not load the audit log'))
+        setLoading(false)
+      },
     )
-  }, [query, scope, entity])
+  }, [query, scope, entity, reloads])
 
   const scopeLabel = scope === 'global' ? 'global entries (statutory tables, users, sign-ins)' : (entity?.name ?? '')
   const title = `Audit log, ${scopeLabel}, ${from || 'start'} to ${to || today}${table ? `, ${TABLES[table] ?? table}` : ''}`
@@ -274,6 +284,8 @@ export default function AuditLog() {
       </div>
       {loading ? (
         <Spinner />
+      ) : loadError ? (
+        <LoadFailed message={loadError} onRetry={() => setReloads((n) => n + 1)} />
       ) : rows.length === 0 ? (
         <Card><EmptyState title="No audit entries" sub="Nothing recorded for these filters." /></Card>
       ) : (

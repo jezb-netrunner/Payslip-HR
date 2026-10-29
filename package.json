@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:edge": "vitest run --config supabase/functions/tests/vitest.config.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

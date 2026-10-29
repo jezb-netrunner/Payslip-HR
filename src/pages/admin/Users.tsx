@@ -34,15 +34,21 @@ export default function Users() {
   const notify = useToast()
 
   const load = useCallback(async () => {
-    const [{ data: profs }, { data: ea }, sec] = await Promise.all([
-      supabase.from('profiles').select('*').in('role', ['company_admin', 'entity_admin']).order('full_name'),
-      supabase.from('entity_admins').select('*'),
-      callAdminUsers({ action: 'admin_security' }) as Promise<{ accounts?: AccountSecurity[]; error?: string }>,
-    ])
-    setAdmins((profs ?? []) as Profile[])
-    setLinks((ea ?? []) as EntityAdmin[])
-    setSecurity(new Map((sec.accounts ?? []).map((a) => [a.user_id, a])))
-    setLoading(false)
+    try {
+      const [{ data: profs }, { data: ea }, sec] = await Promise.all([
+        supabase.from('profiles').select('*').in('role', ['company_admin', 'entity_admin']).order('full_name'),
+        supabase.from('entity_admins').select('*'),
+        // the lock status is extra: the list shows without it
+        (callAdminUsers({ action: 'admin_security' }) as Promise<{ accounts?: AccountSecurity[]; error?: string }>).catch(
+          () => ({ accounts: undefined }),
+        ),
+      ])
+      setAdmins((profs ?? []) as Profile[])
+      setLinks((ea ?? []) as EntityAdmin[])
+      setSecurity(new Map((sec.accounts ?? []).map((a) => [a.user_id, a])))
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   async function unlock(a: Profile) {
@@ -312,17 +318,19 @@ function EditAdminModal({
             <ClientPicker value={ids} onChange={setIds} />
           </Field>
         )}
-        <Field
-          label="Reset password (leave blank to keep)"
-          hint={
-            isSelf
-              ? PASSWORD_RULE
-              : `${PASSWORD_RULE} A password you set for someone else is temporary: their sessions end now, and they choose their own at the next sign-in.`
-          }
-        >
-          <Input value={password} onChange={(e) => setPassword(e.target.value)} />
-        </Field>
-        {problem && <p className="text-xs text-rose-600">{problem}</p>}
+        {isSelf ? (
+          <p className="text-xs text-slate-500">To change your own password, use the key icon by your name: it asks for the current one first.</p>
+        ) : (
+          <>
+            <Field
+              label="Reset password (leave blank to keep)"
+              hint={`${PASSWORD_RULE} A password you set for someone else is temporary: their sessions end now, and they choose their own at the next sign-in.`}
+            >
+              <Input value={password} onChange={(e) => setPassword(e.target.value)} />
+            </Field>
+            {problem && <p className="text-xs text-rose-600">{problem}</p>}
+          </>
+        )}
         {!isSelf && <Toggle checked={active} onChange={setActive} label="Account active" />}
         <Button className="w-full" disabled={busy || !!problem} onClick={save}>
           {busy ? 'Saving…' : 'Save changes'}

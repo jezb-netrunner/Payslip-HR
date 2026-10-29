@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Check, KeyRound, Lock, Mail, User } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { supabase, urlAuthError } from '../lib/supabase'
 import { employeeLoginEmail, isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
 import { Button, Input, Logo } from '../components/ui'
 import { errorMessage } from '../lib/errors'
@@ -24,6 +24,16 @@ function signInProblem(err: { status?: number; name?: string }, badCredentials: 
   return badCredentials
 }
 
+/** A link the Auth server refused, in words. */
+function linkProblem(): string {
+  if (!urlAuthError) return ''
+  if (urlAuthError.code === 'user_banned') {
+    return 'This account is deactivated. Ask a company admin to reactivate it.'
+  }
+  if (urlAuthError.code === 'otp_expired') return 'That link has expired or was already used. Request a new one.'
+  return `That link didn't work${urlAuthError.description ? `: ${urlAuthError.description}` : ''}. Request a new one.`
+}
+
 export default function Login() {
   const [mode, setMode] = useState<Mode>('employee')
   const [code, setCode] = useState('')
@@ -36,9 +46,14 @@ export default function Login() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
-  // why the app signed the user out (a sign-in elsewhere ended this session)
-  const [signedOutNotice] = useState(peekSignInNotice)
-  useEffect(clearSignInNotice, [])
+  // why the app signed the user out (a sign-in elsewhere ended this session),
+  // or why the Auth server refused a link (a reset link of a locked account)
+  const [signedOutNotice] = useState(() => peekSignInNotice() || linkProblem())
+  useEffect(() => {
+    clearSignInNotice()
+    // the error stays in the address bar otherwise
+    if (urlAuthError) window.history.replaceState(null, '', window.location.pathname)
+  }, [])
 
   function switchTo(m: Mode) {
     setMode(m)
@@ -64,7 +79,7 @@ export default function Login() {
           password: normalized,
         })
         if (err) throw new Error(signInProblem(err, 'That code did not work. Check it with your HR or payroll officer.'))
-        void logActivity('sign_in', null, { via: 'login code' })
+        void logActivity('sign_in', null, { method: 'login code' })
       } else if (mode === 'admin') {
         // the guard counts failures, admits this one session and asks for a
         // new password when the current one is temporary or 30 days old

@@ -306,10 +306,13 @@ reminds company admins when this year's check is due).
 5. Employee login codes are client-prefixed (no cross-client guessing),
    high-entropy, revocable, and never stored in readable form.
 6. Admin sign-in goes through the `auth-guard` edge function: five failed
-   sign-ins lock the account for 30 minutes, a temporary or 30-day-old
-   password must be changed first, passwords mix letters and digits, and an
-   account has one session at a time — the RLS helpers give admin access
-   only to the session the guard admitted (`profiles.admin_session_id`).
+   sign-ins lock the account for 30 minutes (counted in the database, one
+   attempt at a time), a temporary or 30-day-old password must be changed
+   first, passwords mix letters and digits, and an account has one session at
+   a time — the RLS helpers give admin access only to the session the guard
+   admitted (`profiles.admin_session_id`). The Auth server keeps an admin
+   password only keyed (an HMAC under the `ADMIN_PASSWORD_PEPPER` secret), so
+   it can't be guessed straight at the Auth API.
 7. Every report and export carries the client's name, address, VAT status
    and TIN, the user, the time and the software version; reports, prints,
    exports, sign-ins and sign-outs are on the audit trail, which no app user
@@ -376,12 +379,16 @@ and anon key are public by design (RLS protects all data).
 
 Migrations are in `supabase/migrations/` and the edge functions are in
 `supabase/functions/` (`admin-users` with JWT verification on, `auth-guard`
-with it **off**: it is called before there is a session). The CAS-controls
+with it **off**: it is called before there is a session). Both need the
+edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random characters; never
+change it: admin passwords are kept keyed with it). The CAS-controls
 migration (`*_cas_controls.sql`), both functions and the front end go live
 together: after the migration only a session the guard admitted has admin
 access, so an older front end can't sign admins in, and this front end needs
-the migration. Deploy both functions, apply the migration, then merge to
-`main`; every admin signs in once more. Likewise the multi-client migrations
+the migration. Set the secret, deploy both functions, apply the migration,
+then merge to `main`; every admin signs in once more and chooses a new
+password. `npm run test:edge` runs the functions against a local stack
+(`supabase/functions/tests/`). Likewise the multi-client migrations
 (`*_multi_client_schema.sql`, `*_multi_client_security.sql`) replace the
 single-company schema, so an older front end stops working once they are
 applied, and this front end needs them. Apply the migrations, deploy the edge
