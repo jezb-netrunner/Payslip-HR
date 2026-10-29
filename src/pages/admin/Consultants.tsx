@@ -66,6 +66,9 @@ import {
 } from '../../payroll/ewt'
 import { ewtDueDates, type EwtDueOverride } from '../../payroll/ewtDueDates'
 import { round2 } from '../../payroll/types'
+import { useReportStamp } from '../../lib/useReportStamp'
+import { stampHtml, tinLine, type ReportStamp } from '../../lib/reportStamp'
+import { logActivity } from '../../lib/activity'
 
 interface Data {
   consultants: Consultant[]
@@ -1134,6 +1137,7 @@ function BirTab({
   onChanged: () => void
 }) {
   const toast = useToast()
+  const stamp = useReportStamp(entity)
   const [marking, setMarking] = useState(false)
   const [filedOn, setFiledOn] = useState(todayManila())
   const [reference, setReference] = useState('')
@@ -1199,7 +1203,7 @@ function BirTab({
     downloadCsv(`qap-${entity.code}-${quarter.label.replace(' ', '-')}.csv`, [
       ['Seq', 'TIN', 'Branch code', 'Registered name', 'Last name', 'First name', 'Middle name', 'ATC', 'Nature of income payment', 'Income payment', 'Rate', 'Tax withheld'],
       ...qap.map((r) => [r.seq, r.tin, r.branch, r.registeredName, r.lastName, r.firstName, r.middleName, r.atc, r.nature, r.income, r.rate, r.withheld]),
-    ])
+    ], stamp(`Quarterly Alphalist of Payees, ${quarter.label}`), { agencyFormat: true })
   }
 
   return (
@@ -1308,7 +1312,7 @@ function BirTab({
                     d.over_threshold ? 'Above the threshold' : 'Within the threshold',
                     d.submitted_on,
                   ]),
-                ])
+                ], stamp(`Payees with sworn declarations, ${year}`))
               }
             >
               <Download className="size-4" /> CSV
@@ -1347,7 +1351,7 @@ function BirTab({
               <Button size="sm" variant="secondary" onClick={exportQap}>
                 <Download className="size-4" /> QAP CSV
               </Button>
-              <Button size="sm" variant="secondary" onClick={() => print2307(entity, payees, facts, quarter)}>
+              <Button size="sm" variant="secondary" onClick={() => print2307(entity, payees, facts, quarter, stamp(`BIR 2307 figures ${quarter.label}`))}>
                 <Printer className="size-4" /> Print all 2307 figures
               </Button>
             </>
@@ -1393,7 +1397,7 @@ function BirTab({
                       <td className="whitespace-nowrap py-2 pr-4 text-right font-semibold tabular-nums">{money(r.withheld)}</td>
                       <td className="py-2 text-right">
                         {i === 0 && (
-                          <IconButton label={`Print the 2307 figures of ${payeeName(p)}`} onClick={() => print2307(entity, [p], facts, quarter)}>
+                          <IconButton label={`Print the 2307 figures of ${payeeName(p)}`} onClick={() => print2307(entity, [p], facts, quarter, stamp(`BIR 2307 figures ${quarter.label}, ${payeeName(p)}`))}>
                             <Printer className="size-4" />
                           </IconButton>
                         )}
@@ -1430,9 +1434,10 @@ function BirTab({
 }
 
 /** The 2307 working figures of the payees for a quarter, printed one per page. */
-function print2307(entity: Entity, payees: Consultant[], facts: Parameters<typeof form2307Rows>[0], quarter: Quarter) {
+function print2307(entity: Entity, payees: Consultant[], facts: Parameters<typeof form2307Rows>[0], quarter: Quarter, stamp: ReportStamp) {
   const w = window.open('', '_blank', 'width=760,height=900')
   if (!w) return
+  void logActivity('print', entity.id, { report: stamp.title, payees: payees.length })
   const esc = (v: string) => v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
   const val = (v: number) => v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const month = (m: string) => fmtDate(`${m}-01`).replace(/ 1,/, '')
@@ -1449,12 +1454,12 @@ function print2307(entity: Entity, payees: Consultant[], facts: Parameters<typeo
       <p style="font-size:12px;color:#475569">Working figures for the official BIR Form 2307 (Certificate of Creditable Tax Withheld at Source), period ${esc(fmtDate(quarter.start))} to ${esc(fmtDate(quarter.end))}.</p>
       <p style="font-size:12px"><b>Payee:</b> ${esc(payeeName(p))} · TIN ${esc(fmtTin(p.tin, p.tin_branch_code))}<br/>
       <b>Registered address:</b> ${esc(p.address || '—')} ${esc(p.zip_code)}<br/>
-      <b>Payor:</b> ${esc(entity.name)} · TIN ${esc(fmtTin(entity.tin, entity.tin_branch_code))} · ${esc(entity.registered_address)} ${esc(entity.zip_code)}</p>
+      <b>Payor:</b> ${esc(entity.name)} · ${esc(tinLine(entity))} · ${esc(entity.registered_address)} ${esc(entity.zip_code)}</p>
       <table style="width:100%;border-collapse:collapse;font-size:12px" border="1" cellpadding="4">
         <tr><th>ATC</th>${quarter.months.map((m) => `<th>${esc(month(m))}</th>`).join('')}<th>Total</th><th>Tax withheld</th></tr>
         ${cells}
       </table>
-      <p style="font-size:12px">Income payment: ${esc(p.service)}</p></section>`
+      <p style="font-size:12px">Income payment: ${esc(p.service)}</p>${stampHtml(stamp, esc)}</section>`
   }
   w.document.write(
     `<html><head><title>BIR 2307 figures — ${esc(entity.name)} ${esc(quarter.label)}</title></head><body style="font-family:sans-serif;padding:24px;color:#0f172a">${payees.map(sheet).join('')}</body></html>`,

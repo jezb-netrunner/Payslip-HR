@@ -33,9 +33,23 @@ create or replace function pg_temp.computed(p_run uuid) returns void
 language sql as $$
   update payslips p set employee_payroll_seq = e.payroll_seq
     from employees e where e.id = p.employee_id and p.payroll_run_id = p_run;
-  update payroll_runs
-    set totals = jsonb_build_object('employees', (select count(*) from payslips where payroll_run_id = p_run))
-    where id = p_run;
+  -- lines that add up to each payslip's figures and run totals that add up
+  -- to its payslips, as computeRun writes them (finalize cross-checks both)
+  update payslips p set
+      earnings = coalesce(p.earnings, '[]'::jsonb) || case when x.e = p.gross_pay then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'basic', 'label', 'Basic Pay', 'amount', p.gross_pay - x.e)) end,
+      deductions = coalesce(p.deductions, '[]'::jsonb) || case when x.d = p.total_deductions then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'other', 'label', 'Other deductions', 'amount', p.total_deductions - x.d)) end
+    from (select q.id,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.earnings, '[]'::jsonb)) l), 0) as e,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.deductions, '[]'::jsonb)) l), 0) as d
+          from payslips q where q.payroll_run_id = p_run) x
+    where p.id = x.id;
+  update payroll_runs r
+    set totals = (select jsonb_build_object('employees', count(*), 'gross', coalesce(sum(gross_pay), 0),
+                    'net', coalesce(sum(net_pay), 0), 'withholding_tax', coalesce(sum(withholding_tax), 0))
+                  from payslips where payroll_run_id = p_run)
+    where r.id = p_run;
 $$;
 grant execute on function pg_temp.computed(uuid) to authenticated;
 
@@ -160,7 +174,7 @@ insert into schedule_overrides (employee_id, work_date, shift) values ('20000000
 -- another employee of the client was not paid: their schedule is free
 insert into employee_schedules (employee_id, effective_from, pattern) values
   ('20000000-0000-0000-0000-0000000000b2', '2026-11-02', '[null,null,null,null,null,null,null]');
-select public.reopen_payroll_run('3000000e-0000-0000-0000-000000000001');
+select public.void_payroll_run('3000000e-0000-0000-0000-000000000001', 'Test: corrected and reissued');
 update schedule_overrides set note = 'reopened: editable again' where id = '5300000e-0000-0000-0000-000000000001';
 delete from employee_schedules where id = '5200000e-0000-0000-0000-000000000001';
 commit;
@@ -196,7 +210,7 @@ select pg_temp.check((select balance from recurring_deductions where id = '70000
 select pg_temp.check((select balance from recurring_deductions where id = '7000000e-0000-0000-0000-000000000002') = 3000, 'the skipped loan kept its balance');
 select pg_temp.expect_error($$update payroll_deduction_overrides set amount = 100 where id = '5400000e-0000-0000-0000-000000000001'$$, '%finalized payroll run are locked%');
 select pg_temp.expect_error($$delete from payroll_deduction_overrides where id = '5400000e-0000-0000-0000-000000000002'$$, '%finalized payroll run are locked%');
-select public.reopen_payroll_run('3000000e-0000-0000-0000-000000000001');
+select public.void_payroll_run('3000000e-0000-0000-0000-000000000001', 'Test: corrected and reissued');
 select pg_temp.check((select balance from recurring_deductions where id = '7000000e-0000-0000-0000-000000000001') = 2000, 'reopen restored the advance');
 delete from payroll_deduction_overrides where id = '5400000e-0000-0000-0000-000000000002';
 commit;
@@ -246,7 +260,7 @@ select pg_temp.computed('3000000e-0000-0000-0000-000000000001');
 select public.finalize_payroll_run('3000000e-0000-0000-0000-000000000001');
 select pg_temp.check((select balance = 0 and not active from recurring_deductions where id = '7000000e-0000-0000-0000-000000000003'), 'the paused loan is paid off');
 select pg_temp.check((select balance = 0 and not active and closed_by_run = '3000000e-0000-0000-0000-000000000001' from recurring_deductions where id = '7000000e-0000-0000-0000-000000000004'), 'finalize stopped the paid-off loan and says so');
-select public.reopen_payroll_run('3000000e-0000-0000-0000-000000000001');
+select public.void_payroll_run('3000000e-0000-0000-0000-000000000001', 'Test: corrected and reissued');
 select pg_temp.check((select balance = 600 and not active from recurring_deductions where id = '7000000e-0000-0000-0000-000000000003'), 'reopen restores the balance and keeps the pause');
 select pg_temp.check((select balance = 300 and active and closed_by_run is null from recurring_deductions where id = '7000000e-0000-0000-0000-000000000004'), 'reopen restarts what finalize stopped');
 -- skipped in a finalized payroll, then deleted: its amounts go with it
@@ -258,6 +272,6 @@ select public.finalize_payroll_run('3000000e-0000-0000-0000-000000000001');
 delete from recurring_deductions where id = '7000000e-0000-0000-0000-000000000003';
 select pg_temp.check((select count(*) from payroll_deduction_overrides where deduction_id = '7000000e-0000-0000-0000-000000000003') = 0, 'the deduction and its amounts are gone');
 select pg_temp.expect_error($$delete from payroll_deduction_overrides where payroll_run_id = '3000000e-0000-0000-0000-000000000001'$$, '%finalized payroll run are locked%');
-select public.reopen_payroll_run('3000000e-0000-0000-0000-000000000001');
+select public.void_payroll_run('3000000e-0000-0000-0000-000000000001', 'Test: corrected and reissued');
 commit;
 \echo 'PASSED 14'

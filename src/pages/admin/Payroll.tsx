@@ -99,6 +99,7 @@ function RunList({ entity }: { entity: Entity }) {
         norm(
           [
             runLabel(r),
+            r.control_no ?? '',
             fmtPeriod(r.period_start, r.period_end),
             RUN_TYPE_LABELS[r.run_type],
             r.pay_frequency ? FREQUENCY_LABELS[r.pay_frequency] : '',
@@ -185,6 +186,7 @@ function RunList({ entity }: { entity: Entity }) {
                   <Td>
                     <p className="font-semibold text-ink-900">{runLabel(r)}</p>
                     <p className="text-xs text-slate-400">
+                      {r.control_no && <span className="font-medium text-slate-500">{r.control_no} · </span>}
                       {fmtMonth(r.period_month)}
                       {r.periods_in_month > 1 ? ` · payroll ${r.period_index} of ${r.periods_in_month}` : ''}
                     </p>

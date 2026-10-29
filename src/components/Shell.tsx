@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Clock,
   FileBarChart,
+  FileSpreadsheet,
   FileText,
   HandCoins,
   KeyRound,
@@ -37,6 +38,8 @@ import { ROLE_LABELS } from '../lib/labels'
 import { onPendingChanged } from '../lib/pending'
 import { supabase } from '../lib/supabase'
 import ChangePassword from './ChangePassword'
+import { useSessionWatch } from '../lib/useSessionWatch'
+import { setSignInNotice } from '../lib/authGuard'
 import { Avatar, Logo, Modal } from './ui'
 
 type Counter = 'corrections' | 'leaves' | 'advances'
@@ -77,6 +80,7 @@ const adminGroups: NavGroup[] = [
       { to: '/admin/advances', label: 'Cash Advances', icon: <HandCoins className={ic} />, counter: 'advances' },
       { to: '/admin/consultants', label: 'Consultants', icon: <BriefcaseBusiness className={ic} /> },
       { to: '/admin/reports', label: 'BIR & Reports', icon: <FileBarChart className={ic} /> },
+      { to: '/admin/export', label: 'Data Export', icon: <FileSpreadsheet className={ic} /> },
     ],
   },
   {
@@ -349,6 +353,13 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
     await signOut()
     navigate('/')
   }
+
+  useSessionWatch(mode === 'admin', () => {
+    setSignInNotice(
+      'Your admin session ended: this account signed in on another device or browser, or its sign-in was reset. Sign in again.',
+    )
+    void signOut('session ended elsewhere').then(() => navigate('/'))
+  })
 
   const pills = (
     <>

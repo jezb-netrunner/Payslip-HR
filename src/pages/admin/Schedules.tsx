@@ -333,7 +333,7 @@ function Roster({ entity, onShifts }: { entity: Entity; onShifts: () => void }) 
                                 !employed
                                   ? 'Not employed on this date'
                                   : locked
-                                    ? 'Paid in a finalized payroll — reopen it to change this date'
+                                    ? 'Paid in a finalized payroll — void and reissue it to change this date'
                                     : `${fullName(e)}, ${fmtDate(d)}: ${shiftLabel(shifts[i])}${change ? ' (changed for this date)' : ''}${change?.note ? ` — ${change.note}` : ''}`
                               }
                               className={`flex h-12 w-full min-w-16 flex-col items-center justify-center rounded-lg px-1 text-xs transition-colors disabled:cursor-not-allowed ${

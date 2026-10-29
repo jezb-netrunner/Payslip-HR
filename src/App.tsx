@@ -23,6 +23,7 @@ import Statutory from './pages/admin/Statutory'
 import Holidays from './pages/admin/Holidays'
 import Settings from './pages/admin/Settings'
 import AuditLog from './pages/admin/AuditLog'
+import DataExport from './pages/admin/DataExport'
 import MyDashboard from './pages/employee/MyDashboard'
 import MyAttendance from './pages/employee/MyAttendance'
 import MyPayslips from './pages/employee/MyPayslips'
@@ -70,7 +71,7 @@ export default function App() {
       <div className="flex h-screen items-center justify-center bg-canvas p-4">
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-7 shadow-sm">
           <h1 className="mb-4 text-lg font-bold text-ink-900">Choose a new password</h1>
-          <ChangePassword />
+          <ChangePassword recovery />
           <button
             onClick={async () => {
               clearRecovery()
@@ -89,14 +90,14 @@ export default function App() {
     return profileError ? (
       <Centered title="Couldn't load your account" body="Check your connection and try again.">
         <button onClick={refreshProfile} className={linkBtn}>Try again</button>
-        <button onClick={signOut} className={linkBtn}>Sign out</button>
+        <button onClick={() => signOut()} className={linkBtn}>Sign out</button>
       </Centered>
     ) : (
       <Centered
         title="Account not provisioned"
         body="Your login exists but has no profile yet. Ask your administrator to set up your access."
       >
-        <button onClick={signOut} className={linkBtn}>Sign out</button>
+        <button onClick={() => signOut()} className={linkBtn}>Sign out</button>
       </Centered>
     )
   }
@@ -105,7 +106,7 @@ export default function App() {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 bg-canvas p-4">
         <Centered title="Access disabled" body="This account has been deactivated. Contact your administrator." />
-        <button onClick={signOut} className="text-sm font-semibold text-brand-600">Sign out</button>
+        <button onClick={() => signOut()} className="text-sm font-semibold text-brand-600">Sign out</button>
       </div>
     )
   }
@@ -117,7 +118,7 @@ export default function App() {
           title="No access yet"
           body="This account is not linked to an employee record or an admin role. Ask your administrator."
         />
-        <button onClick={signOut} className="text-sm font-semibold text-brand-600">Sign out</button>
+        <button onClick={() => signOut()} className="text-sm font-semibold text-brand-600">Sign out</button>
       </div>
     )
   }
@@ -151,6 +152,7 @@ export default function App() {
           <Route path="holidays" element={<Holidays />} />
           <Route path="settings" element={<Settings />} />
           <Route path="audit" element={<AuditLog />} />
+          <Route path="export" element={<DataExport />} />
         </Route>
       )}
       {isEmployee && (

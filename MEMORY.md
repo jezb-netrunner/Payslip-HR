@@ -459,9 +459,60 @@ outputs, a weekly run paying by-results holiday pay from the weeks before,
 EWT date overrides, the employee portal and its REST access) found no
 further bugs. Migrations applied live (see deployed state). Tests 400.
 
+### 2026-10-29 — BIR RMO 9-2021 Annex B controls (same branch, after PR #8)
+
+**Asked:** is the app compliant with Annex B (the CAS checklist)? Then: fix
+every code-side gap; for backups, an Excel export the users keep.
+
+**Review round:** two independent reviews (DB + edge, front end) found 10
++ 7 items, all fixed: a race that let concurrent wrong passwords count as
+one (now `guard_sign_in`, one transaction per attempt under the guard row's
+lock), the lockout's Auth ban (it ended live sessions too: dropped), guessing
+straight at the Auth API (admin passwords now kept keyed, HMAC under
+`ADMIN_PASSWORD_PEPPER`), a promotion to admin that left the session
+unrestricted (trigger now sets a random `admin_session_id`), silent failures
+of security writes, unlogged resets and unlocks, `$2b$` hashes misread by
+pgcrypto, control numbers truncated past 999,999, forgeable `log_activity`
+rows; in the app, self password reset through Admin Users (it ended the
+admin's own session), a watcher race during a password change, a Users page
+stuck loading, the reason a reset link was refused, the VOID note overflowing,
+voided payslips reloaded on every page load. Edge tests now in the repo
+(`npm run test:edge`, 12 scenarios).
+
+**Did:** migration `20261029000100_cas_controls.sql` (placeholder version,
+**not live**): control numbers PR-/PS-000001 per client assigned at
+finalize (`document_counters`), the finalize cross-check
+(`payroll_run_out_of_balance`), void and reissue (`void_payroll_run`,
+`payroll_voids`) replacing reopen, `entities.vat_registered`, audit_logs
+closed to app writes plus `log_activity`, the sign-in guard's tables and
+`guard_check_password`, `profiles.admin_session_id` (one admitted admin
+session) and the reworded trigger messages. Edge functions: new
+`auth-guard` (lockout, forced and 30-day password change, one session),
+`admin-users` (password rule, lock status, unlock, admitted-session check).
+Front end: report identification on every PDF/CSV/print, VOID payslips,
+control totals and voided versions on the run page, guarded sign-in and
+password screens, the session watcher, Users lock status, Client Settings
+VAT field, Audit Log dates/print/Excel/CSV, **Data Export** (the Excel
+backup, `src/lib/xlsx.ts` + `backup.ts`), `docs/BIR_ANNEX_B.md`. Tests 400
+→ 417 (vitest), SQL suite 21, edge harness 9 (Node, scratchpad), Playwright
+walkthrough of every new flow on the local stack. Not done: 2316/2307 in
+the official BIR layout (needs the BIR's form templates; bir.gov.ph is
+outside the network policy).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**PENDING (2026-10-29, not live):** `20261029000100_cas_controls.sql`, the
+new `auth-guard` edge function (deploy with **verify_jwt off**) and
+`admin-users` v6 must go live **together with the front end**: after the
+migration only a session the guard admitted has admin access, so the old
+front end can't sign admins in, and the new one needs the migration. Order:
+set the edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random characters,
+never rotated: admin passwords are kept keyed with it) → deploy both
+functions → apply the migration (MCP: no DROP, every UPDATE has a WHERE) →
+run the advisors → merge to `main`. Every admin then signs in once more and,
+having no guard record yet, chooses a new password (from then on kept keyed).
 
 **2026-10-28: the four pay-diversity migrations are live** (owner's
 approval), through MCP `apply_migration` as `20261028113903
@@ -476,9 +527,11 @@ career events' rates were moved off. Security advisors: the 10 intentional
 WARNs plus `can_manage_output_report` (executable by `authenticated` by
 design: the output-reports storage policies call it as the caller), and
 the leaked-password setting. Performance: INFO only (one new unindexed FK,
-`consultant_declarations.entity_id`, on a tiny table). Until the PR is
-merged and deployed, the live site (main) can't change a pay rate from the
-old Pay tab or a career event (the history guard refuses it): merge soon.
+`consultant_declarations.entity_id`, on a tiny table). PR #8 (this
+branch) was merged at the owner's request on 2026-10-28 (merge commit
+`45a8d5a`) and deployed by Pages run 11 (green, 11:49 UTC): the old Pay
+tab, whose direct rate edits the history guard refuses, was live only for
+the ~10 minutes after the migrations (11:39–11:42 UTC).
 
 **2026-10-26: the seven compliance migrations are live** (owner's
 approval), as `20261026084112 mwe_premium_pay` … `20261026084508
@@ -1597,3 +1650,57 @@ default was taken: taxed as supplementary pay. RR 2-98's last proviso of
 Sec. 2.78.1(A)(3) may instead put such excess in the ₱90,000 pool — asked
 the owner.
 
+
+### A posted payroll is voided and reissued, never reopened (design decision, 2026-10-29)
+
+> BIR RMO 9-2021 Annex B: "the transaction can be voided, but not modified once posted". `void_payroll_run(run, reason)` archives the run and its payslips in `payroll_voids` (immutable, printed VOID), restores what finalize moved (loans, rounding carry, payroll_seq) and returns the run to draft; `reopen_payroll_run` now only refuses. Control numbers come from `document_counters` at finalize and are never reused, so a reissue gets new ones.
+
+Why it mattered: reopen edited the posted record in place, leaving no
+trace of what employees had been shown. Every user-facing "reopen the run"
+message (DB triggers and UI) now says "void and reissue"; the consultants'
+quarter filing keeps "reopen" (a different thing).
+
+### One admin session: the guard admits it, RLS checks `admin_session_id` (design decision, 2026-10-29)
+
+> The Free plan has no single-session setting or password hook, so `auth-guard` signs every admin in, signs the account out elsewhere and stores the new session's id in `profiles.admin_session_id`; `is_company_admin()` / `can_manage_entity()` / `my_session_active()` give admin access only to that session. Only the service role moves it (`guard_profile_sessions`).
+
+Why it mattered: the first version compared the token's `iat` with
+`sessions_revoked_at`, which let a sign-in made straight against the Auth
+API (skipping lockout, password expiry and the one-session rule) keep full
+admin access. Null means "not yet through the guard": the migration fills
+every existing admin with a random id (all sign in once more), and
+`supabase/tests/run.sh` clears it for the suites, which act through
+`request.jwt.claim.sub` without a session id. Keep null from ever meaning
+"unrestricted" again: `guard_profile_sessions` gives a random id to any
+profile promoted to an admin role, create_admin sets one (and deletes the
+Auth user if the profile write fails), and `admit()` refuses a token without
+a `session_id`. Only the very first sign-up of a deployment starts null.
+
+### The sign-in guard checks passwords in the database, and Auth keeps them keyed (correction, 2026-10-29)
+
+> Supabase Auth rate-limits `/auth/v1/token` per IP, and every request the guard makes comes from the edge function's IP. `guard_sign_in` (service role only) takes the account's guard row lock, refuses while locked, compares the password with the bcrypt hash via pgcrypto (only `$2a$`/`$2x$`: pgcrypto misreads `$2b$`/`$2y$`), and counts a failure with its audit row in the same transaction. Only a right password reaches Auth. Passwords the guard or admin-users set are stored at Auth as `k1.` + HMAC-SHA256(`ADMIN_PASSWORD_PEPPER`, password), so the Auth API alone can't confirm a guess.
+
+Why it mattered: first built, the guard asked Auth with every password — a
+flood of wrong ones would drain that one shared bucket and lock every admin
+out; then counting read-then-wrote, so concurrent guesses counted as one;
+and guessing straight at the Auth API was never counted at all. The lock
+no longer bans the user at Auth (a ban also kills the user's live sessions
+at their next refresh, so five anonymous requests could kick an admin out).
+Deliberate residual: an unknown email answers after a jittered delay instead
+of a dummy bcrypt (which would let anyone burn DB CPU), and only real
+accounts ever lock.
+
+### The finalize cross-check holds for every engine output (confirmed, 2026-10-29)
+
+> The engine sums gross and deductions from the lines and pays net = gross − deductions + rounding, so `payroll_run_out_of_balance` passes by construction; `fakeSupabase.finalize` enforces the same rule (`controlTotals`), so all flow tests exercise it.
+
+Why it mattered: a false out-of-balance would block real payrolls. SQL
+fixtures in older suites had unbalanced payslips and needed balancing lines.
+
+### Re-creating DB functions for a wording change: copy `pg_get_functiondef` from the replica
+
+> To change only the messages of trigger functions defined across several migrations, take each latest definition from `phr_test` (all migrations replayed) with `pg_get_functiondef`, replace the strings in a script that asserts each replacement, and append the results to the new migration.
+
+Why: hand-copying a function from an old migration risks reviving a
+version a later migration replaced. Check the copied bodies' comments for
+semicolons (the MCP splitter).

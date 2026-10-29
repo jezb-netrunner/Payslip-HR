@@ -30,6 +30,10 @@ for f in "$REPO"/supabase/migrations/*.sql "$@"; do
   out="$($P -d "$DB" -f "$f" 2>&1)" || { echo "FAILED applying $(basename "$f")"; echo "$out"; exit 1; }
 done
 echo "migrations applied"
+# The suites act as users through request.jwt.claim(s) without a session id:
+# lift the admitted-session lock the CAS-controls migration puts on existing
+# admins (the owner above). Suite 21 tests that rule itself.
+$P -d "$DB" -c "update public.profiles set admin_session_id = null where admin_session_id is not null" >/dev/null || exit 1
 
 status=0
 for t in "$HERE"/[1-9][0-9]_*tests.sql; do

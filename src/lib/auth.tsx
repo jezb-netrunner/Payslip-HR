@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import type { Employee, Profile } from './db'
+import { logActivity } from './activity'
 
 interface AuthState {
   session: Session | null
@@ -21,7 +22,8 @@ interface AuthState {
   recovering: boolean
   clearRecovery: () => void
   refreshProfile: () => Promise<void>
-  signOut: () => Promise<void>
+  /** Signs this device out, on the audit trail (with the reason when the app did it). */
+  signOut: (reason?: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthState>({
@@ -138,7 +140,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // This device only. Supabase's default ('global') ends every session of
         // the account — signing out on a phone left the desktop tab with a
         // token the admin-users function rejects as "Not authenticated".
-        signOut: async () => {
+        signOut: async (reason?: string) => {
+          // logged while the token still works; a slow network never holds the sign-out up
+          await Promise.race([
+            logActivity('sign_out', null, reason ? { reason } : {}),
+            new Promise((resolve) => setTimeout(resolve, 1500)),
+          ])
           await supabase.auth.signOut({ scope: 'local' })
         },
       }}

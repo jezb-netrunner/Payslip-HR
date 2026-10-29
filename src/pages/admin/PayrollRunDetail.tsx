@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Ban,
   Banknote,
   Calculator,
   Check,
@@ -15,9 +16,9 @@ import {
   Lock,
   PieChart,
   Plus,
+  Scale,
   SlidersHorizontal,
   Trash2,
-  Unlock,
 } from 'lucide-react'
 import PayslipView, { runLabel, type PayslipCompany, type PayslipRunInfo } from '../../components/PayslipView'
 import {
@@ -38,20 +39,24 @@ import {
   StatGroup,
   TableShell,
   Td,
+  Textarea,
   Th,
   Toggle,
 } from '../../components/ui'
 import { fetchAll } from '../../lib/fetchAll'
 import { useToast } from '../../components/toast'
 import { downloadBlob, downloadCsv, getEmployees } from '../../lib/api'
-import { buildPayslipsDoc, buildPayslipsZip } from '../../pdf/payslipPdf'
+import { buildPayslipsDoc, buildPayslipsZip, type PayslipPdfOptions } from '../../pdf/payslipPdf'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
-import type { Employee, Payslip, PayrollAdjustment, PayrollRun } from '../../lib/db'
+import type { Employee, Payslip, PayrollAdjustment, PayrollRun, PayrollVoid, PayrollVoidSummary } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
 import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS, LIQUIDATABLE_CATEGORIES, PAY_ITEM_TYPE_LABELS, SUPPLEMENTARY_ITEM_TYPES } from '../../lib/labels'
-import { computeRun, employeesForRun, finalizeRun, reopenRun, type RunComputationResult } from '../../payroll/service'
+import { computeRun, employeesForRun, finalizeRun, voidRun, type RunComputationResult } from '../../payroll/service'
+import { controlTotals } from '../../payroll/controlTotals'
+import { useReportStamp } from '../../lib/useReportStamp'
+import { logActivity } from '../../lib/activity'
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
@@ -88,12 +93,16 @@ export default function PayrollRunDetail() {
   // payslips picked for a bulk download, by employee: survives a recompute (new payslip rows)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [exporting, setExporting] = useState(false)
+  // posted versions of this run voided earlier, newest first
+  const [voids, setVoids] = useState<PayrollVoidSummary[]>([])
+  const [voiding, setVoiding] = useState(false)
+  const [voidExport, setVoidExport] = useState<PayrollVoid | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
     setLoadError('')
     try {
-      const [{ data: r, error: runErr }, s, a] = await Promise.all([
+      const [{ data: r, error: runErr }, s, a, v] = await Promise.all([
         supabase.from('payroll_runs').select('*').eq('id', id).maybeSingle(),
         // more than 1000 payslips arrive in pages: a cut-off list would block
         // finalize and truncate the register
@@ -103,8 +112,16 @@ export default function PayrollRunDetail() {
         fetchAll<PayrollAdjustment>((from, to) =>
           supabase.from('payroll_adjustments').select('*').eq('payroll_run_id', id).order('created_at').order('id').range(from, to),
         ),
+        // the archived payslips are big: they load when a version is downloaded
+        supabase
+          .from('payroll_voids')
+          .select('id, entity_id, payroll_run_id, run_control_no, run_snapshot, reason, voided_by, voided_by_email, voided_at')
+          .eq('payroll_run_id', id)
+          .order('voided_at', { ascending: false }),
       ])
       if (runErr) throw runErr
+      if (v.error) throw v.error
+      setVoids((v.data ?? []) as PayrollVoidSummary[])
       const runRow = (r as PayrollRun) ?? null
       setRun(runRow)
       setSlips(s.sort((x, y) =>
@@ -126,6 +143,8 @@ export default function PayrollRunDetail() {
   const entity = entities.find((e) => e.id === run?.entity_id) ?? null
   useRecordClient(run?.entity_id, '/admin/payroll')
   const covered = useMemo(() => (run ? employeesForRun(run, employees) : []), [run, employees])
+  const stamp = useReportStamp(entity)
+  const control = useMemo(() => controlTotals(slips, run?.totals), [slips, run?.totals])
 
   if (loading) return <Spinner />
   if (loadError) return <LoadFailed message={loadError} onRetry={load} />
@@ -151,7 +170,12 @@ export default function PayrollRunDetail() {
   async function doFinalize() {
     if (!run) return
     if (slips.length === 0) return toast('error', 'Compute the draft first.')
-    if (!confirm('Finalize this payroll run? Payslips become immutable and visible to employees, and attendance in the period locks.')) return
+    if (
+      !confirm(
+        'Finalize this payroll run? It takes the next payroll control number and its payslips are numbered; they become immutable and visible to employees, and attendance in the period locks.',
+      )
+    )
+      return
     setBusy(true)
     try {
       await finalizeRun(run)
@@ -164,16 +188,16 @@ export default function PayrollRunDetail() {
     }
   }
 
-  async function doReopen() {
+  async function doVoid(reason: string) {
     if (!run) return
-    if (!confirm('Reopen this run as a draft? This is audit-logged. Recompute and re-finalize after your changes.')) return
     setBusy(true)
     try {
-      await reopenRun(run.id)
-      toast('success', 'Run reopened as draft.')
+      await voidRun(run.id, reason)
+      setVoiding(false)
+      toast('success', `${run.control_no ?? 'The payroll'} voided and kept on record. Correct the draft, recompute and finalize it to reissue it.`)
       await load()
     } catch (err) {
-      toast('error', errorMessage(err, 'Reopen failed'))
+      toast('error', errorMessage(err, 'Could not void the payroll'))
     } finally {
       setBusy(false)
     }
@@ -192,18 +216,28 @@ export default function PayrollRunDetail() {
     else await load()
   }
 
-  function exportRegister() {
+  /** A voided version with its payslips. */
+  async function withPayslips(v: PayrollVoidSummary): Promise<PayrollVoid | null> {
+    const { data, error } = await supabase.from('payroll_voids').select('payslips').eq('id', v.id).single()
+    if (error) {
+      toast('error', errorMessage(error, 'Could not load the voided payslips'))
+      return null
+    }
+    return { ...v, payslips: (data?.payslips ?? []) as Payslip[] }
+  }
+
+  function exportRegister(list: Payslip[] = slips, version: PayrollVoidSummary | null = null) {
     if (!run) return
     const header = [
-      'Employee No', 'Employee', 'Position', 'Paid by', 'Days', 'OT Hrs', 'Basic (earned)', 'Gross', 'SSS EE', 'SSS MPF EE',
+      'Payslip No', 'Employee No', 'Employee', 'Position', 'Paid by', 'Days', 'OT Hrs', 'Basic (earned)', 'Gross', 'SSS EE', 'SSS MPF EE',
       'PhilHealth EE', 'Pag-IBIG EE', 'W/Tax', 'Union dues', 'Cash Adv', 'Other Ded (incl. union dues, cash adv)', 'Total Ded',
       'Rounding', 'Net Pay',
       'SSS ER', 'SSS MPF ER', 'EC ER', 'PhilHealth ER', 'Pag-IBIG ER',
     ]
-    const rows = slips.map((s) => {
+    const rows = list.map((s) => {
       const snap = s.employee_snapshot as Record<string, string>
       return [
-        snap.employee_no ?? '', snap.name ?? '', snap.position ?? '',
+        s.control_no ?? '', snap.employee_no ?? '', snap.name ?? '', snap.position ?? '',
         s.payment_method ? PAYMENT_METHOD_LABELS[s.payment_method] : '',
         s.days_worked, s.overtime_hours, s.basic_pay, s.gross_pay, s.sss_ee, s.sss_mpf_ee,
         s.philhealth_ee, s.pagibig_ee, s.withholding_tax, s.union_dues,
@@ -213,7 +247,16 @@ export default function PayrollRunDetail() {
         s.philhealth_er, s.pagibig_er,
       ]
     })
-    downloadCsv(`payroll_register_${entity?.code}_${run.period_end}.csv`, [header, ...rows])
+    // the column totals: the register's control totals (Annex B item 10)
+    const totalRow = header.map((_, i) =>
+      i < 5 ? (i === 2 ? `TOTAL (${plural(rows.length, 'payslip')})` : '') : round2(rows.reduce((t, r) => t + Number(r[i] ?? 0), 0)),
+    )
+    const no = version ? `${version.run_control_no ?? '(unnumbered)'} VOID` : (run.control_no ?? '(draft)')
+    downloadCsv(
+      `payroll_register_${entity?.code}_${run.period_end}${version ? `_${version.run_control_no ?? 'unnumbered'}_VOID` : ''}.csv`,
+      [header, ...rows, totalRow, ...(version ? [[], [`VOIDED ${fmtDateTime(version.voided_at)} by ${version.voided_by_email ?? 'unknown'}: ${version.reason}`]] : [])],
+      stamp(`Payroll register ${no}, ${runLabel(run)}, pay date ${fmtDate(version?.run_snapshot.pay_date ?? run.pay_date)}`),
+    )
   }
 
   const cashSlips = slips.filter((s) => s.payment_method === 'cash')
@@ -228,7 +271,11 @@ export default function PayrollRunDetail() {
       return [snap.employee_no ?? '', snap.name ?? '', slip.net_pay, ...PESO_DENOMINATIONS.map((d) => b.counts[d]), b.centavos]
     })
     rows.push(['', 'TOTAL', cashRows.reduce((s, r) => s + Number(r.slip.net_pay), 0), ...PESO_DENOMINATIONS.map((d) => cashTotal.counts[d]), cashTotal.centavos])
-    downloadCsv(`cash_payout_${entity?.code}_${run.pay_date}.csv`, [header, ...rows])
+    downloadCsv(
+      `cash_payout_${entity?.code}_${run.pay_date}.csv`,
+      [header, ...rows],
+      stamp(`Cash payout ${run.control_no ?? '(draft)'}, ${runLabel(run)}, pay date ${fmtDate(run.pay_date)}`),
+    )
   }
 
   const t = run.totals ?? {}
@@ -275,7 +322,7 @@ export default function PayrollRunDetail() {
   const tip = !isDraft
     ? {
         title: 'Notes',
-        body: 'Payslips are locked and visible to employees, and attendance in this period is locked. Reopen the run to change anything — reopening is audit-logged.',
+        body: 'Payslips are locked and visible to employees, and attendance in this period is locked. To correct a posted payroll, void it with a reason and reissue it: the posted version stays on record marked VOID, and the reissued payroll gets new control numbers.',
       }
     : isThirteenth
       ? {
@@ -340,6 +387,8 @@ export default function PayrollRunDetail() {
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Badge tone={isDraft ? 'amber' : run.status === 'paid' ? 'blue' : 'green'}>{isDraft ? 'Draft' : run.status === 'paid' ? 'Paid' : 'Finalized'}</Badge>
+          {run.control_no && <Badge tone="slate" dot={false}>{run.control_no}</Badge>}
+          {voids.length > 0 && <Badge tone="red" dot={false}>{isDraft ? 'voided, to reissue' : `reissued (${plural(voids.length, 'voided version')})`}</Badge>}
           {run.pay_frequency && <Badge tone="slate" dot={false}>{FREQUENCY_LABELS[run.pay_frequency]}</Badge>}
           {run.annualize && <Badge tone="violet" dot={false}>annualized withholding</Badge>}
         </div>
@@ -349,7 +398,7 @@ export default function PayrollRunDetail() {
               <Banknote className="size-4" /> Cash payout ({cashSlips.length})
             </Button>
           )}
-          <Button variant="secondary" onClick={exportRegister} disabled={slips.length === 0}>
+          <Button variant="secondary" onClick={() => exportRegister()} disabled={slips.length === 0}>
             <Download className="size-4" /> Register CSV
           </Button>
           <Button variant="secondary" onClick={() => setExporting(true)} disabled={slips.length === 0}>
@@ -377,7 +426,7 @@ export default function PayrollRunDetail() {
               </h2>
               {!isDraft && run.finalized_at && (
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Finalized {fmtDateTime(run.finalized_at)} · employees can see their payslips
+                  {run.control_no ? `${run.control_no} · ` : ''}Finalized {fmtDateTime(run.finalized_at)} · employees can see their payslips
                 </p>
               )}
               <div className="mt-4 flex flex-wrap gap-x-10 gap-y-4">
@@ -621,6 +670,59 @@ export default function PayrollRunDetail() {
 
           {!isThirteenth && <RunDeductionsCard run={run} covered={covered} slips={slips} onChanged={load} />}
 
+          {voids.length > 0 && (
+            <Card title={`Voided versions (${voids.length})`} icon={<Ban />}>
+              <p className="mb-3 text-sm text-slate-500">
+                Posted versions of this payroll that were voided. They stay on record, marked VOID, with their original
+                control numbers; employees see only the reissued payslips.
+              </p>
+              <ul className="divide-y divide-slate-100">
+                {voids.map((v) => {
+                  // the run's totals as posted
+                  const posted = v.run_snapshot.totals ?? {}
+                  return (
+                    <li key={v.id} className="flex flex-wrap items-start justify-between gap-3 py-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-ink-900">
+                          {v.run_control_no ?? 'Unnumbered'} <Badge tone="red" dot={false}>VOID</Badge>
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Voided {fmtDateTime(v.voided_at)} by {v.voided_by_email ?? 'unknown'} · {plural(posted.employees ?? 0, 'payslip')} ·
+                          net {money(posted.net ?? 0)}
+                        </p>
+                        <p className="mt-1 break-words text-xs text-slate-600">Reason: {v.reason}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={async () => {
+                            const full = await withPayslips(v)
+                            if (full) exportRegister(full.payslips, full)
+                          }}
+                        >
+                          <Download className="size-4" /> Register
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={busy}
+                          onClick={async () => {
+                            const full = await withPayslips(v)
+                            if (full) setVoidExport(full)
+                          }}
+                        >
+                          <FileDown className="size-4" /> Payslips
+                        </Button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </Card>
+          )}
+
           {computed && (
             <div className="grid gap-6 2xl:grid-cols-2">
               {!isThirteenth && (
@@ -711,6 +813,43 @@ export default function PayrollRunDetail() {
             <RunFact label="Employer cost" value={money(t.employer_cost ?? 0)} />
             {!!t.cash_employees && <RunFact label="Cash payout" value={`${money(t.cash_net)} to ${t.cash_employees}`} />}
           </dl>
+          {computed && (
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4 text-sm">
+              <p className="mb-3 flex items-center gap-1.5 font-semibold text-ink-900">
+                <Scale className="size-4" /> Control totals
+              </p>
+              <dl className="space-y-1.5">
+                <RunFact label="Payslips" value={control.payslips} />
+                <RunFact label="Gross pay" value={money(control.gross)} />
+                <RunFact label="Deductions" value={money(control.deductions)} />
+                {control.rounding !== 0 && <RunFact label="Cash rounding" value={money(control.rounding)} />}
+                <RunFact label="Net pay" value={money(control.net)} />
+                <RunFact label="Withholding tax" value={money(control.withholdingTax)} />
+                {control.firstNo && (
+                  <RunFact label="Payslip nos." value={control.firstNo === control.lastNo ? control.firstNo : `${control.firstNo} to ${control.lastNo}`} />
+                )}
+              </dl>
+              {isDraft && !upToDate ? (
+                <p className="mt-3 text-xs text-slate-500">Recompute the draft to check its totals.</p>
+              ) : control.balanced ? (
+                <p className="mt-3 flex items-start gap-1.5 text-xs font-medium text-leaf-700">
+                  <CheckCircle2 className="mt-px size-4 shrink-0" /> In balance: every payslip adds up and the run totals equal the payslips.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-1 text-xs text-rose-700">
+                  <p className="flex items-start gap-1.5 font-semibold">
+                    <AlertTriangle className="mt-px size-4 shrink-0" /> Out of balance{isDraft ? ': finalize will refuse it. Recompute the draft.' : '.'}
+                  </p>
+                  {control.unbalanced.length > 0 && <p>Payslip lines do not add up: {control.unbalanced.join(', ')}</p>}
+                  {control.mismatches.map((m) => (
+                    <p key={m.field}>
+                      Run {m.field === 'withholding_tax' ? 'tax' : m.field} {m.run === null ? 'missing' : money(m.run)}, payslips {money(m.payslips)}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </aside>
       </div>
 
@@ -730,8 +869,8 @@ export default function PayrollRunDetail() {
               </Button>
             </>
           ) : (
-            <Button variant="secondary" onClick={doReopen} disabled={busy}>
-              <Unlock className="size-4" /> Reopen as draft
+            <Button variant="secondary" onClick={() => setVoiding(true)} disabled={busy}>
+              <Ban className="size-4" /> Void and reissue
             </Button>
           )}
         </div>
@@ -748,7 +887,31 @@ export default function PayrollRunDetail() {
           run={run}
           company={entity}
           fileBase={`payslips_${entity.code}_${run.period_end}`}
+          title={`Payslips ${run.control_no ?? '(draft)'}, ${runLabel(run)}`}
           onClose={() => setExporting(false)}
+        />
+      )}
+
+      {voidExport && (
+        <PayslipExportModal
+          slips={voidExport.payslips}
+          picked={[]}
+          run={{ ...voidExport.run_snapshot, status: 'finalized' }}
+          company={entity}
+          fileBase={`payslips_${entity.code}_${run.period_end}_${voidExport.run_control_no ?? 'unnumbered'}_VOID`}
+          title={`Voided payslips ${voidExport.run_control_no ?? '(unnumbered)'}, ${runLabel(voidExport.run_snapshot)}`}
+          voided={{ at: voidExport.voided_at, by: voidExport.voided_by_email, reason: voidExport.reason }}
+          onClose={() => setVoidExport(null)}
+        />
+      )}
+
+      {voiding && (
+        <VoidRunModal
+          controlNo={run.control_no}
+          label={runLabel(run)}
+          busy={busy}
+          onVoid={doVoid}
+          onClose={() => setVoiding(false)}
         />
       )}
 
@@ -1083,6 +1246,52 @@ function AdjustmentModal({
 // ---------- bulk payslip download ----------
 
 /**
+ * Voiding a posted payroll (BIR RMO 9-2021 Annex B, item 10: a posted entry
+ * is never edited): the posted run and its payslips are archived as VOID with
+ * the reason, and the run returns to draft to be corrected and reissued under
+ * new control numbers.
+ */
+function VoidRunModal({
+  controlNo,
+  label,
+  busy,
+  onVoid,
+  onClose,
+}: {
+  controlNo: string | null
+  label: string
+  busy: boolean
+  onVoid: (reason: string) => void
+  onClose: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const trimmed = reason.trim()
+  const ok = trimmed.length >= 5 && trimmed.length <= 500
+  return (
+    <Modal open onClose={busy ? () => {} : onClose} title={`Void ${controlNo ?? 'this payroll'} and reissue`}>
+      <div className="space-y-4 text-sm">
+        <p className="text-slate-600">
+          A posted payroll is never edited. Voiding <b>{label}</b> keeps it and its payslips on record, marked VOID with
+          your reason, and returns the run to draft without control numbers. Correct it, recompute and finalize it
+          again: the reissued payroll and payslips get new control numbers.
+        </p>
+        <ul className="list-disc space-y-1 pl-5 text-xs text-slate-500">
+          <li>Employees no longer see these payslips until the reissued payroll is finalized.</li>
+          <li>Loan and cash advance balances and cash-rounding carries this payroll moved are restored.</li>
+          <li>A later payroll that carried this one&apos;s rounding must be voided first.</li>
+        </ul>
+        <Field label="Reason for voiding" hint="5 to 500 characters, kept with the voided version and in the audit log">
+          <Textarea rows={3} maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} />
+        </Field>
+        <Button className="w-full" variant="danger" disabled={!ok || busy} onClick={() => onVoid(trimmed)}>
+          <Ban className="size-4" /> {busy ? 'Voiding…' : `Void ${controlNo ?? 'payroll'}`}
+        </Button>
+      </div>
+    </Modal>
+  )
+}
+
+/**
  * Download many payslips at once: everyone in the run or the ones picked in
  * the list, as one PDF (a payslip per page, for printing) or a ZIP of one
  * PDF per employee (for sending individually).
@@ -1093,6 +1302,8 @@ function PayslipExportModal({
   run,
   company,
   fileBase,
+  title,
+  voided,
   onClose,
 }: {
   slips: Payslip[]
@@ -1100,9 +1311,14 @@ function PayslipExportModal({
   run: PayslipRunInfo
   company: PayslipCompany
   fileBase: string
+  /** the report title on each payslip's stamp */
+  title: string
+  /** an archived version of a voided payroll: every page is marked VOID */
+  voided?: PayslipPdfOptions['voided']
   onClose: () => void
 }) {
   const toast = useToast()
+  const stamp = useReportStamp(company)
   const [scope, setScope] = useState<'picked' | 'all'>(picked.length > 0 ? 'picked' : 'all')
   const [format, setFormat] = useState<'pdf' | 'zip'>('pdf')
   const [done, setDone] = useState<number | null>(null)
@@ -1113,13 +1329,16 @@ function PayslipExportModal({
     if (busy || chosen.length === 0) return
     setDone(0)
     try {
+      // stamped when the file is made, not when the dialog opened
+      const opts = { stamp: stamp(title), voided }
       if (format === 'pdf') {
-        const doc = await buildPayslipsDoc(chosen, run, company, setDone)
+        const doc = await buildPayslipsDoc(chosen, run, company, setDone, opts)
         downloadBlob(`${fileBase}.pdf`, doc.output('blob'))
       } else {
-        const zip = await buildPayslipsZip(chosen, run, company, setDone)
+        const zip = await buildPayslipsZip(chosen, run, company, setDone, opts)
         downloadBlob(`${fileBase}.zip`, new Blob([zip as BlobPart], { type: 'application/zip' }))
       }
+      void logActivity('export', company.id, { report: title, file: `${fileBase}.${format}`, payslips: chosen.length })
       toast('success', `Downloaded ${plural(chosen.length, 'payslip')}.`)
       onClose()
     } catch (err) {

@@ -5,8 +5,14 @@ import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
 import { generatePayslipPdf } from '../pdf/payslipPdf'
 import { Avatar, Badge, Button } from './ui'
 import { employerFor, roundingLines } from '../lib/payslip'
+import { tinLine } from '../lib/reportStamp'
+import { useReportStamp } from '../lib/useReportStamp'
+import { logActivity } from '../lib/activity'
 
-export type PayslipCompany = Pick<Entity, 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'payslip_footer_note'>
+export type PayslipCompany = Pick<
+  Entity,
+  'id' | 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'vat_registered' | 'payslip_footer_note'
+>
 
 export type PayslipRunInfo = Pick<PayrollRun, 'run_type' | 'period_start' | 'period_end' | 'pay_date' | 'status'>
 
@@ -42,6 +48,16 @@ export default function PayslipView({
 }) {
   const snap = slip.employee_snapshot as Record<string, string>
   const employer = employerFor(slip, company)
+  const stamp = useReportStamp(company)
+  const downloadPdf = () => {
+    generatePayslipPdf(slip, run, company, { stamp: stamp('Payslip') })
+    void logActivity('export', company.id, {
+      report: 'Payslip',
+      control_no: slip.control_no ?? null,
+      employee_no: snap.employee_no ?? null,
+      period_end: run.period_end,
+    })
+  }
   const employerTotal =
     Number(slip.sss_er) + Number(slip.sss_mpf_er) + Number(slip.sss_ec_er) +
     Number(slip.philhealth_er) + Number(slip.pagibig_er)
@@ -67,8 +83,9 @@ export default function PayslipView({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {slip.control_no && <Badge tone="slate" dot={false}>{slip.control_no}</Badge>}
           {run.status !== 'draft' ? <Badge tone="green">Finalized</Badge> : <Badge tone="amber">Draft</Badge>}
-          <Button variant="secondary" onClick={() => generatePayslipPdf(slip, run, company)}>
+          <Button variant="secondary" onClick={downloadPdf}>
             <Download className="size-4" /> PDF
           </Button>
         </div>
@@ -180,7 +197,7 @@ export default function PayslipView({
       {employer.name && (
         <p className="text-[11px] text-slate-400">
           {employer.name}
-          {employer.tin ? ` · TIN ${employer.tin}` : ''}
+          {employer.tin ? ` · ${tinLine({ ...employer, vat_registered: company.vat_registered })}` : ''}
         </p>
       )}
     </div>

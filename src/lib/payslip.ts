@@ -1,7 +1,7 @@
 import type { Entity, Payslip } from './db'
 import { round2 } from '../payroll/types'
 
-export type PayslipEmployer = Pick<Entity, 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'payslip_footer_note'>
+export type PayslipEmployer = Pick<Entity, 'id' | 'name' | 'registered_address' | 'tin' | 'tin_branch_code' | 'vat_registered' | 'payslip_footer_note'>
 
 /**
  * The employer as it stood when the payslip was computed (saved in its

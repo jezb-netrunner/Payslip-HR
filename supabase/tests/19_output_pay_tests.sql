@@ -33,9 +33,23 @@ create or replace function pg_temp.computed(p_run uuid) returns void
 language sql as $$
   update payslips p set employee_payroll_seq = e.payroll_seq
     from employees e where e.id = p.employee_id and p.payroll_run_id = p_run;
-  update payroll_runs
-    set totals = jsonb_build_object('employees', (select count(*) from payslips where payroll_run_id = p_run))
-    where id = p_run;
+  -- lines that add up to each payslip's figures and run totals that add up
+  -- to its payslips, as computeRun writes them (finalize cross-checks both)
+  update payslips p set
+      earnings = coalesce(p.earnings, '[]'::jsonb) || case when x.e = p.gross_pay then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'basic', 'label', 'Basic Pay', 'amount', p.gross_pay - x.e)) end,
+      deductions = coalesce(p.deductions, '[]'::jsonb) || case when x.d = p.total_deductions then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'other', 'label', 'Other deductions', 'amount', p.total_deductions - x.d)) end
+    from (select q.id,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.earnings, '[]'::jsonb)) l), 0) as e,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.deductions, '[]'::jsonb)) l), 0) as d
+          from payslips q where q.payroll_run_id = p_run) x
+    where p.id = x.id;
+  update payroll_runs r
+    set totals = (select jsonb_build_object('employees', count(*), 'gross', coalesce(sum(gross_pay), 0),
+                    'net', coalesce(sum(net_pay), 0), 'withholding_tax', coalesce(sum(withholding_tax), 0))
+                  from payslips where payroll_run_id = p_run)
+    where r.id = p_run;
 $$;
 grant execute on function pg_temp.computed(uuid) to authenticated;
 

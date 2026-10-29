@@ -181,7 +181,7 @@ function OutputModal({
       <div className="space-y-4">
         {locked && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            Paid in a finalized payroll: only its report, who accepted it and the note can change. Reopen that payroll to change the output.
+            Paid in a finalized payroll: only its report, who accepted it and the note can change. Void and reissue that payroll to change the output.
           </p>
         )}
         <div className="grid gap-3 sm:grid-cols-2">

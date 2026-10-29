@@ -6,6 +6,12 @@
 // Admin accounts (company admins only):
 //   create_admin               {email, password, full_name, role, entity_ids?}
 //   update_admin               {user_id, full_name?, entity_ids?, active?, password?}
+//   admin_security             {}         lockouts, last sign-in, password age
+//   unlock_admin               {user_id}  ends a lockout after failed sign-ins
+// A password set here for someone else is temporary: the sign-in guard
+// (auth-guard) makes them change it at their next sign-in. It is kept at
+// the Auth server keyed (HMAC under ADMIN_PASSWORD_PEPPER), as the guard
+// keeps every admin password. Resets and unlocks are on the audit trail.
 //
 // Employee login codes are "<CLIENT CODE>-<PART>". Supabase Auth needs an
 // email, so each code maps to a synthetic address derived from a SHA-256 of
@@ -68,6 +74,39 @@ function weakCodeReason(part: string, employeeNo = "", names: string[] = []): st
   return null;
 }
 
+/** KEEP IN SYNC with passwordProblem in src/lib/password.ts and auth-guard. */
+function passwordProblem(password: string, email = ""): string | null {
+  if (password.length < 8) return "Use at least 8 characters.";
+  if (password.length > 72) return "Use at most 72 characters.";
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return "Mix letters and digits.";
+  }
+  const local = email.split("@")[0]?.toLowerCase() ?? "";
+  if (local.length >= 3 && password.toLowerCase().includes(local)) {
+    return "Don't put the email name in the password.";
+  }
+  return null;
+}
+
+/**
+ * The password as the Auth server keeps it: an HMAC of it under a server
+ * secret. KEEP IN SYNC with keyedPassword in auth-guard.
+ */
+async function keyedPassword(password: string, pepper: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(password)));
+  return "k1." + btoa(String.fromCharCode(...mac)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function tokenClaims(token: string): { iat?: number; session_id?: string } {
+  try {
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(part.padEnd(part.length + (4 - (part.length % 4)) % 4, "=")));
+  } catch {
+    return {};
+  }
+}
+
 function isAlreadyRegistered(message: string | undefined): boolean {
   return /already (been )?registered|already exists|duplicate/i.test(message ?? "");
 }
@@ -97,7 +136,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: caller } = await admin
       .from("profiles")
-      .select("id, role, is_active")
+      .select("id, role, is_active, email, sessions_revoked_at, admin_session_id")
       .eq("id", callerId)
       .single();
     if (
@@ -105,6 +144,15 @@ Deno.serve(async (req: Request) => {
       (caller.role !== "company_admin" && caller.role !== "entity_admin")
     ) {
       return json({ error: "Admin access required" }, 403);
+    }
+    // one active session: only the session the sign-in guard admitted acts,
+    // and none older than a revocation (as the RLS helpers check)
+    const token = tokenClaims(jwt);
+    if (
+      (caller.sessions_revoked_at && Number(token.iat ?? 0) < Math.floor(new Date(caller.sessions_revoked_at).getTime() / 1000)) ||
+      (caller.admin_session_id && token.session_id !== caller.admin_session_id)
+    ) {
+      return json({ error: "Your session ended: this account signed in elsewhere. Sign in again." }, 401);
     }
     const isCompanyAdmin = caller.role === "company_admin";
 
@@ -114,6 +162,22 @@ Deno.serve(async (req: Request) => {
       auth: { persistSession: false, autoRefreshToken: false },
       global: { headers: { "x-actor-id": callerId } },
     });
+    const pepper = Deno.env.get("ADMIN_PASSWORD_PEPPER") ?? "";
+    const callerEmail = (caller.email as string | null) ?? null;
+
+    // an admin account's action on the audit trail (the account rows hold no trace of it)
+    async function auditAccount(action: string, target: string, detail: Record<string, unknown> = {}) {
+      const { error } = await db.from("audit_logs").insert({
+        actor_id: callerId,
+        actor_email: callerEmail,
+        action,
+        table_name: "activity",
+        record_id: null,
+        entity_id: null,
+        new_data: { ...detail, account: target, via: "admin users" },
+      });
+      if (error) throw error;
+    }
 
     async function canManageEntity(entityId: string): Promise<boolean> {
       if (isCompanyAdmin) return true;
@@ -268,15 +332,15 @@ Deno.serve(async (req: Request) => {
       const fullName = String(body.full_name ?? "").trim();
       const role = body.role;
       if (!email || !fullName) return json({ error: "Name and email are required" }, 400);
-      if (password.length < 8) {
-        return json({ error: "Password must be at least 8 characters" }, 400);
-      }
+      const weak = passwordProblem(password, email);
+      if (weak) return json({ error: `Temporary password: ${weak}` }, 400);
       if (role !== "company_admin" && role !== "entity_admin") {
         return json({ error: "Role must be company_admin or entity_admin" }, 400);
       }
+      if (pepper.length < 32) return json({ error: "Admin passwords can't be set: the ADMIN_PASSWORD_PEPPER secret is missing." }, 500);
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email,
-        password,
+        password: await keyedPassword(password, pepper),
         email_confirm: true,
         app_metadata: { role },
         user_metadata: { full_name: fullName },
@@ -284,15 +348,25 @@ Deno.serve(async (req: Request) => {
       if (createErr || !created?.user) {
         return json({ error: createErr?.message ?? "Failed to create user" }, 400);
       }
-      await db.from("profiles").upsert({
+      const { error: profErr } = await db.from("profiles").upsert({
         id: created.user.id,
         role,
         employee_id: null,
         email,
         full_name: fullName,
         is_active: true,
+        // no session has admin access until the first sign-in through the guard
+        admin_session_id: crypto.randomUUID(),
       });
+      if (profErr) {
+        // no half-made admin: the account goes with its profile
+        await admin.auth.admin.deleteUser(created.user.id);
+        return json({ error: profErr.message }, 400);
+      }
       if (role === "entity_admin") await setAssignments(created.user.id, body.entity_ids);
+      // a temporary password: changed at the first sign-in
+      const { error: guardErr } = await db.from("auth_guard").upsert({ email, password_changed_at: null, updated_at: new Date().toISOString() });
+      if (guardErr) return json({ error: guardErr.message }, 400);
       return json({ ok: true, user_id: created.user.id });
     }
 
@@ -300,7 +374,7 @@ Deno.serve(async (req: Request) => {
       const userId = String(body.user_id ?? "");
       const { data: target } = await db
         .from("profiles")
-        .select("id, role")
+        .select("id, role, email")
         .eq("id", userId)
         .maybeSingle();
       if (!target || (target.role !== "company_admin" && target.role !== "entity_admin")) {
@@ -323,13 +397,32 @@ Deno.serve(async (req: Request) => {
         if (!body.active) await db.rpc("revoke_user_sessions", { p_user: userId });
       }
       if (typeof body.password === "string" && body.password.length > 0) {
-        if (body.password.length < 8) {
-          return json({ error: "Password must be at least 8 characters" }, 400);
+        // your own password changes through the sign-in guard (account menu):
+        // it asks for the current one and starts the new session; set here,
+        // the Auth server would end this session with nothing to replace it
+        if (userId === callerId) {
+          return json({ error: "Change your own password from the account menu (the key icon by your name)." }, 400);
         }
+        const targetEmail = String(target.email ?? "").toLowerCase();
+        const weak = passwordProblem(body.password, targetEmail);
+        if (weak) return json({ error: `Password: ${weak}` }, 400);
+        if (pepper.length < 32) return json({ error: "Admin passwords can't be set: the ADMIN_PASSWORD_PEPPER secret is missing." }, 500);
         const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
-          password: body.password,
+          password: await keyedPassword(body.password, pepper),
         });
         if (pwErr) return json({ error: pwErr.message }, 400);
+        if (targetEmail) {
+          // a password set here is temporary (changed at the next sign-in),
+          // and the account's sessions end now
+          const { error: guardErr } = await db.from("auth_guard").upsert({
+            email: targetEmail,
+            password_changed_at: null,
+            updated_at: new Date().toISOString(),
+          });
+          if (guardErr) return json({ error: guardErr.message }, 400);
+        }
+        await db.rpc("revoke_user_sessions", { p_user: userId });
+        await auditAccount("password_reset", targetEmail || userId);
       }
       if (typeof body.full_name === "string" && body.full_name.trim()) {
         await db.from("profiles").update({ full_name: body.full_name.trim() }).eq("id", userId);
@@ -337,6 +430,46 @@ Deno.serve(async (req: Request) => {
       if (target.role === "entity_admin" && body.entity_ids !== undefined) {
         await setAssignments(userId, body.entity_ids);
       }
+      return json({ ok: true });
+    }
+
+    if (action === "admin_security") {
+      const { data: admins } = await db
+        .from("profiles")
+        .select("id, email")
+        .in("role", ["company_admin", "entity_admin"]);
+      const emails = (admins ?? []).map((a: { email: string | null }) => String(a.email ?? "").toLowerCase()).filter(Boolean);
+      const { data: guards } = emails.length > 0
+        ? await db.from("auth_guard").select("email, failed_attempts, locked_until, last_sign_in_at, password_changed_at").in("email", emails)
+        : { data: [] };
+      const byEmail = new Map((guards ?? []).map((g: { email: string }) => [g.email, g]));
+      return json({
+        accounts: (admins ?? []).map((a: { id: string; email: string | null }) => ({
+          user_id: a.id,
+          ...(byEmail.get(String(a.email ?? "").toLowerCase()) ?? {}),
+        })),
+      });
+    }
+
+    if (action === "unlock_admin") {
+      const userId = String(body.user_id ?? "");
+      const { data: target } = await db
+        .from("profiles")
+        .select("id, role, email, is_active")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!target || (target.role !== "company_admin" && target.role !== "entity_admin") || !target.email) {
+        return json({ error: "Admin account not found" }, 404);
+      }
+      const { error: guardErr } = await db.from("auth_guard").upsert({
+        email: String(target.email).toLowerCase(),
+        failed_attempts: 0,
+        locked_until: null,
+        last_failed_at: null,
+        updated_at: new Date().toISOString(),
+      });
+      if (guardErr) return json({ error: guardErr.message }, 400);
+      await auditAccount("unlock", String(target.email).toLowerCase());
       return json({ ok: true });
     }
 

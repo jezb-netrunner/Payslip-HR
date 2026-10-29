@@ -117,7 +117,7 @@ export function ScheduleTab({ employee, entity }: { employee: Employee; entity: 
         {data.lastPaid && (
           <p className="mt-3 text-[11px] text-slate-400">
             Paid through {fmtDate(data.lastPaid)}: a change can start on {fmtDate(earliest)} at the earliest. To change a
-            paid period, reopen its payroll first.
+            paid period, void and reissue its payroll first.
           </p>
         )}
       </Card>

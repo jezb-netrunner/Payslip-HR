@@ -5,9 +5,10 @@
 // Built-in PDF fonts have no peso sign, so amounts print as "PHP".
 
 import { safeDoc } from './text'
+import { stampFooter, tinLine, type ReportStamp } from '../lib/reportStamp'
 
 export interface AdvanceFormData {
-  employer: { name: string; address?: string | null; tin?: string | null }
+  employer: { name: string; address?: string | null; tin?: string | null; tin_branch_code?: string | null; vat_registered?: boolean | null }
   employee: { name: string; employeeNo: string; position?: string | null }
   amount: number
   /** 0 = no fixed installment: an amount agreed for each payroll */
@@ -16,6 +17,8 @@ export interface AdvanceFormData {
   releasedOn: string
   firstDeduction: string
   releaseMethod: string
+  /** who generated the form and when, printed at the foot */
+  stamp?: ReportStamp
 }
 
 const php = (v: number) => `PHP ${v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -35,7 +38,8 @@ export function generateAdvanceForm(f: AdvanceFormData): void {
   doc.text(f.employer.name, margin, y)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
-  const sub = [f.employer.address, f.employer.tin ? `TIN ${f.employer.tin}` : ''].filter(Boolean).join('  •  ')
+  const tin = tinLine(f.employer)
+  const sub = [f.employer.address, tin].filter(Boolean).join('  •  ')
   if (sub) {
     y += 5
     doc.text(doc.splitTextToSize(sub, width) as string[], margin, y)
@@ -110,6 +114,11 @@ export function generateAdvanceForm(f: AdvanceFormData): void {
     margin,
     y,
   )
+  if (f.stamp) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7)
+    doc.text(doc.splitTextToSize(stampFooter(f.stamp), width) as string[], margin, doc.internal.pageSize.getHeight() - 10)
+  }
 
   doc.save(`cash-advance_${f.employee.employeeNo.replace(/[^\w-]/g, '_')}_${f.releasedOn}.pdf`)
 }

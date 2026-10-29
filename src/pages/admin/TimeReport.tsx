@@ -26,6 +26,7 @@ import {
 } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadBlob, downloadCsv, getEmployees, getHolidaysBetween } from '../../lib/api'
+import { logActivity } from '../../lib/activity'
 import type { Employee, Entity, Holiday, PayrollRun } from '../../lib/db'
 import { errorMessage } from '../../lib/errors'
 import { fetchAll } from '../../lib/fetchAll'
@@ -51,6 +52,7 @@ import {
 } from '../../lib/timeReport'
 import { buildDtrDoc, buildTimeSummaryDoc, timeReportFileName } from '../../pdf/timeReportPdf'
 import type { PayFrequency } from '../../payroll/types'
+import { useReportStamp } from '../../lib/useReportStamp'
 
 /** Dates (and pay frequency) to open the report with, e.g. from a pay run. */
 export interface ReportPreset {
@@ -791,6 +793,7 @@ function ExportModal({
   onClose: () => void
 }) {
   const toast = useToast()
+  const stamp = useReportStamp(entity)
   const [content, setContent] = useState<'summary' | 'dtr'>(single ? 'dtr' : 'summary')
   const [format, setFormat] = useState<'pdf' | 'csv'>('pdf')
   const [done, setDone] = useState<number | null>(null)
@@ -807,9 +810,13 @@ function ExportModal({
         to,
         single ? reports[0].employee.employee_no : undefined,
       )
-      if (format === 'csv') downloadCsv(`${stem}.csv`, content === 'dtr' ? detailCsv(reports) : summaryCsv(reports))
-      else if (content === 'dtr') downloadBlob(`${stem}.pdf`, (await buildDtrDoc(reports, entity, setDone)).output('blob'))
-      else downloadBlob(`${stem}.pdf`, buildTimeSummaryDoc(reports, entity, from, to).output('blob'))
+      if (format === 'csv') downloadCsv(`${stem}.csv`, content === 'dtr' ? detailCsv(reports) : summaryCsv(reports), stamp(content === 'dtr' ? 'Daily time records' : 'Time summary'))
+      else {
+        const title = content === 'dtr' ? 'Daily time records' : 'Time summary'
+        const doc = content === 'dtr' ? await buildDtrDoc(reports, entity, setDone, stamp(title)) : buildTimeSummaryDoc(reports, entity, from, to, stamp(title))
+        downloadBlob(`${stem}.pdf`, doc.output('blob'))
+        void logActivity('export', entity.id, { report: title, file: `${stem}.pdf`, from, to, employees: reports.length })
+      }
       toast('success', 'Report downloaded.')
       onClose()
     } catch (err) {

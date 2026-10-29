@@ -3,12 +3,20 @@
 // Note: the built-in PDF fonts have no ₱ glyph, so amounts use "PHP".
 
 import { zipSync } from 'fflate'
-import type { jsPDF } from 'jspdf'
+import { GState, type jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { safeDoc } from './text'
 import type { Payslip } from '../lib/db'
 import type { PayslipCompany, PayslipRunInfo } from '../components/PayslipView'
 import { employerFor, roundingLines } from '../lib/payslip'
+import { manilaStamp, stampFooter, tinLine, type ReportStamp } from '../lib/reportStamp'
+
+export interface PayslipPdfOptions {
+  /** who generated this copy and when, printed at the foot (BIR RMO 9-2021 Annex B, item 4) */
+  stamp?: ReportStamp
+  /** a posted version kept on record after its payroll was voided */
+  voided?: { at: string; by?: string | null; reason: string }
+}
 
 const NAVY: [number, number, number] = [18, 45, 85]
 const ORANGE: [number, number, number] = [246, 134, 46]
@@ -43,12 +51,29 @@ function fitText(doc: jsPDF, text: string, maxW: number): string {
 
 const newDoc = () => safeDoc({ unit: 'mm', format: 'a4' })
 
+/** A large diagonal VOID across every page from `fromPage` on. */
+function voidWatermark(doc: jsPDF, fromPage: number): void {
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  for (let p = fromPage; p <= doc.getNumberOfPages(); p++) {
+    doc.setPage(p)
+    doc.saveGraphicsState()
+    doc.setGState(new GState({ opacity: 0.18 }))
+    doc.setTextColor(220, 38, 38)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(120)
+    doc.text('VOID', pageW / 2, pageH / 2 + 20, { align: 'center', angle: 35 })
+    doc.restoreGraphicsState()
+  }
+}
+
 /** Draws one payslip from the top of the document's current page. */
-function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: PayslipCompany): void {
+function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: PayslipCompany, opts: PayslipPdfOptions = {}): void {
   const pageW = doc.internal.pageSize.getWidth()
   const margin = 14
   const snap = slip.employee_snapshot as Record<string, string>
   const employer = employerFor(slip, company)
+  const firstPage = doc.getCurrentPageInfo().pageNumber
 
   // ---- header ----
   doc.setFillColor(...NAVY)
@@ -62,15 +87,22 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
       : periodLabel(run)
   const payDate = `Pay date: ${new Date(`${run.pay_date}T00:00:00`).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })}`
   // a draft can still change: never let its printout pass for the final payslip
-  const title = run.status === 'draft' ? 'DRAFT PAYSLIP' : 'PAYSLIP'
+  const title = opts.voided ? 'VOIDED PAYSLIP' : run.status === 'draft' ? 'DRAFT PAYSLIP' : 'PAYSLIP'
+  const controlNo = slip.control_no ? `Payslip No. ${slip.control_no}` : ''
+  // the control number takes a line of its own: the lines sit closer together
+  const lineY = controlNo ? [10, 14.6, 18.8, 23] : [11, 16.5, 21.5]
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(14)
-  doc.text(title, pageW - margin, 11, { align: 'right' })
+  doc.text(title, pageW - margin, lineY[0], { align: 'right' })
   let rightW = doc.getTextWidth(title)
-  doc.setFont('helvetica', 'normal')
   doc.setFontSize(8.5)
-  doc.text(runLabel, pageW - margin, 16.5, { align: 'right' })
-  doc.text(payDate, pageW - margin, 21.5, { align: 'right' })
+  if (controlNo) {
+    doc.text(controlNo, pageW - margin, lineY[1], { align: 'right' })
+    rightW = Math.max(rightW, doc.getTextWidth(controlNo))
+  }
+  doc.setFont('helvetica', 'normal')
+  doc.text(runLabel, pageW - margin, lineY[lineY.length - 2], { align: 'right' })
+  doc.text(payDate, pageW - margin, lineY[lineY.length - 1], { align: 'right' })
   rightW = Math.max(rightW, doc.getTextWidth(runLabel), doc.getTextWidth(payDate))
   const leftW = pageW - margin * 2 - rightW - 6
 
@@ -81,7 +113,7 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
   doc.text(fitText(doc, name, leftW), margin, 11)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
-  const sub = [employer.registered_address, employer.tin ? `TIN ${employer.tin}` : '']
+  const sub = [employer.registered_address, tinLine({ ...employer, vat_registered: company.vat_registered })]
     .filter(Boolean)
     .join('  •  ')
   if (sub) {
@@ -263,20 +295,44 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'italic')
   doc.setTextColor(...SLATE)
-  // the note is free text from client settings: wrap it, and start the
-  // "Generated" line below however many lines it took
-  const note: string[] = doc.splitTextToSize(company.payslip_footer_note ?? '', pageW - margin * 2)
-  if (y + Math.max(1, note.length) * 3.6 + 5 > pageH - 8) {
+  // the note is free text from client settings, and the generated-by line
+  // names the user: wrap both, each below however many lines the last took
+  const textW = pageW - margin * 2
+  // wrapped in the bold it prints in
+  doc.setFont('helvetica', 'bold')
+  const voidNote: string[] = opts.voided
+    ? doc.splitTextToSize(
+        `VOIDED ${manilaStamp(new Date(opts.voided.at))}${opts.voided.by ? ` by ${opts.voided.by}` : ''}: ${opts.voided.reason}. ` +
+          'This version was replaced by the reissued payroll and is kept on record only.',
+        textW,
+      )
+    : []
+  doc.setFont('helvetica', 'italic')
+  const note: string[] = doc.splitTextToSize(company.payslip_footer_note ?? '', textW)
+  const generated = opts.stamp
+    ? stampFooter(opts.stamp)
+    : `Generated ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}`
+  const foot: string[] = doc.splitTextToSize(
+    `${generated} • Confidential` +
+      (run.status === 'draft' && !opts.voided ? ' • DRAFT: not final, may change before the payroll is finalized' : ''),
+    textW,
+  )
+  const lines = voidNote.length + Math.max(1, note.length) + foot.length
+  if (y + lines * 3.6 + 2 > pageH - 8) {
     doc.addPage()
     y = 20
   }
+  if (voidNote.length) {
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(185, 28, 28)
+    doc.text(voidNote, margin, y)
+    y += voidNote.length * 3.6
+    doc.setFont('helvetica', 'italic')
+    doc.setTextColor(...SLATE)
+  }
   doc.text(note, margin, y)
-  doc.text(
-    `Generated ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })} • Confidential` +
-      (run.status === 'draft' ? ' • DRAFT: not final, may change before the payroll is finalized' : ''),
-    margin,
-    y + Math.max(1, note.length) * 3.6 + 1,
-  )
+  doc.text(foot, margin, y + Math.max(1, note.length) * 3.6 + 1)
+  if (opts.voided) voidWatermark(doc, firstPage)
 }
 
 /** payslip_<employee no>_<period end>.pdf */
@@ -285,10 +341,10 @@ export function payslipFileName(slip: Payslip, run: PayslipRunInfo): string {
   return `payslip_${no.replace(/[^\w-]/g, '_')}_${run.period_end}.pdf`
 }
 
-export function generatePayslipPdf(slip: Payslip, run: PayslipRunInfo, company: PayslipCompany): void {
+export function generatePayslipPdf(slip: Payslip, run: PayslipRunInfo, company: PayslipCompany, opts: PayslipPdfOptions = {}): void {
   const doc = newDoc()
-  drawPayslip(doc, slip, run, company)
-  doc.save(payslipFileName(slip, run))
+  drawPayslip(doc, slip, run, company, opts)
+  doc.save(opts.voided ? payslipFileName(slip, run).replace(/\.pdf$/, '_VOID.pdf') : payslipFileName(slip, run))
 }
 
 /** Lets the page repaint (progress text) between batches of a long export. */
@@ -301,11 +357,12 @@ export async function buildPayslipsDoc(
   run: PayslipRunInfo,
   company: PayslipCompany,
   onProgress?: (done: number) => void,
+  opts: PayslipPdfOptions = {},
 ): Promise<jsPDF> {
   const doc = newDoc()
   for (let i = 0; i < slips.length; i++) {
     if (i > 0) doc.addPage()
-    drawPayslip(doc, slips[i], run, company)
+    drawPayslip(doc, slips[i], run, company, opts)
     if ((i + 1) % BATCH === 0) {
       onProgress?.(i + 1)
       await breathe()
@@ -320,11 +377,12 @@ export async function buildPayslipsZip(
   run: PayslipRunInfo,
   company: PayslipCompany,
   onProgress?: (done: number) => void,
+  opts: PayslipPdfOptions = {},
 ): Promise<Uint8Array> {
   const files: Record<string, Uint8Array> = {}
   for (let i = 0; i < slips.length; i++) {
     const doc = newDoc()
-    drawPayslip(doc, slips[i], run, company)
+    drawPayslip(doc, slips[i], run, company, opts)
     let name = payslipFileName(slips[i], run)
     for (let n = 2; files[name]; n++) name = payslipFileName(slips[i], run).replace(/\.pdf$/, `_${n}.pdf`)
     files[name] = new Uint8Array(doc.output('arraybuffer'))

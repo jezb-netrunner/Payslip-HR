@@ -48,6 +48,8 @@ import { fetchAdvances, fetchAttendance, fetchLeave, fetchPeople, fetchSlipFacts
 import type { LeaveType } from '../../lib/db'
 import { addMonths, todayManila } from '../../lib/manila'
 import { generateInsightsPdf } from '../../pdf/insightsPdf'
+import { useReportStamp } from '../../lib/useReportStamp'
+import { logActivity } from '../../lib/activity'
 
 type ReportKey = 'cost' | 'overtime' | 'attendance' | 'headcount' | 'leave' | 'advances' | 'custom'
 
@@ -108,6 +110,7 @@ interface Data {
 }
 
 export default function Insights({ entity }: { entity: Entity }) {
+  const stamp = useReportStamp(entity)
   const today = todayManila()
   const thisMonth = today.slice(0, 7)
   const [params, setParams] = useSearchParams()
@@ -244,7 +247,13 @@ export default function Insights({ entity }: { entity: Entity }) {
   const loading = !built && !error
 
   const period = `${rangeLabel(range)}${department ? ` · ${department}` : ''}${def.groups.length ? ` · by ${GROUP_LABELS[by].toLowerCase()}` : ''}`
-  const company = { name: entity.name, registered_address: entity.registered_address, tin: entity.tin, tin_branch_code: entity.tin_branch_code }
+  const company = {
+    name: entity.name,
+    registered_address: entity.registered_address,
+    tin: entity.tin,
+    tin_branch_code: entity.tin_branch_code,
+    vat_registered: entity.vat_registered,
+  }
   const slug = def.label.toLowerCase().replace(/[^a-z0-9]+/g, '_')
 
   return (
@@ -302,10 +311,14 @@ export default function Insights({ entity }: { entity: Entity }) {
             </Field>
           )}
           <div className="flex gap-2 sm:ml-auto">
-            <Button variant="secondary" disabled={!built} onClick={() => built && downloadCsv(`${slug}_${entity.code}_${range.from}_${range.to}.csv`, reportCsv(def.title, period, built))}>
+            <Button variant="secondary" disabled={!built} onClick={() => built && downloadCsv(`${slug}_${entity.code}_${range.from}_${range.to}.csv`, reportCsv(def.title, period, built), stamp(`${def.title}, ${period}`))}>
               <Download className="size-4" /> CSV
             </Button>
-            <Button variant="secondary" disabled={!built} onClick={() => built && generateInsightsPdf(company, def.title, period, built)}>
+            <Button variant="secondary" disabled={!built} onClick={() => {
+                if (!built) return
+                generateInsightsPdf(company, def.title, period, built, stamp(`${def.title}, ${period}`))
+                void logActivity('export', entity.id, { report: `${def.title}, ${period}`, format: 'pdf' })
+              }}>
               <FileDown className="size-4" /> PDF
             </Button>
           </div>
