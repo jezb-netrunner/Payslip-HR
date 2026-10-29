@@ -77,6 +77,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           trade_name: s.trade_name,
           tin: tin.tin,
           tin_branch_code: tin.branch,
+          vat_registered: s.vat_registered,
           rdo_code: s.rdo_code,
           registered_address: s.registered_address,
           zip_code: s.zip_code,
@@ -157,6 +158,16 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
               </Field>
               <Field label="RDO code">
                 <Input value={s.rdo_code} onChange={(e) => set('rdo_code', e.target.value)} />
+              </Field>
+              <Field label="VAT registration" className="col-span-2 sm:col-span-4" hint="Printed with the TIN on every report: VAT REG TIN or NON-VAT REG TIN (BIR RMO 9-2021).">
+                <Select
+                  value={s.vat_registered === null ? '' : s.vat_registered ? 'vat' : 'non_vat'}
+                  onChange={(e) => set('vat_registered', e.target.value === '' ? null : e.target.value === 'vat')}
+                >
+                  <option value="">Not set: reports print "TIN" only</option>
+                  <option value="vat">VAT-registered</option>
+                  <option value="non_vat">Non-VAT (percentage tax or exempt)</option>
+                </Select>
               </Field>
               <Field label="ZIP code">
                 <Input value={s.zip_code} onChange={(e) => set('zip_code', e.target.value)} />

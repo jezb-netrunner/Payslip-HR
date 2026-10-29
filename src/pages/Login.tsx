@@ -1,11 +1,15 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Check, KeyRound, Lock, Mail, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { employeeLoginEmail, isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
 import { Button, Input, Logo } from '../components/ui'
 import { errorMessage } from '../lib/errors'
+import { clearSignInNotice, guardChangePassword, guardSignIn, peekSignInNotice } from '../lib/authGuard'
+import { PASSWORD_RULE, passwordProblem } from '../lib/password'
+import { logActivity } from '../lib/activity'
 
-type Mode = 'employee' | 'admin' | 'reset' | 'bootstrap'
+// 'change': an admin's temporary or 30-day-old password, changed before the session starts
+type Mode = 'employee' | 'admin' | 'reset' | 'bootstrap' | 'change'
 
 /**
  * A rejected code and a busy or unreachable server need different advice:
@@ -26,14 +30,22 @@ export default function Login() {
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [changeReason, setChangeReason] = useState<'new' | 'expired'>('new')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  // why the app signed the user out (a sign-in elsewhere ended this session)
+  const [signedOutNotice] = useState(peekSignInNotice)
+  useEffect(clearSignInNotice, [])
 
   function switchTo(m: Mode) {
     setMode(m)
     setError('')
     setNotice('')
+    setNewPassword('')
+    setConfirmPassword('')
   }
 
   async function submit(e: FormEvent) {
@@ -52,9 +64,21 @@ export default function Login() {
           password: normalized,
         })
         if (err) throw new Error(signInProblem(err, 'That code did not work. Check it with your HR or payroll officer.'))
+        void logActivity('sign_in', null, { via: 'login code' })
       } else if (mode === 'admin') {
-        const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-        if (err) throw new Error(signInProblem(err, err.message))
+        // the guard counts failures, admits this one session and asks for a
+        // new password when the current one is temporary or 30 days old
+        const outcome = await guardSignIn(email.trim(), password)
+        if (outcome.kind === 'change_password') {
+          setChangeReason(outcome.reason)
+          setMode('change')
+        }
+      } else if (mode === 'change') {
+        const problem = passwordProblem(newPassword, email.trim())
+        if (problem) throw new Error(problem)
+        if (newPassword !== confirmPassword) throw new Error('The new passwords do not match.')
+        if (newPassword === password) throw new Error('Choose a password different from the current one.')
+        await guardChangePassword(email.trim(), password, newPassword)
       } else if (mode === 'reset') {
         const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: window.location.origin + import.meta.env.BASE_URL,
@@ -62,6 +86,8 @@ export default function Login() {
         if (err) throw err
         setNotice('If that address belongs to an admin account, a password reset link is on its way.')
       } else {
+        const problem = passwordProblem(password, email.trim())
+        if (problem) throw new Error(problem)
         const { error: err } = await supabase.auth.signUp({
           email,
           password,
@@ -69,7 +95,7 @@ export default function Login() {
         })
         if (err) throw err
         setNotice(
-          'Account created. Confirm the email if confirmation is enabled, then sign in. Only the very first account of a new deployment becomes the company admin.',
+          'Account created. Confirm the email if confirmation is enabled, then sign in (the first sign-in asks you to choose your password again). Only the very first account of a new deployment becomes the company admin.',
         )
       }
     } catch (err) {
@@ -149,6 +175,7 @@ export default function Login() {
             {mode === 'admin' && 'Admin sign in'}
             {mode === 'reset' && 'Reset your password'}
             {mode === 'bootstrap' && 'Set up a new deployment'}
+            {mode === 'change' && 'Choose a new password'}
           </h2>
           <p className="mt-1 text-sm text-slate-500">
             {mode === 'employee' && 'Use the login code given to you by your HR or payroll officer.'}
@@ -156,7 +183,14 @@ export default function Login() {
             {mode === 'reset' && 'Admins only — employees get a new code from their payroll officer.'}
             {mode === 'bootstrap' &&
               'The first account ever created becomes the company admin. Every other account is created from inside the app.'}
+            {mode === 'change' &&
+              (changeReason === 'expired'
+                ? 'Your password is more than 30 days old. Choose a new one to sign in.'
+                : 'This is a temporary password, or one set before the sign-in rules. Choose your own to sign in.')}
           </p>
+          {signedOutNotice && (mode === 'admin' || mode === 'employee') && (
+            <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{signedOutNotice}</p>
+          )}
           <form onSubmit={submit} className="mt-5 space-y-4">
             {mode === 'bootstrap' && (
               <div className="relative">
@@ -187,6 +221,36 @@ export default function Login() {
                   className="pl-9 font-mono tracking-wider uppercase"
                 />
               </div>
+            ) : mode === 'change' ? (
+              <>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 size-4 text-slate-400" />
+                  <Input
+                    type="password"
+                    required
+                    aria-label="New password"
+                    autoComplete="new-password"
+                    placeholder="New password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 size-4 text-slate-400" />
+                  <Input
+                    type="password"
+                    required
+                    aria-label="Confirm the new password"
+                    autoComplete="new-password"
+                    placeholder="Confirm the new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <p className="text-xs text-slate-500">{PASSWORD_RULE}</p>
+              </>
             ) : (
               <div className="relative">
                 <Mail className="absolute left-3 top-2.5 size-4 text-slate-400" />
@@ -208,7 +272,8 @@ export default function Login() {
                 <Input
                   type="password"
                   required
-                  minLength={8}
+                  // an account's current password may predate the 8-character rule: the guard then asks for a new one
+                  minLength={mode === 'bootstrap' ? 8 : undefined}
                   aria-label="Password"
                   autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'}
                   placeholder="Password"
@@ -229,7 +294,9 @@ export default function Login() {
                   ? 'Send reset link'
                   : mode === 'bootstrap'
                     ? 'Create company admin account'
-                    : 'Sign in'}
+                    : mode === 'change'
+                      ? 'Change password and sign in'
+                      : 'Sign in'}
             </Button>
           </form>
           <div className="mt-4 flex justify-between text-xs font-semibold text-brand-600">
@@ -243,7 +310,7 @@ export default function Login() {
                 </button>
               </>
             )}
-            {(mode === 'reset' || mode === 'bootstrap') && (
+            {(mode === 'reset' || mode === 'bootstrap' || mode === 'change') && (
               <button type="button" onClick={() => switchTo('admin')} className="hover:text-brand-800">
                 ← Back to sign in
               </button>

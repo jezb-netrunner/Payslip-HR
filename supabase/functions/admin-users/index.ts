@@ -6,6 +6,10 @@
 // Admin accounts (company admins only):
 //   create_admin               {email, password, full_name, role, entity_ids?}
 //   update_admin               {user_id, full_name?, entity_ids?, active?, password?}
+//   admin_security             {}         lockouts, last sign-in, password age
+//   unlock_admin               {user_id}  ends a lockout after failed sign-ins
+// A password set here for someone else is temporary: the sign-in guard
+// (auth-guard) makes them change it at their next sign-in.
 //
 // Employee login codes are "<CLIENT CODE>-<PART>". Supabase Auth needs an
 // email, so each code maps to a synthetic address derived from a SHA-256 of
@@ -68,6 +72,29 @@ function weakCodeReason(part: string, employeeNo = "", names: string[] = []): st
   return null;
 }
 
+/** KEEP IN SYNC with passwordProblem in src/lib/password.ts and auth-guard. */
+function passwordProblem(password: string, email = ""): string | null {
+  if (password.length < 8) return "Use at least 8 characters.";
+  if (password.length > 72) return "Use at most 72 characters.";
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return "Mix letters and digits.";
+  }
+  const local = email.split("@")[0]?.toLowerCase() ?? "";
+  if (local.length >= 3 && password.toLowerCase().includes(local)) {
+    return "Don't put the email name in the password.";
+  }
+  return null;
+}
+
+function tokenClaims(token: string): { iat?: number; session_id?: string } {
+  try {
+    const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(part.padEnd(part.length + (4 - (part.length % 4)) % 4, "=")));
+  } catch {
+    return {};
+  }
+}
+
 function isAlreadyRegistered(message: string | undefined): boolean {
   return /already (been )?registered|already exists|duplicate/i.test(message ?? "");
 }
@@ -97,7 +124,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: caller } = await admin
       .from("profiles")
-      .select("id, role, is_active")
+      .select("id, role, is_active, sessions_revoked_at, admin_session_id")
       .eq("id", callerId)
       .single();
     if (
@@ -105,6 +132,15 @@ Deno.serve(async (req: Request) => {
       (caller.role !== "company_admin" && caller.role !== "entity_admin")
     ) {
       return json({ error: "Admin access required" }, 403);
+    }
+    // one active session: only the session the sign-in guard admitted acts,
+    // and none older than a revocation (as the RLS helpers check)
+    const token = tokenClaims(jwt);
+    if (
+      (caller.sessions_revoked_at && Number(token.iat ?? 0) < Math.floor(new Date(caller.sessions_revoked_at).getTime() / 1000)) ||
+      (caller.admin_session_id && token.session_id !== caller.admin_session_id)
+    ) {
+      return json({ error: "Your session ended: this account signed in elsewhere. Sign in again." }, 401);
     }
     const isCompanyAdmin = caller.role === "company_admin";
 
@@ -268,9 +304,8 @@ Deno.serve(async (req: Request) => {
       const fullName = String(body.full_name ?? "").trim();
       const role = body.role;
       if (!email || !fullName) return json({ error: "Name and email are required" }, 400);
-      if (password.length < 8) {
-        return json({ error: "Password must be at least 8 characters" }, 400);
-      }
+      const weak = passwordProblem(password, email);
+      if (weak) return json({ error: `Temporary password: ${weak}` }, 400);
       if (role !== "company_admin" && role !== "entity_admin") {
         return json({ error: "Role must be company_admin or entity_admin" }, 400);
       }
@@ -291,8 +326,12 @@ Deno.serve(async (req: Request) => {
         email,
         full_name: fullName,
         is_active: true,
+        // no session has admin access until the first sign-in through the guard
+        admin_session_id: crypto.randomUUID(),
       });
       if (role === "entity_admin") await setAssignments(created.user.id, body.entity_ids);
+      // a temporary password: changed at the first sign-in
+      await db.from("auth_guard").upsert({ email, password_changed_at: null, updated_at: new Date().toISOString() });
       return json({ ok: true, user_id: created.user.id });
     }
 
@@ -300,7 +339,7 @@ Deno.serve(async (req: Request) => {
       const userId = String(body.user_id ?? "");
       const { data: target } = await db
         .from("profiles")
-        .select("id, role")
+        .select("id, role, email")
         .eq("id", userId)
         .maybeSingle();
       if (!target || (target.role !== "company_admin" && target.role !== "entity_admin")) {
@@ -323,19 +362,71 @@ Deno.serve(async (req: Request) => {
         if (!body.active) await db.rpc("revoke_user_sessions", { p_user: userId });
       }
       if (typeof body.password === "string" && body.password.length > 0) {
-        if (body.password.length < 8) {
-          return json({ error: "Password must be at least 8 characters" }, 400);
-        }
+        const targetEmail = String(target.email ?? "").toLowerCase();
+        const weak = passwordProblem(body.password, targetEmail);
+        if (weak) return json({ error: `Password: ${weak}` }, 400);
         const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
           password: body.password,
         });
         if (pwErr) return json({ error: pwErr.message }, 400);
+        if (targetEmail) {
+          // someone else's password set here is temporary (changed at the next
+          // sign-in), and their sessions end now
+          await db.from("auth_guard").upsert({
+            email: targetEmail,
+            password_changed_at: userId === callerId ? new Date().toISOString() : null,
+            updated_at: new Date().toISOString(),
+          });
+        }
+        if (userId !== callerId) await db.rpc("revoke_user_sessions", { p_user: userId });
       }
       if (typeof body.full_name === "string" && body.full_name.trim()) {
         await db.from("profiles").update({ full_name: body.full_name.trim() }).eq("id", userId);
       }
       if (target.role === "entity_admin" && body.entity_ids !== undefined) {
         await setAssignments(userId, body.entity_ids);
+      }
+      return json({ ok: true });
+    }
+
+    if (action === "admin_security") {
+      const { data: admins } = await db
+        .from("profiles")
+        .select("id, email")
+        .in("role", ["company_admin", "entity_admin"]);
+      const emails = (admins ?? []).map((a: { email: string | null }) => String(a.email ?? "").toLowerCase()).filter(Boolean);
+      const { data: guards } = emails.length > 0
+        ? await db.from("auth_guard").select("email, failed_attempts, locked_until, last_sign_in_at, password_changed_at").in("email", emails)
+        : { data: [] };
+      const byEmail = new Map((guards ?? []).map((g: { email: string }) => [g.email, g]));
+      return json({
+        accounts: (admins ?? []).map((a: { id: string; email: string | null }) => ({
+          user_id: a.id,
+          ...(byEmail.get(String(a.email ?? "").toLowerCase()) ?? {}),
+        })),
+      });
+    }
+
+    if (action === "unlock_admin") {
+      const userId = String(body.user_id ?? "");
+      const { data: target } = await db
+        .from("profiles")
+        .select("id, role, email, is_active")
+        .eq("id", userId)
+        .maybeSingle();
+      if (!target || (target.role !== "company_admin" && target.role !== "entity_admin") || !target.email) {
+        return json({ error: "Admin account not found" }, 404);
+      }
+      await db.from("auth_guard").upsert({
+        email: String(target.email).toLowerCase(),
+        failed_attempts: 0,
+        locked_until: null,
+        last_failed_at: null,
+        updated_at: new Date().toISOString(),
+      });
+      if (target.is_active) {
+        const { error: banErr } = await admin.auth.admin.updateUserById(userId, { ban_duration: "none" });
+        if (banErr) return json({ error: banErr.message }, 400);
       }
       return json({ ok: true });
     }

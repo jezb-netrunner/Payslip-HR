@@ -36,9 +36,23 @@ create or replace function pg_temp.computed(p_run uuid) returns void
 language sql as $$
   update payslips p set employee_payroll_seq = e.payroll_seq
     from employees e where e.id = p.employee_id and p.payroll_run_id = p_run;
-  update payroll_runs
-    set totals = jsonb_build_object('employees', (select count(*) from payslips where payroll_run_id = p_run))
-    where id = p_run;
+  -- lines that add up to each payslip's figures and run totals that add up
+  -- to its payslips, as computeRun writes them (finalize cross-checks both)
+  update payslips p set
+      earnings = coalesce(p.earnings, '[]'::jsonb) || case when x.e = p.gross_pay then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'basic', 'label', 'Basic Pay', 'amount', p.gross_pay - x.e)) end,
+      deductions = coalesce(p.deductions, '[]'::jsonb) || case when x.d = p.total_deductions then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'other', 'label', 'Other deductions', 'amount', p.total_deductions - x.d)) end
+    from (select q.id,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.earnings, '[]'::jsonb)) l), 0) as e,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.deductions, '[]'::jsonb)) l), 0) as d
+          from payslips q where q.payroll_run_id = p_run) x
+    where p.id = x.id;
+  update payroll_runs r
+    set totals = (select jsonb_build_object('employees', count(*), 'gross', coalesce(sum(gross_pay), 0),
+                    'net', coalesce(sum(net_pay), 0), 'withholding_tax', coalesce(sum(withholding_tax), 0))
+                  from payslips where payroll_run_id = p_run)
+    where r.id = p_run;
 $$;
 grant execute on function pg_temp.computed(uuid) to authenticated;
 
@@ -264,7 +278,7 @@ select pg_temp.expect_error($$select public.finalize_payroll_run('30000000-0000-
 -- earnings can't use deduction categories
 select pg_temp.expect_error($$insert into payroll_adjustments (payroll_run_id, employee_id, kind, label, amount, category) values ('30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-0000000000e1','earning','x',1,'other')$$, '%payroll_adjustments_category_check2%');
 -- status only moves through the RPCs
-select pg_temp.expect_error($$update payroll_runs set status = 'paid' where id = '30000000-0000-0000-0000-000000000001'$$, '%Use Finalize or Reopen%');
+select pg_temp.expect_error($$update payroll_runs set status = 'paid' where id = '30000000-0000-0000-0000-000000000001'$$, '%Use Finalize or Void%');
 -- entity admins cannot touch the rounding balance directly, nor seed one
 select pg_temp.expect_error($$update employees set rounding_balance = 0.5 where id = '20000000-0000-0000-0000-0000000000e1'$$, '%maintained by payroll finalization%');
 select pg_temp.expect_error($$insert into employees (entity_id, employee_no, first_name, last_name, hire_date, rounding_balance) values ('10000000-0000-0000-0000-00000000000a','A-099','Rho','Bal','2026-01-01',0.99)$$, '%maintained by payroll finalization%');
@@ -279,10 +293,10 @@ update time_entries set admin_notes = 'verified';
 select pg_temp.expect_error($$insert into time_entries (employee_id, work_date, clock_in, clock_out) values ('20000000-0000-0000-0000-0000000000e1','2026-10-06','2026-10-06T00:00:00Z','2026-10-06T09:00:00Z')$$, '%locked%');
 select pg_temp.expect_error($$delete from payroll_adjustments$$, '%locked%');
 select pg_temp.expect_error($$update payslips set remarks = 'x'$$, '%immutable%');
-select pg_temp.expect_error($$delete from payroll_runs$$, '%Cannot delete a finalized%');
+select pg_temp.expect_error($$delete from payroll_runs$$, '%finalized payroll run is never deleted%');
 -- a finalized run is frozen (notes aside) and never changes client
-select pg_temp.expect_error($$update payroll_runs set period_start = '2026-10-04' where id = '30000000-0000-0000-0000-000000000001'$$, '%reopen it to make changes%');
-select pg_temp.expect_error($$update payroll_runs set status = 'draft' where id = '30000000-0000-0000-0000-000000000001'$$, '%Use Finalize or Reopen%');
+select pg_temp.expect_error($$update payroll_runs set period_start = '2026-10-04' where id = '30000000-0000-0000-0000-000000000001'$$, '%void and reissue it to make changes%');
+select pg_temp.expect_error($$update payroll_runs set status = 'draft' where id = '30000000-0000-0000-0000-000000000001'$$, '%Use Finalize or Void%');
 update payroll_runs set notes = 'paid in cash' where id = '30000000-0000-0000-0000-000000000001';
 -- an overlapping draft can't pay the same days again
 insert into payroll_runs (id, entity_id, run_type, pay_frequency, period_start, period_end, pay_date, period_month, period_index, periods_in_month)
@@ -308,13 +322,13 @@ insert into payslips (payroll_run_id, employee_id, gross_pay, net_pay, rounding_
 values ('30000000-0000-0000-0000-000000000002', '20000000-0000-0000-0000-0000000000e1', 100.30, 100, 0, 0.30);
 select pg_temp.computed('30000000-0000-0000-0000-000000000002');
 select pg_temp.expect_error($$select public.finalize_payroll_run('30000000-0000-0000-0000-000000000002')$$, '%Recompute the draft%');
-update payslips set rounding_carry_in = 0.40, rounding_carry_out = 0.70, net_pay = 100 where payroll_run_id = '30000000-0000-0000-0000-000000000002';
+update payslips set rounding_carry_in = 0.40, rounding_carry_out = 0.70, net_pay = 100, rounding_adjustment = -0.30 where payroll_run_id = '30000000-0000-0000-0000-000000000002';
 select finalize_payroll_run('30000000-0000-0000-0000-000000000002');
 select pg_temp.check((select rounding_balance from employees where id = '20000000-0000-0000-0000-0000000000e1') = 0.70, 'chain advanced');
-select pg_temp.expect_error($$select public.reopen_payroll_run('30000000-0000-0000-0000-000000000001')$$, '%Reopen that later run first%');
-select reopen_payroll_run('30000000-0000-0000-0000-000000000002');
+select pg_temp.expect_error($$select public.void_payroll_run('30000000-0000-0000-0000-000000000001', 'Test: corrected and reissued')$$, '%Void that later run first%');
+select void_payroll_run('30000000-0000-0000-0000-000000000002', 'Test: corrected and reissued');
 select pg_temp.check((select rounding_balance from employees where id = '20000000-0000-0000-0000-0000000000e1') = 0.40, 'reopen restores carry-in');
-select reopen_payroll_run('30000000-0000-0000-0000-000000000001');
+select void_payroll_run('30000000-0000-0000-0000-000000000001', 'Test: corrected and reissued');
 select pg_temp.check((select rounding_balance from employees where id = '20000000-0000-0000-0000-0000000000e1') = 0, 'chain fully unwound');
 update time_entries set clock_out = clock_out + interval '15 minutes';
 commit;

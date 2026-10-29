@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { unzipSync } from 'fflate'
 import type { Payslip } from '../lib/db'
 import { buildPayslipsDoc, buildPayslipsZip, payslipFileName } from './payslipPdf'
+import { makeStamp } from '../lib/reportStamp'
 
 const run = { run_type: 'regular' as const, period_start: '2026-10-16', period_end: '2026-10-31', pay_date: '2026-11-05', status: 'finalized' as const }
-const company = { name: 'Acme Trading Corporation', registered_address: 'Makati City', tin: '123-456-789-000', tin_branch_code: '000', payslip_footer_note: '' }
+const company = { id: 'e1', name: 'Acme Trading Corporation', registered_address: 'Makati City', tin: '123-456-789', tin_branch_code: '00000', vat_registered: true, payslip_footer_note: '' }
 
 function slip(no: string, name: string, lines = 3): Payslip {
   return {
@@ -71,6 +72,31 @@ describe('bulk payslip PDFs', () => {
     expect(ys).toHaveLength(1)
     // PDF y runs up from the bottom edge in points: at least 8 mm (22.7 pt) clear of it
     expect(ys[0]).toBeGreaterThan(22.7)
+  })
+
+  it('prints the control number, the VAT status with the TIN, and who generated it with which software', async () => {
+    const numbered = { ...slip('A-001', 'Ana Reyes'), control_no: 'PS-000042' } as Payslip
+    const stamp = makeStamp('Payslip', company, { full_name: 'Liza Santos', email: 'liza@acme.ph' }, new Date('2026-10-29T01:15:00Z'))
+    const text = (await buildPayslipsDoc([numbered], run, company, undefined, { stamp })).output()
+    expect(text).toContain('Payslip No. PS-000042')
+    expect(text).toContain('VAT REG TIN 123-456-789-00000')
+    expect(text).toContain('Generated Oct 29, 2026, 9:15')
+    expect(text).toContain('by Liza Santos \\(liza@acme.ph\\)')
+    expect(text).toMatch(/Payslip HR v\d+\.\d+\.\d+/)
+    const nonVat = (await buildPayslipsDoc([numbered], run, { ...company, vat_registered: false })).output()
+    expect(nonVat).toContain('NON-VAT REG TIN 123-456-789-00000')
+  })
+
+  it('marks an archived version of a voided payroll VOID on every page, with the reason', async () => {
+    const voided = { at: '2026-10-30T02:00:00Z', by: 'liza@acme.ph', reason: 'Wrong overtime hours' }
+    const doc = await buildPayslipsDoc([slip('A-001', 'Ana Reyes', 60)], run, company, undefined, { voided })
+    const pages = (doc.internal as unknown as { pages: string[][] }).pages
+    expect(doc.getNumberOfPages()).toBeGreaterThan(1)
+    for (let n = 1; n <= doc.getNumberOfPages(); n++) expect(pages[n].join('\n')).toContain('(VOID)')
+    const text = doc.output()
+    expect(text).toContain('VOIDED PAYSLIP')
+    expect(text).toContain('Wrong overtime hours')
+    expect(text).not.toContain('DRAFT')
   })
 
   it('names files safely', () => {

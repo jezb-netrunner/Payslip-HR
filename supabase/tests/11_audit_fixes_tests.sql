@@ -30,9 +30,23 @@ create or replace function pg_temp.computed(p_run uuid) returns void
 language sql as $$
   update payslips p set employee_payroll_seq = e.payroll_seq
     from employees e where e.id = p.employee_id and p.payroll_run_id = p_run;
-  update payroll_runs
-    set totals = jsonb_build_object('employees', (select count(*) from payslips where payroll_run_id = p_run))
-    where id = p_run;
+  -- lines that add up to each payslip's figures and run totals that add up
+  -- to its payslips, as computeRun writes them (finalize cross-checks both)
+  update payslips p set
+      earnings = coalesce(p.earnings, '[]'::jsonb) || case when x.e = p.gross_pay then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'basic', 'label', 'Basic Pay', 'amount', p.gross_pay - x.e)) end,
+      deductions = coalesce(p.deductions, '[]'::jsonb) || case when x.d = p.total_deductions then '[]'::jsonb
+        else jsonb_build_array(jsonb_build_object('code', 'other', 'label', 'Other deductions', 'amount', p.total_deductions - x.d)) end
+    from (select q.id,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.earnings, '[]'::jsonb)) l), 0) as e,
+            coalesce((select sum((l->>'amount')::numeric) from jsonb_array_elements(coalesce(q.deductions, '[]'::jsonb)) l), 0) as d
+          from payslips q where q.payroll_run_id = p_run) x
+    where p.id = x.id;
+  update payroll_runs r
+    set totals = (select jsonb_build_object('employees', count(*), 'gross', coalesce(sum(gross_pay), 0),
+                    'net', coalesce(sum(net_pay), 0), 'withholding_tax', coalesce(sum(withholding_tax), 0))
+                  from payslips where payroll_run_id = p_run)
+    where r.id = p_run;
 $$;
 grant execute on function pg_temp.computed(uuid) to authenticated;
 
@@ -96,7 +110,7 @@ select pg_temp.expect_error($$select public.finalize_payroll_run('3000000c-0000-
 delete from payroll_adjustments where payroll_run_id = '3000000c-0000-0000-0000-000000000003';
 select pg_temp.computed('3000000c-0000-0000-0000-000000000003');
 select finalize_payroll_run('3000000c-0000-0000-0000-000000000003');
-select reopen_payroll_run('3000000c-0000-0000-0000-000000000003');
+select void_payroll_run('3000000c-0000-0000-0000-000000000003', 'Test: corrected and reissued');
 select pg_temp.check(pg_temp.totals('3000000c-0000-0000-0000-000000000003') = '{}', 'reopened run must be recomputed');
 select pg_temp.expect_error($$select public.finalize_payroll_run('3000000c-0000-0000-0000-000000000003')$$, '%Recompute the draft%');
 rollback;
@@ -119,9 +133,9 @@ insert into payslips (payroll_run_id, employee_id, gross_pay, net_pay, rounding_
 values ('3000000c-0000-0000-0000-00000000000b', '20000000-0000-0000-0000-0000000000f1', 3775, 3775, 0, 0.40, 0.40);
 select pg_temp.computed('3000000c-0000-0000-0000-00000000000b');
 select finalize_payroll_run('3000000c-0000-0000-0000-00000000000b');
-select pg_temp.expect_error($$select public.reopen_payroll_run('3000000c-0000-0000-0000-00000000000a')$$, '%Reopen that later run first%');
-select reopen_payroll_run('3000000c-0000-0000-0000-00000000000b');
-select reopen_payroll_run('3000000c-0000-0000-0000-00000000000a');
+select pg_temp.expect_error($$select public.void_payroll_run('3000000c-0000-0000-0000-00000000000a', 'Test: corrected and reissued')$$, '%Void that later run first%');
+select void_payroll_run('3000000c-0000-0000-0000-00000000000b', 'Test: corrected and reissued');
+select void_payroll_run('3000000c-0000-0000-0000-00000000000a', 'Test: corrected and reissued');
 select pg_temp.check((select rounding_balance from employees where id = '20000000-0000-0000-0000-0000000000f1') = 0, 'chain unwound in order');
 rollback;
 

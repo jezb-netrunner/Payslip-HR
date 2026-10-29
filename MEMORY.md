@@ -459,9 +459,43 @@ outputs, a weekly run paying by-results holiday pay from the weeks before,
 EWT date overrides, the employee portal and its REST access) found no
 further bugs. Migrations applied live (see deployed state). Tests 400.
 
+### 2026-10-29 — BIR RMO 9-2021 Annex B controls (same branch, after PR #8)
+
+**Asked:** is the app compliant with Annex B (the CAS checklist)? Then: fix
+every code-side gap; for backups, an Excel export the users keep.
+
+**Did:** migration `20261029000100_cas_controls.sql` (placeholder version,
+**not live**): control numbers PR-/PS-000001 per client assigned at
+finalize (`document_counters`), the finalize cross-check
+(`payroll_run_out_of_balance`), void and reissue (`void_payroll_run`,
+`payroll_voids`) replacing reopen, `entities.vat_registered`, audit_logs
+closed to app writes plus `log_activity`, the sign-in guard's tables and
+`guard_check_password`, `profiles.admin_session_id` (one admitted admin
+session) and the reworded trigger messages. Edge functions: new
+`auth-guard` (lockout, forced and 30-day password change, one session),
+`admin-users` (password rule, lock status, unlock, admitted-session check).
+Front end: report identification on every PDF/CSV/print, VOID payslips,
+control totals and voided versions on the run page, guarded sign-in and
+password screens, the session watcher, Users lock status, Client Settings
+VAT field, Audit Log dates/print/Excel/CSV, **Data Export** (the Excel
+backup, `src/lib/xlsx.ts` + `backup.ts`), `docs/BIR_ANNEX_B.md`. Tests 400
+→ 417 (vitest), SQL suite 21, edge harness 9 (Node, scratchpad), Playwright
+walkthrough of every new flow on the local stack. Not done: 2316/2307 in
+the official BIR layout (needs the BIR's form templates; bir.gov.ph is
+outside the network policy).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**PENDING (2026-10-29, not live):** `20261029000100_cas_controls.sql`, the
+new `auth-guard` edge function (deploy with **verify_jwt off**) and
+`admin-users` v6 must go live **together with the front end**: after the
+migration only a session the guard admitted has admin access, so the old
+front end can't sign admins in, and the new one needs the migration. Order:
+deploy both functions → apply the migration (MCP: no DROP, every UPDATE has
+a WHERE) → run the advisors → merge to `main`. Every admin then signs in
+once more and, having no guard record yet, chooses a new password.
 
 **2026-10-28: the four pay-diversity migrations are live** (owner's
 approval), through MCP `apply_migration` as `20261028113903
@@ -1599,3 +1633,50 @@ default was taken: taxed as supplementary pay. RR 2-98's last proviso of
 Sec. 2.78.1(A)(3) may instead put such excess in the ₱90,000 pool — asked
 the owner.
 
+
+### A posted payroll is voided and reissued, never reopened (design decision, 2026-10-29)
+
+> BIR RMO 9-2021 Annex B: "the transaction can be voided, but not modified once posted". `void_payroll_run(run, reason)` archives the run and its payslips in `payroll_voids` (immutable, printed VOID), restores what finalize moved (loans, rounding carry, payroll_seq) and returns the run to draft; `reopen_payroll_run` now only refuses. Control numbers come from `document_counters` at finalize and are never reused, so a reissue gets new ones.
+
+Why it mattered: reopen edited the posted record in place, leaving no
+trace of what employees had been shown. Every user-facing "reopen the run"
+message (DB triggers and UI) now says "void and reissue"; the consultants'
+quarter filing keeps "reopen" (a different thing).
+
+### One admin session: the guard admits it, RLS checks `admin_session_id` (design decision, 2026-10-29)
+
+> The Free plan has no single-session setting or password hook, so `auth-guard` signs every admin in, signs the account out elsewhere and stores the new session's id in `profiles.admin_session_id`; `is_company_admin()` / `can_manage_entity()` / `my_session_active()` give admin access only to that session. Only the service role moves it (`guard_profile_sessions`).
+
+Why it mattered: the first version compared the token's `iat` with
+`sessions_revoked_at`, which let a sign-in made straight against the Auth
+API (skipping lockout, password expiry and the one-session rule) keep full
+admin access. Null means "not yet through the guard": the migration fills
+every existing admin with a random id (all sign in once more), and
+`supabase/tests/run.sh` clears it for the suites, which act through
+`request.jwt.claim.sub` without a session id.
+
+### The sign-in guard checks passwords in the database, not at the Auth server (correction, 2026-10-29)
+
+> Supabase Auth rate-limits `/auth/v1/token` per IP, and every request the guard makes comes from the edge function's IP. `guard_check_password` (service role only) compares the password with the account's bcrypt hash via pgcrypto first, so only a right password reaches Auth; an unknown email gets the wrong-password answer and stores nothing; no "attempts left" count (it told which emails exist); attempts during a lock aren't logged again.
+
+Why it mattered: as first built, anyone could flood the guard with wrong
+passwords, drain that one shared bucket and lock every admin out. Forwarding
+the user's IP (`Sb-Forwarded-For`) needs a secret API key and a dashboard
+setting, so it wasn't used. Residual: guessing straight against the Auth API
+isn't counted by the guard's lockout (Auth's own per-IP limit applies), but a
+session made that way gets no admin access.
+
+### The finalize cross-check holds for every engine output (confirmed, 2026-10-29)
+
+> The engine sums gross and deductions from the lines and pays net = gross − deductions + rounding, so `payroll_run_out_of_balance` passes by construction; `fakeSupabase.finalize` enforces the same rule (`controlTotals`), so all flow tests exercise it.
+
+Why it mattered: a false out-of-balance would block real payrolls. SQL
+fixtures in older suites had unbalanced payslips and needed balancing lines.
+
+### Re-creating DB functions for a wording change: copy `pg_get_functiondef` from the replica
+
+> To change only the messages of trigger functions defined across several migrations, take each latest definition from `phr_test` (all migrations replayed) with `pg_get_functiondef`, replace the strings in a script that asserts each replacement, and append the results to the new migration.
+
+Why: hand-copying a function from an old migration risks reviving a
+version a later migration replaced. Check the copied bodies' comments for
+semicolons (the MCP splitter).

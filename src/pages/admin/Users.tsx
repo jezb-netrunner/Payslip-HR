@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Pencil, Plus, ShieldCheck, Users as UsersIcon } from 'lucide-react'
+import { LockOpen, Pencil, Plus, ShieldCheck, Users as UsersIcon } from 'lucide-react'
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Spinner, TableShell, Td, Th, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { callAdminUsers } from '../../lib/api'
@@ -9,6 +9,17 @@ import { useEntity } from '../../lib/entity'
 import { ROLE_LABELS } from '../../lib/labels'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import { fmtDateTime } from '../../lib/format'
+import { PASSWORD_RULE, passwordProblem } from '../../lib/password'
+
+/** The sign-in guard's record of an admin account (admin-users: admin_security). */
+interface AccountSecurity {
+  user_id: string
+  failed_attempts?: number
+  locked_until?: string | null
+  last_sign_in_at?: string | null
+  password_changed_at?: string | null
+}
 
 export default function Users() {
   const { profile: me } = useAuth()
@@ -18,16 +29,35 @@ export default function Users() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<Profile | null>(null)
+  const [security, setSecurity] = useState<Map<string, AccountSecurity>>(new Map())
+  const [unlocking, setUnlocking] = useState<string | null>(null)
+  const notify = useToast()
 
   const load = useCallback(async () => {
-    const [{ data: profs }, { data: ea }] = await Promise.all([
+    const [{ data: profs }, { data: ea }, sec] = await Promise.all([
       supabase.from('profiles').select('*').in('role', ['company_admin', 'entity_admin']).order('full_name'),
       supabase.from('entity_admins').select('*'),
+      callAdminUsers({ action: 'admin_security' }) as Promise<{ accounts?: AccountSecurity[]; error?: string }>,
     ])
     setAdmins((profs ?? []) as Profile[])
     setLinks((ea ?? []) as EntityAdmin[])
+    setSecurity(new Map((sec.accounts ?? []).map((a) => [a.user_id, a])))
     setLoading(false)
   }, [])
+
+  async function unlock(a: Profile) {
+    setUnlocking(a.id)
+    try {
+      const res = await callAdminUsers({ action: 'unlock_admin', user_id: a.id })
+      if (res.error) throw new Error(res.error)
+      notify('success', `${a.full_name || a.email} can sign in again.`)
+      await load()
+    } catch (err) {
+      notify('error', errorMessage(err, 'Could not unlock the account'))
+    } finally {
+      setUnlocking(null)
+    }
+  }
 
   useEffect(() => {
     load()
@@ -83,7 +113,36 @@ export default function Users() {
                       <span className="text-amber-600">none assigned</span>
                     )}
                   </Td>
-                  <Td>{a.is_active ? <Badge tone="green">active</Badge> : <Badge tone="red">deactivated</Badge>}</Td>
+                  <Td>
+                    {(() => {
+                      const sec = security.get(a.id)
+                      const locked = !!sec?.locked_until && new Date(sec.locked_until) > new Date()
+                      return (
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {a.is_active ? <Badge tone="green">active</Badge> : <Badge tone="red">deactivated</Badge>}
+                            {locked && <Badge tone="red">locked until {fmtDateTime(sec!.locked_until!)}</Badge>}
+                            {locked && (
+                              <button
+                                type="button"
+                                disabled={unlocking === a.id}
+                                onClick={() => unlock(a)}
+                                className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-800"
+                              >
+                                <LockOpen className="size-3.5" /> Unlock
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            {sec?.last_sign_in_at ? `Signed in ${fmtDateTime(sec.last_sign_in_at)}` : 'No guarded sign-in yet'}
+                            {' · '}
+                            {sec?.password_changed_at ? `password changed ${fmtDateTime(sec.password_changed_at)}` : 'temporary password'}
+                            {!!sec?.failed_attempts && !locked && ` · ${sec.failed_attempts} failed sign-in${sec.failed_attempts === 1 ? '' : 's'}`}
+                          </p>
+                        </div>
+                      )
+                    })()}
+                  </Td>
                   <Td>
                     {isOtherCompanyAdmin ? (
                       <span className="flex items-center gap-1 text-[11px] text-slate-400" title="Company admins can only manage their own account">
@@ -154,6 +213,8 @@ function CreateAdminModal({ open, onClose, onSaved }: { open: boolean; onClose: 
   const [busy, setBusy] = useState(false)
   const [f, setF] = useState({ full_name: '', email: '', password: '', role: 'entity_admin', entity_ids: [] as string[] })
 
+  const problem = f.password ? passwordProblem(f.password, f.email) : 'Enter a temporary password.'
+
   async function save() {
     setBusy(true)
     try {
@@ -178,9 +239,10 @@ function CreateAdminModal({ open, onClose, onSaved }: { open: boolean; onClose: 
         <Field label="Email (used to sign in)">
           <Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
-        <Field label="Temporary password (min 8 characters)" hint="They can change it from the key icon after signing in.">
+        <Field label="Temporary password" hint={`${PASSWORD_RULE} They choose their own at the first sign-in.`}>
           <Input value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
         </Field>
+        {f.password && problem && <p className="text-xs text-rose-600">{problem}</p>}
         <Field label="Role">
           <Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>
             <option value="entity_admin">Entity admin — HR & payroll for assigned clients</option>
@@ -192,7 +254,7 @@ function CreateAdminModal({ open, onClose, onSaved }: { open: boolean; onClose: 
             <ClientPicker value={f.entity_ids} onChange={(ids) => setF({ ...f, entity_ids: ids })} />
           </Field>
         )}
-        <Button className="w-full" disabled={busy || f.password.length < 8} onClick={save}>
+        <Button className="w-full" disabled={busy || !!problem} onClick={save}>
           {busy ? 'Creating…' : 'Create admin'}
         </Button>
       </div>
@@ -219,6 +281,7 @@ function EditAdminModal({
   const [ids, setIds] = useState<string[]>(assigned)
   const [password, setPassword] = useState('')
   const [active, setActive] = useState(admin.is_active)
+  const problem = password ? passwordProblem(password, admin.email ?? '') : null
 
   async function save() {
     setBusy(true)
@@ -249,11 +312,19 @@ function EditAdminModal({
             <ClientPicker value={ids} onChange={setIds} />
           </Field>
         )}
-        <Field label="Reset password (leave blank to keep)">
+        <Field
+          label="Reset password (leave blank to keep)"
+          hint={
+            isSelf
+              ? PASSWORD_RULE
+              : `${PASSWORD_RULE} A password you set for someone else is temporary: their sessions end now, and they choose their own at the next sign-in.`
+          }
+        >
           <Input value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
+        {problem && <p className="text-xs text-rose-600">{problem}</p>}
         {!isSelf && <Toggle checked={active} onChange={setActive} label="Account active" />}
-        <Button className="w-full" disabled={busy || (password.length > 0 && password.length < 8)} onClick={save}>
+        <Button className="w-full" disabled={busy || !!problem} onClick={save}>
           {busy ? 'Saving…' : 'Save changes'}
         </Button>
       </div>

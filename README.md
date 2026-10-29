@@ -105,8 +105,9 @@ are refused; the Generate button makes random ones.
   set for a year grant it sooner
 - Payroll runs per **pay frequency** (weekly / semi-monthly / monthly) with
   regular, 13th-month, special and final-pay run types; adjustments
-  (bonuses, deductions, back pay); review → finalize (immutable) → reopen
-  (audited); payroll register CSV; payslip PDFs for one employee or in
+  (bonuses, deductions, back pay); review → finalize (numbered, immutable,
+  cross-checked) → void and reissue with a reason (the posted version kept
+  as VOID); payroll register CSV; payslip PDFs for one employee or in
   **bulk** (ticked employees or everyone: one PDF, a payslip per page, or a
   ZIP of single PDFs); **cash payout sheet** with bill/coin breakdown per
   employee and per run. Computing warns, per employee, about scheduled
@@ -170,7 +171,8 @@ table for the run's frequency, and the tax year follows the **pay date**
 Safety rules enforced by the database: a draft can only be finalized if it
 was fully computed after its latest input change (attendance, leave,
 adjustments, rates or client settings); nobody is paid twice for the same
-days; finalized payrolls are frozen until reopened.
+days; a finalized payroll is frozen — a correction voids it (kept on
+record) and reissues it under new numbers.
 
 ## Cash payroll without centavos
 
@@ -277,7 +279,7 @@ every API role. A change in the law ships as a migration:
 Versions that finalized payrolls may have used are frozen. Only a published
 mistake is corrected in place, deliberately: the correcting migration runs
 `set local statutory.correction = 'on'`, and the affected payrolls are
-reopened and recomputed. Re-check every table each January (the dashboard
+voided and reissued. Re-check every table each January (the dashboard
 reminds company admins when this year's check is due).
 
 ## Internal controls
@@ -289,9 +291,13 @@ reminds company admins when this year's check is due).
 2. Entity admins can only reach the clients assigned to them; everything is
    scoped by client in the database, and archiving a client locks its entity
    admins out.
-3. Finalized payslips are immutable; attendance already paid is locked;
-   finalize / reopen run as atomic database functions that also maintain the
-   cash-rounding carry balance.
+3. Finalized payslips are immutable; attendance already paid is locked.
+   Finalize gives the payroll and each payslip a control number (PR-000001,
+   PS-000001 per client, never reused) and refuses a payroll whose payslip
+   lines or totals don't add up. A posted payroll is never edited: **void
+   and reissue** archives it with the reason (kept on record, printed VOID)
+   and returns it to draft. Finalize and void are atomic database functions
+   that also maintain loan balances and the cash-rounding carry.
 4. Sensitive changes are audit-logged by database triggers (who, when, what,
    which client) — including login-code changes made through the edge
    function and leave / correction reviews; bookkeeping writes (draft
@@ -299,12 +305,25 @@ reminds company admins when this year's check is due).
    formula-like text so a typed name can't run as a spreadsheet formula.
 5. Employee login codes are client-prefixed (no cross-client guessing),
    high-entropy, revocable, and never stored in readable form.
+6. Admin sign-in goes through the `auth-guard` edge function: five failed
+   sign-ins lock the account for 30 minutes, a temporary or 30-day-old
+   password must be changed first, passwords mix letters and digits, and an
+   account has one session at a time — the RLS helpers give admin access
+   only to the session the guard admitted (`profiles.admin_session_id`).
+7. Every report and export carries the client's name, address, VAT status
+   and TIN, the user, the time and the software version; reports, prints,
+   exports, sign-ins and sign-outs are on the audit trail, which no app user
+   can write. **Data Export** downloads a client's payroll records as one
+   Excel workbook for the client's own backups.
+
+See `docs/BIR_ANNEX_B.md` for these controls item by item against BIR RMO
+9-2021 Annex B (CAS functional requirements).
 
 ## Stack
 
 - **Backend**: Supabase (project `ruuhpghcgccvezkjhisy`, ap-southeast-1) —
   Postgres 17, RLS, triggers, RPCs, `admin-users` edge function for login
-  codes and admin accounts
+  codes and admin accounts, `auth-guard` edge function for admin sign-in
 - **Frontend**: Vite + React 19 + TypeScript + Tailwind CSS v4, React Router,
   Recharts, jsPDF, Lucide icons
 - **Tests**: Vitest — payroll engine, frequencies, annualization, alphalist,
@@ -355,9 +374,14 @@ and anon key are public by design (RLS protects all data).
 
 ### Database
 
-Migrations are in `supabase/migrations/` and the edge function source is in
-`supabase/functions/admin-users/`. The front end, the migrations and the edge
-function must be deployed **together**: the multi-client migrations
+Migrations are in `supabase/migrations/` and the edge functions are in
+`supabase/functions/` (`admin-users` with JWT verification on, `auth-guard`
+with it **off**: it is called before there is a session). The CAS-controls
+migration (`*_cas_controls.sql`), both functions and the front end go live
+together: after the migration only a session the guard admitted has admin
+access, so an older front end can't sign admins in, and this front end needs
+the migration. Deploy both functions, apply the migration, then merge to
+`main`; every admin signs in once more. Likewise the multi-client migrations
 (`*_multi_client_schema.sql`, `*_multi_client_security.sql`) replace the
 single-company schema, so an older front end stops working once they are
 applied, and this front end needs them. Apply the migrations, deploy the edge
@@ -377,6 +401,7 @@ src/
                   # management reports (insights.ts: pure aggregations + tests)
   pdf/            # payslip PDFs, cash advance agreement, time and insight reports
 supabase/         # migrations + edge functions (source of truth for schema)
+docs/             # user guide; BIR RMO 9-2021 Annex B notes
 MEMORY.md         # running memory log: session history, deployed state, lessons
 ```
 

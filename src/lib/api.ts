@@ -1,5 +1,7 @@
 import { fetchAll } from './fetchAll'
+import { logActivity } from './activity'
 import { toCsv } from './csv'
+import { stampRows, type ReportStamp } from './reportStamp'
 import {
   isAuthApiError,
   isAuthRefreshDiscardedError,
@@ -180,8 +182,22 @@ function postAdminUsers(token: string, body: Record<string, unknown>): Promise<R
   })
 }
 
-export function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {
-  downloadBlob(filename, new Blob(['\ufeff' + toCsv(rows)], { type: 'text/csv;charset=utf-8' }))
+/**
+ * A CSV download. A report gets its identification heading (company, VAT
+ * status and TIN, who generated it, when, and the software version: BIR RMO
+ * 9-2021 Annex B) and goes on the audit trail. A file in an agency's own
+ * import format (alphalist, QAP, Annex F) keeps that format: logged, but no
+ * heading rows.
+ */
+export function downloadCsv(
+  filename: string,
+  rows: (string | number | null | undefined)[][],
+  stamp?: ReportStamp,
+  opts: { agencyFormat?: boolean } = {},
+) {
+  const body = stamp && !opts.agencyFormat ? [...stampRows(stamp), ...rows] : rows
+  downloadBlob(filename, new Blob(['\ufeff' + toCsv(body)], { type: 'text/csv;charset=utf-8' }))
+  if (stamp) void logActivity('export', stamp.entityId, { report: stamp.title, file: filename })
 }
 
 export function downloadBlob(filename: string, blob: Blob) {

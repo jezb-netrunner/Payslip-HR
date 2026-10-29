@@ -1,25 +1,39 @@
 import { useState } from 'react'
 import { useAuth } from '../lib/auth'
-import { supabase } from '../lib/supabase'
+import { guardSetPassword } from '../lib/authGuard'
+import { PASSWORD_RULE, passwordProblem } from '../lib/password'
 import { useToast } from './toast'
 import { Button, Field, Input } from './ui'
 
-/** Admin self-service password change (also finishes a reset-link recovery). */
-export default function ChangePassword({ onDone }: { onDone?: () => void }) {
+/**
+ * Admin self-service password change, through the sign-in guard (the
+ * password rules, and the new password starts the one active session). A
+ * reset link proves the mailbox: `recovery` asks for no current password.
+ */
+export default function ChangePassword({ recovery = false, onDone }: { recovery?: boolean; onDone?: () => void }) {
   const toast = useToast()
-  const { clearRecovery } = useAuth()
+  const { profile, clearRecovery } = useAuth()
+  const [current, setCurrent] = useState('')
   const [pw, setPw] = useState('')
   const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
 
   async function save() {
-    if (pw.length < 8) return toast('error', 'Use at least 8 characters.')
+    if (!recovery && !current) return toast('error', 'Enter your current password.')
+    const problem = passwordProblem(pw, profile?.email ?? '')
+    if (problem) return toast('error', problem)
     if (pw !== confirm) return toast('error', 'The passwords do not match.')
+    if (!recovery && pw === current) return toast('error', 'Choose a password different from the current one.')
     setBusy(true)
-    const { error } = await supabase.auth.updateUser({ password: pw })
+    try {
+      await guardSetPassword(pw, recovery ? undefined : current)
+    } catch (err) {
+      setBusy(false)
+      return toast('error', err instanceof Error ? err.message : 'Could not change the password.')
+    }
     setBusy(false)
-    if (error) return toast('error', error.message)
-    toast('success', 'Password updated.')
+    toast('success', 'Password updated. Other sessions of this account were signed out.')
+    setCurrent('')
     setPw('')
     setConfirm('')
     clearRecovery()
@@ -28,7 +42,12 @@ export default function ChangePassword({ onDone }: { onDone?: () => void }) {
 
   return (
     <div className="space-y-3">
-      <Field label="New password (min 8 characters)">
+      {!recovery && (
+        <Field label="Current password">
+          <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+        </Field>
+      )}
+      <Field label="New password" hint={PASSWORD_RULE}>
         <Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
       </Field>
       <Field label="Confirm new password">

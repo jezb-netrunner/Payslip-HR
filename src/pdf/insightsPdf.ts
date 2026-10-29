@@ -6,7 +6,8 @@ import type { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { cellText, type Report } from '../lib/insights'
 import { pdfText, safeDoc } from './text'
-import { drawHeader, generatedAt, type ReportCompany } from './timeReportPdf'
+import { drawHeader, generatedLine, type ReportCompany } from './timeReportPdf'
+import type { ReportStamp } from '../lib/reportStamp'
 
 const NAVY: [number, number, number] = [18, 45, 85]
 const TEXT: [number, number, number] = [51, 65, 85]
@@ -15,7 +16,7 @@ const MARGIN = 14
 
 type AutoTableDoc = jsPDF & { lastAutoTable: { finalY: number } }
 
-export function generateInsightsPdf(company: ReportCompany, title: string, period: string, report: Report): void {
+export function generateInsightsPdf(company: ReportCompany, title: string, period: string, report: Report, stamp?: ReportStamp): void {
   const wide = report.tables.some((t) => t.columns.length > 7)
   const doc = safeDoc({ unit: 'mm', format: 'a4', orientation: wide ? 'landscape' : 'portrait' })
   const pageW = doc.internal.pageSize.getWidth()
@@ -91,7 +92,7 @@ export function generateInsightsPdf(company: ReportCompany, title: string, perio
     doc.setFontSize(7)
     doc.setTextColor(...SLATE)
     const h = doc.internal.pageSize.getHeight()
-    doc.text(`Generated ${generatedAt()} from finalized payroll and HR records`, MARGIN, h - 7)
+    doc.text(`${generatedLine(stamp)} • from finalized payroll and HR records`, MARGIN, h - 7, { maxWidth: pageW - MARGIN * 2 - 24 })
     doc.text(`Page ${p} of ${pages}`, pageW - MARGIN, h - 7, { align: 'right' })
   }
   doc.save(`${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${period.replace(/[^\w]+/g, '-')}.pdf`)

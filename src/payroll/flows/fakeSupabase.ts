@@ -7,6 +7,7 @@
 import { DEFAULT_TABLES } from '../defaults'
 import { slotFor } from '../../lib/payPeriods'
 import { eachDate, isoWeekday } from '../../lib/manila'
+import { controlTotals, type ControlSlip } from '../controlTotals'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>
@@ -356,6 +357,9 @@ export function finalize(runId: string) {
   const slips = db.t.payslips.filter((p) => p.payroll_run_id === runId)
   if (run.totals?.employees !== slips.length) throw new Error('draft out of date')
   if (slips.length === 0) throw new Error('Nothing to finalize')
+  // payroll_run_out_of_balance: every payslip adds up, and the run totals equal the payslips
+  const control = controlTotals(slips as unknown as ControlSlip[], run.totals)
+  if (!control.balanced) throw new Error(`Out of balance: ${control.unbalanced.join(', ')} ${JSON.stringify(control.mismatches)}`)
   const orphan = db.t.payroll_adjustments.find(
     (a) => a.payroll_run_id === runId && !slips.some((p) => p.employee_id === a.employee_id),
   )
