@@ -499,20 +499,50 @@ walkthrough of every new flow on the local stack. Not done: 2316/2307 in
 the official BIR layout (needs the BIR's form templates; bir.gov.ph is
 outside the network policy).
 
+### 2026-11-04 — Industry practice over BIR for sign-in security (same branch, PR #9 still open)
+
+**Asked:** are the Annex B edits industry standard (e.g. Paylocity)? Answer:
+the payroll controls are; the 30-day rotation and letters-plus-digits rule
+are BIR-only and below NIST practice; missing were MFA, timeouts and breach
+screening. Then: "Follow industry's best practices over BIR".
+
+**Did (all still in the not-live `*_cas_controls.sql`, both functions, the
+front end):** password rule 12–128 characters, no composition, no expiry,
+breached passwords refused (Pwned Passwords range API); forced change only
+when temporary (`auth_guard.temporary_password`), weak or breached; legacy
+passwords re-keyed silently at sign-in. Two-step sign-in (TOTP) for every
+admin: `MfaGate` (enrol or code) before any admin page, account menu
+**Two-step sign-in** (add/remove phones), Admin Users status + **Reset
+two-step** (`admin-users` `reset_mfa`, audited `mfa_reset`). Timeouts:
+`admin_session_activity` + `admin_session_ok` in the RLS helpers (aal2, 12 h,
+32 min), `my_session_state` / `touch_admin_session`; the app warns at 25 idle
+minutes and signs out at 30, employees too (client-side only for them).
+Password fields got show/hide. Docs: Annex B rows marked *Deviation* with the
+compensating controls, README, guide. Tests: vitest 421, SQL suites 12 (21.5
+rewritten), edge 14 (real TOTP against the local GoTrue, HIBP stub), and a
+Playwright walkthrough (enrol, challenge, wrong code, warning, idle sign-out,
+skewed clock, employee return after 31 min) that found two bugs (lessons
+below). Not done: employee sessions have no server-side timeout (Free plan
+has no inactivity setting; employees only see their own records).
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**PENDING (2026-10-29, not live):** `20261029000100_cas_controls.sql`, the
-new `auth-guard` edge function (deploy with **verify_jwt off**) and
-`admin-users` v6 must go live **together with the front end**: after the
-migration only a session the guard admitted has admin access, so the old
-front end can't sign admins in, and the new one needs the migration. Order:
-set the edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random characters,
-never rotated: admin passwords are kept keyed with it) → deploy both
-functions → apply the migration (MCP: no DROP, every UPDATE has a WHERE) →
-run the advisors → merge to `main`. Every admin then signs in once more and,
-having no guard record yet, chooses a new password (from then on kept keyed).
+**PENDING (2026-10-29, extended 2026-11-04, not live):**
+`20261029000100_cas_controls.sql`, the new `auth-guard` edge function (deploy
+with **verify_jwt off**) and `admin-users` v6 must go live **together with
+the front end**: after the migration only the session the guard admitted, at
+aal2 (two-step verified) and within the timeouts, has admin access, so the
+old front end can't sign admins in, and the new one needs the migration.
+Order: set the edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random
+characters, never rotated: admin passwords are kept keyed with it) → check
+Auth → Multi-Factor has TOTP on (the default) → deploy both functions →
+apply the migration (MCP: no DROP, every UPDATE has a WHERE) → run the
+advisors → merge to `main`. Every admin then signs in once more and sets up
+an authenticator app; a password changes only if under 12 characters or
+breached (others are re-keyed silently). The functions call
+`api.pwnedpasswords.com` (fail open if unreachable).
 
 **2026-10-28: the four pay-diversity migrations are live** (owner's
 approval), through MCP `apply_migration` as `20261028113903
@@ -1662,7 +1692,7 @@ quarter filing keeps "reopen" (a different thing).
 
 ### One admin session: the guard admits it, RLS checks `admin_session_id` (design decision, 2026-10-29)
 
-> The Free plan has no single-session setting or password hook, so `auth-guard` signs every admin in, signs the account out elsewhere and stores the new session's id in `profiles.admin_session_id`; `is_company_admin()` / `can_manage_entity()` / `my_session_active()` give admin access only to that session. Only the service role moves it (`guard_profile_sessions`).
+> The Free plan has no single-session setting or password hook, so `auth-guard` signs every admin in, signs the account out elsewhere and stores the new session's id in `profiles.admin_session_id`; `is_company_admin()` / `can_manage_entity()` / `my_session_active()` give admin access only to that session (since 2026-11-04 through `admin_session_ok`, which also needs aal2 and the timeouts). Only the service role moves it (`guard_profile_sessions`).
 
 Why it mattered: the first version compared the token's `iat` with
 `sessions_revoked_at`, which let a sign-in made straight against the Auth
@@ -1704,3 +1734,45 @@ fixtures in older suites had unbalanced payslips and needed balancing lines.
 Why: hand-copying a function from an old migration risks reviving a
 version a later migration replaced. Check the copied bodies' comments for
 semicolons (the MCP splitter).
+
+### Sign-in security follows NIST SP 800-63B-4 over Annex B's letter (owner's decision, 2026-11-04)
+
+> Owner: "Follow industry's best practices over BIR". No 30-day rotation and no letters-plus-digits rule; instead 12+ characters, a breach blocklist, change only on evidence (temporary, breached, below the rule), two-step sign-in for every admin, 30-minute idle and 12-hour session limits. `docs/BIR_ANNEX_B.md` declares the two items as deviations with these compensating controls.
+
+Why it mattered: NIST forbids periodic changes and composition rules (they
+breed `Payroll2026` → `Payroll2027`) and asks for length, a blocklist and
+MFA; Annex B is a 2021 checklist. If an RDO insists on the two items for
+registration, restoring them is a small change in `passwordProblem` (three
+copies: `src/lib/password.ts`, both functions) and `changeDue` in auth-guard.
+Rev 4 allows passwords under 15 characters only as part of MFA — fine for
+admins (always aal2); revisit the 12 if a password ever stands alone.
+
+### MFA and session timeouts are enforced in RLS, not just the app (design decision, 2026-11-04)
+
+> `admin_session_ok(user, admitted)` needs the JWT's `session_id` = the admitted session, `aal` = aal2, and an `admin_session_activity` row started < 12 h and seen < 32 min ago (the app signs out at 30). `touch_admin_session()` moves `seen_at` only within those limits; `my_session_state()` says active / idle / expired / ended. Null `admin_session_id` (bootstrap, test fixtures) skips all of it.
+
+Why it mattered: Supabase's time-box, inactivity timeout, single-session and
+leaked-password settings are Pro-only; TOTP is free. Checked on the local
+GoTrue: once a factor is verified, enrolling another or unenrolling a
+verified one needs an aal2 session (403/422), so a stolen password can't
+swap the phone; an admin-API password update deletes all the user's
+sessions. In RLS, a reset link (aal1) opens nothing either. auth-guard's
+`set_password` (non-recovery) also requires aal2; admin-users refuses aal1
+callers and timed-out sessions.
+
+### Compare the device's clock only with itself (correction, 2026-11-04)
+
+> The idle clock stores `{session, at}` in localStorage (`payslip-hr:last-activity`), keyed by the JWT's `session_id`; activity from an earlier session is ignored. Never compare a server timestamp (e.g. `user.last_sign_in_at`) with `Date.now()` in the browser.
+
+Why it mattered: the first version took `max(stored, last_sign_in_at)` as
+the last activity; on a device clock 40+ minutes fast, every fresh sign-in
+looked 30 minutes idle and was signed straight out. The Playwright
+walkthrough (`page.clock.install({ time })`) caught it.
+
+### Effects that create server state run twice in dev (correction, 2026-11-04)
+
+> React strict mode runs effects twice; `EnrollAuthenticator` keeps its enrolment promise in a ref so the second run reuses it. GoTrue's `mfa_factors_user_friendly_name_unique` turned the duplicate enrol into a 500.
+
+Why it mattered: invisible in production builds but a real race; and two
+factors added in one minute would also collide, so friendly names now carry
+seconds.

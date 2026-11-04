@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LockOpen, Pencil, Plus, ShieldCheck, Users as UsersIcon } from 'lucide-react'
+import { LockOpen, Pencil, Plus, ShieldCheck, ShieldOff, Users as UsersIcon } from 'lucide-react'
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Select, Spinner, TableShell, Td, Th, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { callAdminUsers } from '../../lib/api'
@@ -19,6 +19,10 @@ interface AccountSecurity {
   locked_until?: string | null
   last_sign_in_at?: string | null
   password_changed_at?: string | null
+  /** set by another admin: changed at the next sign-in */
+  temporary_password?: boolean
+  /** verified authenticator apps (two-step sign-in) */
+  mfa_factors?: number
 }
 
 export default function Users() {
@@ -31,6 +35,7 @@ export default function Users() {
   const [editing, setEditing] = useState<Profile | null>(null)
   const [security, setSecurity] = useState<Map<string, AccountSecurity>>(new Map())
   const [unlocking, setUnlocking] = useState<string | null>(null)
+  const [resettingMfa, setResettingMfa] = useState<string | null>(null)
   const notify = useToast()
 
   const load = useCallback(async () => {
@@ -62,6 +67,22 @@ export default function Users() {
       notify('error', errorMessage(err, 'Could not unlock the account'))
     } finally {
       setUnlocking(null)
+    }
+  }
+
+  async function resetMfa(a: Profile) {
+    const who = a.full_name || a.email
+    if (!confirm(`Reset two-step sign-in for ${who}? Their authenticator apps stop working, they are signed out, and their next sign-in sets up a new one.`)) return
+    setResettingMfa(a.id)
+    try {
+      const res = await callAdminUsers({ action: 'reset_mfa', user_id: a.id })
+      if (res.error) throw new Error(res.error)
+      notify('success', `${who} sets up two-step sign-in again at the next sign-in.`)
+      await load()
+    } catch (err) {
+      notify('error', errorMessage(err, 'Could not reset two-step sign-in'))
+    } finally {
+      setResettingMfa(null)
     }
   }
 
@@ -138,11 +159,31 @@ export default function Users() {
                                 <LockOpen className="size-3.5" /> Unlock
                               </button>
                             )}
+                            {sec?.mfa_factors !== undefined &&
+                              (sec.mfa_factors > 0 ? (
+                                <Badge tone="green">two-step on</Badge>
+                              ) : (
+                                <Badge tone="amber">two-step not set up</Badge>
+                              ))}
+                            {!!sec?.mfa_factors && a.role === 'entity_admin' && a.id !== me?.id && (
+                              <button
+                                type="button"
+                                disabled={resettingMfa === a.id}
+                                onClick={() => resetMfa(a)}
+                                title="For a lost phone: their next sign-in sets up a new authenticator"
+                                className="flex items-center gap-1 text-xs font-semibold text-brand-600 hover:text-brand-800"
+                              >
+                                <ShieldOff className="size-3.5" /> Reset two-step
+                              </button>
+                            )}
                           </div>
                           <p className="text-[11px] text-slate-400">
                             {sec?.last_sign_in_at ? `Signed in ${fmtDateTime(sec.last_sign_in_at)}` : 'No guarded sign-in yet'}
-                            {' · '}
-                            {sec?.password_changed_at ? `password changed ${fmtDateTime(sec.password_changed_at)}` : 'temporary password'}
+                            {sec?.temporary_password
+                              ? ' · temporary password'
+                              : sec?.password_changed_at
+                                ? ` · password changed ${fmtDateTime(sec.password_changed_at)}`
+                                : ''}
                             {!!sec?.failed_attempts && !locked && ` · ${sec.failed_attempts} failed sign-in${sec.failed_attempts === 1 ? '' : 's'}`}
                           </p>
                         </div>

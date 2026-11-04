@@ -9,12 +9,15 @@ import { edgeFunctionUrl } from './api'
 import { supabase } from './supabase'
 import { manilaStamp } from './reportStamp'
 
-export type SignInOutcome = { kind: 'signed_in' } | { kind: 'change_password'; reason: 'new' | 'expired' }
+/** Why a password must change before a session: temporary, short of the rule, or found in a data breach. */
+export type ChangeReason = 'new' | 'weak' | 'breached'
+
+export type SignInOutcome = { kind: 'signed_in' } | { kind: 'change_password'; reason: ChangeReason }
 
 interface GuardPayload {
   status?: 'ok' | 'password_change_required'
   session?: Session
-  reason?: 'new' | 'expired'
+  reason?: ChangeReason
   error?: string
   message?: string
   locked_until?: string
@@ -37,6 +40,8 @@ export function guardProblem(status: number, p: GuardPayload): string {
       return 'This is not an admin account. Employees sign in with their login code.'
     case 'weak_password':
       return p.message ?? 'Choose a stronger password.'
+    case 'mfa_required':
+      return p.message ?? 'Finish two-step sign-in first.'
   }
   if (!status || status >= 500) return OFFLINE
   return p.error ?? 'Sign-in failed.'

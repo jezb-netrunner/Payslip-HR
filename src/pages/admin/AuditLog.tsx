@@ -28,6 +28,7 @@ const ACTIONS: Record<string, { label: string; tone: string }> = {
   password_change: { label: 'password changed', tone: 'violet' },
   password_reset: { label: 'reset a password', tone: 'violet' },
   unlock: { label: 'unlocked an account', tone: 'violet' },
+  mfa_reset: { label: 'reset two-step sign-in', tone: 'violet' },
   sign_out: { label: 'signed out', tone: 'slate' },
   report: { label: 'ran report', tone: 'blue' },
   print: { label: 'printed', tone: 'blue' },

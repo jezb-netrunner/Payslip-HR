@@ -3,7 +3,8 @@ import { useAuth } from '../lib/auth'
 import { guardSetPassword } from '../lib/authGuard'
 import { PASSWORD_RULE, passwordProblem } from '../lib/password'
 import { useToast } from './toast'
-import { Button, Field, Input } from './ui'
+import { Button, Field } from './ui'
+import PasswordInput from './PasswordInput'
 
 /**
  * Admin self-service password change, through the sign-in guard (the
@@ -44,14 +45,14 @@ export default function ChangePassword({ recovery = false, onDone }: { recovery?
     <div className="space-y-3">
       {!recovery && (
         <Field label="Current password">
-          <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
+          <PasswordInput value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />
         </Field>
       )}
       <Field label="New password" hint={PASSWORD_RULE}>
-        <Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
+        <PasswordInput value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
       </Field>
       <Field label="Confirm new password">
-        <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+        <PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
       </Field>
       <Button className="w-full" disabled={busy} onClick={save}>
         {busy ? 'Saving…' : 'Update password'}

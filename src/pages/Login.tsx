@@ -4,8 +4,9 @@ import { supabase, urlAuthError } from '../lib/supabase'
 import { employeeLoginEmail, isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
 import { Button, Input, Logo } from '../components/ui'
 import { errorMessage } from '../lib/errors'
-import { clearSignInNotice, guardChangePassword, guardSignIn, peekSignInNotice } from '../lib/authGuard'
-import { PASSWORD_RULE, passwordProblem } from '../lib/password'
+import { clearSignInNotice, guardChangePassword, guardSignIn, peekSignInNotice, type ChangeReason } from '../lib/authGuard'
+import { PASSWORD_MIN, PASSWORD_RULE, passwordProblem } from '../lib/password'
+import PasswordInput from '../components/PasswordInput'
 import { logActivity } from '../lib/activity'
 
 // 'change': an admin's temporary or 30-day-old password, changed before the session starts
@@ -42,7 +43,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [changeReason, setChangeReason] = useState<'new' | 'expired'>('new')
+  const [changeReason, setChangeReason] = useState<ChangeReason>('new')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -199,9 +200,11 @@ export default function Login() {
             {mode === 'bootstrap' &&
               'The first account ever created becomes the company admin. Every other account is created from inside the app.'}
             {mode === 'change' &&
-              (changeReason === 'expired'
-                ? 'Your password is more than 30 days old. Choose a new one to sign in.'
-                : 'This is a temporary password, or one set before the sign-in rules. Choose your own to sign in.')}
+              (changeReason === 'breached'
+                ? 'Your password appears in a known data breach (on another site). Choose a new one to sign in.'
+                : changeReason === 'weak'
+                  ? `Your password is shorter than the sign-in rule (${PASSWORD_MIN} characters). Choose a new one to sign in.`
+                  : 'This is a temporary password. Choose your own to sign in.')}
           </p>
           {signedOutNotice && (mode === 'admin' || mode === 'employee') && (
             <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{signedOutNotice}</p>
@@ -240,8 +243,7 @@ export default function Login() {
               <>
                 <div className="relative">
                   <Lock className="absolute left-3 top-2.5 size-4 text-slate-400" />
-                  <Input
-                    type="password"
+                  <PasswordInput
                     required
                     aria-label="New password"
                     autoComplete="new-password"
@@ -253,8 +255,7 @@ export default function Login() {
                 </div>
                 <div className="relative">
                   <Lock className="absolute left-3 top-2.5 size-4 text-slate-400" />
-                  <Input
-                    type="password"
+                  <PasswordInput
                     required
                     aria-label="Confirm the new password"
                     autoComplete="new-password"
@@ -284,11 +285,10 @@ export default function Login() {
             {(mode === 'admin' || mode === 'bootstrap') && (
               <div className="relative">
                 <Lock className="absolute left-3 top-2.5 size-4 text-slate-400" />
-                <Input
-                  type="password"
+                <PasswordInput
                   required
-                  // an account's current password may predate the 8-character rule: the guard then asks for a new one
-                  minLength={mode === 'bootstrap' ? 8 : undefined}
+                  // an account's current password may predate the rule: the guard then asks for a new one
+                  minLength={mode === 'bootstrap' ? PASSWORD_MIN : undefined}
                   aria-label="Password"
                   autoComplete={mode === 'bootstrap' ? 'new-password' : 'current-password'}
                   placeholder="Password"

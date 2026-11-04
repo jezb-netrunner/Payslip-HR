@@ -1,15 +1,19 @@
 // Sign-in guard for admin accounts. Deployed with verify_jwt OFF: sign_in
 // and change_password come before there is a session (and the publishable
 // key is not a JWT); set_password checks the caller's own token itself.
-// BIR RMO 9-2021 Annex B, system security:
+// Admin sign-in follows current practice (NIST SP 800-63B, OWASP) where it
+// differs from BIR RMO 9-2021 Annex B:
 //   - five failed sign-ins in a row lock the account for 30 minutes
 //   - one active session: a sign-in here signs the account out everywhere
 //     else, and only the session admitted here has admin access (the RLS
 //     helpers compare the token's session_id with profiles.admin_session_id,
-//     so a sign-in made straight against the Auth API gets none)
-//   - a temporary password, or one older than 30 days, must be changed
-//     before the account gets a session
-//   - passwords mix letters and digits (KEEP IN SYNC with src/lib/password.ts)
+//     so a sign-in made straight against the Auth API gets none); it also
+//     needs the second factor (aal2) and ends after 12 hours, or 30 minutes
+//     without activity (admin_session_activity)
+//   - passwords: at least 12 characters, no character-mix rules, screened
+//     against known breaches (Have I Been Pwned, k-anonymity), changed when
+//     temporary, too weak or breached — never just because 30 days passed
+//     (KEEP THE RULE IN SYNC with src/lib/password.ts and admin-users)
 // The password is checked in the database (guard_sign_in: the lock, bcrypt
 // and the count in one transaction), never by asking the Auth server with a
 // wrong one: all requests from here share one IP address at the Auth
@@ -27,7 +31,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MAX_FAILURES = 5;
 const LOCK_MINUTES = 30;
-const PASSWORD_DAYS = 30;
+const PASSWORD_MIN = 12;
+const PASSWORD_MAX = 128;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,18 +48,46 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-/** KEEP IN SYNC with passwordProblem in src/lib/password.ts. */
+/**
+ * The password rule (NIST SP 800-63B): length, not a mix of character
+ * kinds, and nothing a guesser tries first. KEEP IN SYNC with
+ * passwordProblem in src/lib/password.ts and in admin-users.
+ */
 export function passwordProblem(password: string, email = ""): string | null {
-  if (password.length < 8) return "Use at least 8 characters.";
-  if (password.length > 72) return "Use at most 72 characters.";
-  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-    return "Mix letters and digits.";
-  }
+  const length = [...password].length;
+  if (length < PASSWORD_MIN) return `Use at least ${PASSWORD_MIN} characters: a few words make a strong passphrase.`;
+  if (length > PASSWORD_MAX) return `Use at most ${PASSWORD_MAX} characters.`;
+  if (/^(.)\1+$/su.test(password)) return "Don't repeat one character.";
+  const lower = password.toLowerCase();
   const local = email.split("@")[0]?.toLowerCase() ?? "";
-  if (local.length >= 3 && password.toLowerCase().includes(local)) {
+  if (local.length >= 3 && lower.includes(local)) {
     return "Don't put your email name in the password.";
   }
+  if (lower.includes("payslip")) return "Don't put the app's name in the password.";
   return null;
+}
+
+/**
+ * How often the password appears in known data breaches (Have I Been
+ * Pwned's range API: only the first 5 characters of its SHA-1 leave here).
+ * null when the service doesn't answer: a password is never refused for
+ * that. KEEP IN SYNC with admin-users.
+ */
+export async function breachCount(password: string, base: string): Promise<number | null> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", new TextEncoder().encode(password)));
+  const hex = [...digest].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  try {
+    const r = await fetch(`${base}/range/${hex.slice(0, 5)}`, { headers: { "Add-Padding": "true" }, signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return null;
+    for (const line of (await r.text()).split("\n")) {
+      const [suffix, count] = line.trim().split(":");
+      // padding lines carry a count of 0
+      if (suffix === hex.slice(5)) return Number(count) || 0;
+    }
+    return 0;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -77,7 +110,7 @@ interface Session {
   user: { id: string; email?: string };
 }
 
-function claims(token: string): { sub?: string; iat?: number; session_id?: string; amr?: { method: string }[] } {
+function claims(token: string): { sub?: string; iat?: number; session_id?: string; aal?: string; amr?: { method: string }[] } {
   try {
     const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
     return JSON.parse(atob(part.padEnd(part.length + (4 - (part.length % 4)) % 4, "=")));
@@ -99,6 +132,7 @@ Deno.serve(async (req: Request) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const pepper = Deno.env.get("ADMIN_PASSWORD_PEPPER") ?? "";
+    const pwnedUrl = Deno.env.get("PWNED_PASSWORDS_URL") ?? "https://api.pwnedpasswords.com";
     if (pepper.length < 32) {
       return json({ error: "The sign-in guard is not set up: the ADMIN_PASSWORD_PEPPER secret is missing." }, 500);
     }
@@ -144,7 +178,14 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await db.from("auth_guard").select("*").eq("email", email).maybeSingle();
       if (error) throw error;
       return data as
-        | { email: string; failed_attempts: number; locked_until: string | null; last_failed_at: string | null; password_changed_at: string | null }
+        | {
+            email: string;
+            failed_attempts: number;
+            locked_until: string | null;
+            last_failed_at: string | null;
+            password_changed_at: string | null;
+            temporary_password: boolean;
+          }
         | null;
     }
 
@@ -207,12 +248,6 @@ Deno.serve(async (req: Request) => {
       return json({ error: r.message ?? "Sign-in failed" }, r.status >= 400 && r.status < 600 ? r.status : 500);
     }
 
-    async function verify(email: string, password: string): Promise<Response | Session> {
-      const checked = await checkPassword(email, password);
-      if (checked instanceof Response) return checked;
-      return await grant(email, checked.form);
-    }
-
     /** One active session: this one gets admin access, every other session ends now. */
     async function admit(email: string, session: Session, how: string): Promise<Response> {
       const c = claims(session.access_token);
@@ -227,6 +262,11 @@ Deno.serve(async (req: Request) => {
         })
         .eq("id", session.user.id);
       if (admitErr) throw admitErr;
+      // its clock: 12 hours from now, 30 minutes from each activity
+      const { error: clockErr } = await db
+        .from("admin_session_activity")
+        .upsert({ user_id: session.user.id, session_id: c.session_id, started_at: now(), seen_at: now() });
+      if (clockErr) throw clockErr;
       const guard = await guardRow(email);
       const { error: guardErr } = await db.from("auth_guard").upsert({
         email,
@@ -235,6 +275,7 @@ Deno.serve(async (req: Request) => {
         last_failed_at: null,
         last_sign_in_at: now(),
         password_changed_at: guard?.password_changed_at ?? null,
+        temporary_password: guard?.temporary_password ?? false,
         updated_at: now(),
       });
       if (guardErr) throw guardErr;
@@ -242,15 +283,27 @@ Deno.serve(async (req: Request) => {
       return json({ status: "ok", session });
     }
 
-    function passwordDue(changedAt: string | null | undefined): "new" | "expired" | null {
-      if (!changedAt) return "new";
-      return Date.now() - new Date(changedAt).getTime() > PASSWORD_DAYS * 86_400_000 ? "expired" : null;
+    /**
+     * Whether the password must change before a session: one another admin
+     * set (temporary), one short of the rule (set before it), or one found in
+     * a data breach. Never just its age.
+     */
+    async function changeDue(email: string, password: string): Promise<"new" | "weak" | "breached" | null> {
+      if ((await guardRow(email))?.temporary_password) return "new";
+      if (passwordProblem(password, email)) return "weak";
+      if (((await breachCount(password, pwnedUrl)) ?? 0) > 0) return "breached";
+      return null;
     }
 
     /** Sets the new password (keyed) and records the change. Gives the keyed form to sign in with. */
     async function setNewPassword(userId: string, email: string, newPassword: string): Promise<Response | string> {
       const problem = passwordProblem(newPassword, email);
       if (problem) return json({ error: "weak_password", message: problem }, 400);
+      const breached = await breachCount(newPassword, pwnedUrl);
+      if (breached === null) console.warn("Have I Been Pwned did not answer: the new password was not screened");
+      if ((breached ?? 0) > 0) {
+        return json({ error: "weak_password", message: "That password appears in known data breaches. Choose another." }, 400);
+      }
       const form = await keyedPassword(newPassword, pepper);
       const { error } = await db.auth.admin.updateUserById(userId, { password: form });
       if (error) {
@@ -263,6 +316,7 @@ Deno.serve(async (req: Request) => {
         locked_until: guard?.locked_until ?? null,
         last_failed_at: guard?.last_failed_at ?? null,
         password_changed_at: now(),
+        temporary_password: false,
         updated_at: now(),
       });
       if (guardErr) throw guardErr;
@@ -277,8 +331,11 @@ Deno.serve(async (req: Request) => {
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
       if (!email || !password) return json({ error: "Enter the email and password." }, 400);
-      const verified = await verify(email, password);
-      if (verified instanceof Response) return verified;
+      const checked = await checkPassword(email, password);
+      if (checked instanceof Response) return checked;
+      const granted = await grant(email, checked.form);
+      if (granted instanceof Response) return granted;
+      let verified = granted;
       const prof = await adminProfile(verified.user.id);
       if (!prof || (prof.role !== "company_admin" && prof.role !== "entity_admin")) {
         await signOut(verified.access_token, "local");
@@ -289,11 +346,21 @@ Deno.serve(async (req: Request) => {
         return json({ error: "deactivated" }, 403);
       }
       if (action === "sign_in") {
-        const due = passwordDue((await guardRow(email))?.password_changed_at);
+        const due = await changeDue(email, password);
         if (due) {
           // no session until the password is changed
           await signOut(verified.access_token, "local");
           return json({ status: "password_change_required", reason: due });
+        }
+        if (checked.form === password) {
+          // set before the guard (plain at the Auth server): keyed from now on,
+          // which ends this session at the Auth server, so sign in again with it
+          const form = await keyedPassword(password, pepper);
+          const { error: keyErr } = await db.auth.admin.updateUserById(verified.user.id, { password: form });
+          if (keyErr) throw keyErr;
+          const again = await grant(email, form);
+          if (again instanceof Response) return again;
+          verified = again;
         }
         return await admit(email, verified, "password");
       }
@@ -324,8 +391,13 @@ Deno.serve(async (req: Request) => {
         return json({ error: "not_admin" }, 403);
       }
       // a reset-link session proves the mailbox: no current password needed
-      const recovery = (claims(jwt).amr ?? []).some((m) => m.method === "recovery" || m.method === "otp");
+      // (its new session still needs the second factor before admin access)
+      const token = claims(jwt);
+      const recovery = (token.amr ?? []).some((m) => m.method === "recovery" || m.method === "otp");
       const newPassword = String(body.new_password ?? "");
+      if (!recovery && token.aal !== "aal2") {
+        return json({ error: "mfa_required", message: "Finish two-step sign-in first." }, 403);
+      }
       if (!recovery) {
         const current = String(body.current_password ?? "");
         if (!current) return json({ error: "Enter your current password." }, 400);

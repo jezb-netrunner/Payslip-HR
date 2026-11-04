@@ -514,10 +514,24 @@ create table public.auth_guard (
   last_failed_at timestamptz,
   last_sign_in_at timestamptz,
   password_changed_at timestamptz,
+  -- set by another admin: to be changed at the next sign-in
+  temporary_password boolean not null default false,
   updated_at timestamptz not null default now()
 );
 alter table public.auth_guard enable row level security;
 revoke all on public.auth_guard from anon, authenticated;
+
+-- The admin session the guard admitted: when it began and when the app last
+-- reported activity in it. It ends 12 hours after sign-in, or after 32
+-- minutes without activity (the app signs out at 30 and warns before).
+create table public.admin_session_activity (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  session_id uuid not null,
+  started_at timestamptz not null default now(),
+  seen_at timestamptz not null default now()
+);
+alter table public.admin_session_activity enable row level security;
+revoke all on public.admin_session_activity from anon, authenticated;
 
 -- A wrong password of an admin account: counted, and the fifth in a row
 -- within the lock period locks the account. Counted under the account's row
@@ -648,10 +662,30 @@ revoke execute on function public.guard_profile_sessions() from public, anon, au
 create trigger profiles_guard_sessions before update on public.profiles
   for each row execute function public.guard_profile_sessions();
 
--- one active session: only the session the sign-in guard admitted has admin
--- access, and a session older than the account's sessions_revoked_at (a
--- deactivation or a password reset by another admin) loses it at once, as
--- an employee's already does
+-- The rules of an admin session, in one place: the one session the sign-in
+-- guard admitted, verified with the second factor (aal2), begun within 12
+-- hours and active within the last 32 minutes. An account not yet through
+-- the guard (null) has none of these rules: only the very first sign-up of a
+-- deployment.
+create or replace function public.admin_session_ok(p_user uuid, p_admin_session uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select p_admin_session is null
+      or (p_admin_session = nullif(auth.jwt()->>'session_id', '')::uuid
+          and coalesce(auth.jwt()->>'aal', '') = 'aal2'
+          and exists (
+            select 1 from admin_session_activity a
+            where a.user_id = p_user and a.session_id = p_admin_session
+              and a.started_at > now() - interval '12 hours'
+              and a.seen_at > now() - interval '32 minutes'))
+$$;
+revoke execute on function public.admin_session_ok(uuid, uuid) from public, anon, authenticated;
+
+-- one active session: only the session the sign-in guard admitted (with its
+-- second factor, within its time limits) has admin access, and a session
+-- older than the account's sessions_revoked_at (a deactivation or a password
+-- reset by another admin) loses it at once, as an employee's already does
 create or replace function public.is_company_admin()
 returns boolean
 language sql stable security definer set search_path = public
@@ -661,7 +695,7 @@ as $$
     where id = auth.uid() and role = 'company_admin' and is_active
       and (sessions_revoked_at is null
            or coalesce((auth.jwt()->>'iat')::bigint, 0) >= floor(extract(epoch from sessions_revoked_at)))
-      and (admin_session_id is null or admin_session_id = nullif(auth.jwt()->>'session_id', '')::uuid)
+      and public.admin_session_ok(id, admin_session_id)
   )
 $$;
 
@@ -674,7 +708,7 @@ as $$
     where p.id = auth.uid() and p.is_active
       and (p.sessions_revoked_at is null
            or coalesce((auth.jwt()->>'iat')::bigint, 0) >= floor(extract(epoch from p.sessions_revoked_at)))
-      and (p.admin_session_id is null or p.admin_session_id = nullif(auth.jwt()->>'session_id', '')::uuid)
+      and public.admin_session_ok(p.id, p.admin_session_id)
       and (
         p.role = 'company_admin'
         or (p.role = 'entity_admin' and exists (
@@ -685,24 +719,78 @@ as $$
   )
 $$;
 
--- whether the caller's session is still the active one (the app signs out
--- a session replaced by a sign-in elsewhere)
+-- The state of the caller's session, for the app: active (an admin session
+-- also with the seconds since its last activity and until it ends), ended
+-- (replaced by a sign-in elsewhere, signed out, or revoked), idle or expired.
+create or replace function public.my_session_state()
+returns jsonb
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  v_p profiles;
+  v_a admin_session_activity;
+  v_sid uuid := nullif(auth.jwt()->>'session_id', '')::uuid;
+begin
+  select * into v_p from profiles where id = auth.uid();
+  if v_p.id is null or not v_p.is_active
+     or not exists (select 1 from auth.sessions s where s.id = v_sid and s.user_id = auth.uid())
+     or (v_p.sessions_revoked_at is not null
+         and coalesce((auth.jwt()->>'iat')::bigint, 0) < floor(extract(epoch from v_p.sessions_revoked_at))) then
+    return jsonb_build_object('state', 'ended');
+  end if;
+  -- employees, and the first sign-up of a deployment: no admin session rules
+  if v_p.admin_session_id is null then
+    return jsonb_build_object('state', 'active');
+  end if;
+  if v_p.admin_session_id is distinct from v_sid then
+    return jsonb_build_object('state', 'ended');
+  end if;
+  select * into v_a from admin_session_activity where user_id = v_p.id and session_id = v_sid;
+  if v_a.user_id is null or v_a.started_at <= now() - interval '12 hours' then
+    return jsonb_build_object('state', 'expired');
+  end if;
+  if v_a.seen_at <= now() - interval '32 minutes' then
+    return jsonb_build_object('state', 'idle');
+  end if;
+  return jsonb_build_object(
+    'state', 'active',
+    'idle_seconds', floor(extract(epoch from now() - v_a.seen_at)),
+    'ends_in_seconds', floor(extract(epoch from v_a.started_at + interval '12 hours' - now())));
+end
+$$;
+revoke execute on function public.my_session_state() from public, anon;
+grant execute on function public.my_session_state() to authenticated;
+
+-- whether the caller's session is still an active one (the app signs out a
+-- session replaced by a sign-in elsewhere, idle or past its time)
 create or replace function public.my_session_active()
 returns boolean
 language sql stable security definer set search_path = public
 as $$
-  select exists (
-      select 1 from auth.sessions s
-      where s.id = nullif(auth.jwt()->>'session_id', '')::uuid and s.user_id = auth.uid())
-    and exists (
-      select 1 from profiles p
-      where p.id = auth.uid() and p.is_active
-        and (p.sessions_revoked_at is null
-             or coalesce((auth.jwt()->>'iat')::bigint, 0) >= floor(extract(epoch from p.sessions_revoked_at)))
-        and (p.admin_session_id is null or p.admin_session_id = nullif(auth.jwt()->>'session_id', '')::uuid))
+  select (public.my_session_state()->>'state') = 'active'
 $$;
 revoke execute on function public.my_session_active() from public, anon;
 grant execute on function public.my_session_active() to authenticated;
+
+-- The app reports activity in the admitted admin session (at most about once
+-- a minute), which keeps it from idling out; an idle or expired session
+-- stays ended. Answers the session's state.
+create or replace function public.touch_admin_session()
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+begin
+  update admin_session_activity a
+     set seen_at = now()
+   where a.user_id = auth.uid()
+     and a.session_id = nullif(auth.jwt()->>'session_id', '')::uuid
+     and a.started_at > now() - interval '12 hours'
+     and a.seen_at > now() - interval '32 minutes';
+  return public.my_session_state();
+end
+$$;
+revoke execute on function public.touch_admin_session() from public, anon;
+grant execute on function public.touch_admin_session() to authenticated;
 
 
 -- ---------- wording: a finalized payroll is voided and reissued, never reopened ----------

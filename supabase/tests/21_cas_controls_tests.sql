@@ -267,49 +267,89 @@ select set_config('request.jwt.claims', json_build_object('sub', '00000000-0000-
 select pg_temp.check(not public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'so none of its sessions manages a client');
 commit;
 
-\echo '--- 21.5 one active admin session: only the session the sign-in guard admitted'
+\echo '--- 21.5 one active admin session: the one the sign-in guard admitted, with its second factor, within its time'
 -- the admin signed in through the guard twice: the second sign-in admitted
 -- session b2, so session b1 (and any session made straight against the Auth
 -- API) has no admin access
 insert into auth.sessions (id, user_id) values ('40000000-0000-0000-0000-0000000021b2', :xa);
 update profiles set admin_session_id = '40000000-0000-0000-0000-0000000021b2' where id = :xa;
+insert into admin_session_activity (user_id, session_id) values (:xa, '40000000-0000-0000-0000-0000000021b2');
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000000, 'session_id', '40000000-0000-0000-0000-0000000021b1')::text, true);
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000000, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021b1')::text, true);
 select pg_temp.check(not public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'a session the guard did not admit can''t manage the client');
 select pg_temp.check((select count(*) = 0 from employees where entity_id = '10000000-0000-0000-0000-0000000021f0'), 'and reads nothing');
 select pg_temp.check(not public.my_session_active(), 'it is not the active session');
+select pg_temp.check(public.my_session_state()->>'state' = 'ended', 'its state is ended');
 commit;
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
-select pg_temp.check(public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'the admitted session manages the client');
-select pg_temp.check((select count(*) = 2 from employees where entity_id = '10000000-0000-0000-0000-0000000021f0'), 'and reads its employees');
-select pg_temp.check(public.my_session_active(), 'the admitted session is the active one');
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'aal', 'aal1', 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
+select pg_temp.check(not public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'the admitted session without its second factor (aal1) can''t manage the client');
+select pg_temp.check(public.my_session_active(), 'but it is the active session (the app asks for the second factor)');
 commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
+select pg_temp.check(public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'the admitted session with its second factor manages the client');
+select pg_temp.check((select count(*) = 2 from employees where entity_id = '10000000-0000-0000-0000-0000000021f0'), 'and reads its employees');
+select pg_temp.check(public.my_session_state()->>'state' = 'active' and (public.my_session_state()->>'ends_in_seconds')::int > 11 * 3600, 'active, about 12 hours left');
+commit;
+-- 33 minutes without activity: idle, and a late touch doesn't revive it
+update admin_session_activity set seen_at = now() - interval '33 minutes' where user_id = :xa;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
+select pg_temp.check(not public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'an idle session can''t manage the client');
+select pg_temp.check(public.touch_admin_session()->>'state' = 'idle', 'a touch after the idle limit leaves it idle');
+commit;
+-- activity within the limit keeps it going
+update admin_session_activity set seen_at = now() - interval '20 minutes' where user_id = :xa;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
+select pg_temp.check((public.touch_admin_session()->>'idle_seconds')::int < 5, 'a touch within the limit restarts the idle clock');
+-- another session of the account can't touch the admitted one
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021b1')::text, true);
+select pg_temp.check(public.touch_admin_session()->>'state' = 'ended', 'a session the guard did not admit touches nothing');
+commit;
+-- 12 hours after sign-in the session is over, activity or not
+update admin_session_activity set started_at = now() - interval '13 hours', seen_at = now() where user_id = :xa;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
+select pg_temp.check(not public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'a session past 12 hours can''t manage the client');
+select pg_temp.check(public.my_session_state()->>'state' = 'expired', 'its state is expired');
+commit;
+update admin_session_activity set started_at = now(), seen_at = now() where user_id = :xa;
 -- a revocation (deactivation, a password reset by another admin) ends even the admitted session
 update profiles set sessions_revoked_at = to_timestamp(1790000100) where id = :xa;
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
+select set_config('request.jwt.claims', json_build_object('sub', :xa, 'iat', 1790000060, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021b2')::text, true);
 select pg_temp.check(not public.can_manage_entity('10000000-0000-0000-0000-0000000021f0'), 'a session older than a revocation can''t manage the client');
 select pg_temp.check(not public.my_session_active(), 'and is not active');
 commit;
--- a company admin's session the guard did not admit is not a company admin
+-- a company admin's session the guard did not admit, or without its second factor, is not a company admin
 update profiles set admin_session_id = '40000000-0000-0000-0000-0000000021c1' where id = :owner;
+insert into admin_session_activity (user_id, session_id) values (:owner, '40000000-0000-0000-0000-0000000021c1');
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', json_build_object('sub', :owner, 'iat', 1790000000, 'session_id', '40000000-0000-0000-0000-0000000021c2')::text, true);
+select set_config('request.jwt.claims', json_build_object('sub', :owner, 'iat', 1790000000, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021c2')::text, true);
 select pg_temp.check(not public.is_company_admin(), 'a company admin session the guard did not admit is not a company admin');
+select set_config('request.jwt.claims', json_build_object('sub', :owner, 'iat', 1790000000, 'aal', 'aal1', 'session_id', '40000000-0000-0000-0000-0000000021c1')::text, true);
+select pg_temp.check(not public.is_company_admin(), 'nor is its admitted session before the second factor');
 commit;
 begin;
 set local role authenticated;
-select set_config('request.jwt.claims', json_build_object('sub', :owner, 'iat', 1790000000, 'session_id', '40000000-0000-0000-0000-0000000021c1')::text, true);
-select pg_temp.check(public.is_company_admin(), 'its admitted session is');
+select set_config('request.jwt.claims', json_build_object('sub', :owner, 'iat', 1790000000, 'aal', 'aal2', 'session_id', '40000000-0000-0000-0000-0000000021c1')::text, true);
+select pg_temp.check(public.is_company_admin(), 'its admitted session with the second factor is');
 -- and no admin moves the sessions themselves (a second session of their own)
 select pg_temp.expect_error(format('update profiles set admin_session_id = %L where id = %L', '40000000-0000-0000-0000-0000000021c2', :owner), '%managed by the system%');
 select pg_temp.expect_error(format('update profiles set sessions_revoked_at = null where id = %L', :xa), '%managed by the system%');
+select pg_temp.expect_error($$update admin_session_activity set started_at = now() where true$$, '%permission denied%');
 commit;
 update profiles set sessions_revoked_at = null, admin_session_id = null where id in (:owner, :xa);
+delete from admin_session_activity where user_id in (:owner, :xa);
 
 \echo 'PASSED 21'

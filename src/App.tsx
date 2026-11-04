@@ -3,6 +3,7 @@ import { useAuth } from './lib/auth'
 import { EntityProvider } from './lib/entity'
 import { Spinner } from './components/ui'
 import ChangePassword from './components/ChangePassword'
+import { MfaGate } from './components/TwoStep'
 import Login from './pages/Login'
 import Shell from './components/Shell'
 import AdminDashboard from './pages/admin/Dashboard'
@@ -47,7 +48,7 @@ function Centered({ title, body, children }: { title: string; body: string; chil
 const linkBtn = 'text-sm font-semibold text-brand-600 hover:text-brand-800'
 
 export default function App() {
-  const { session, profile, loading, profileError, refreshProfile, isAdmin, isCompanyAdmin, isEmployee, recovering, clearRecovery, signOut } =
+  const { session, profile, loading, profileError, refreshProfile, isAdmin, isCompanyAdmin, isEmployee, recovering, clearRecovery, signOut, aal } =
     useAuth()
 
   if (loading) {
@@ -110,6 +111,10 @@ export default function App() {
       </div>
     )
   }
+
+  // admins: the authenticator code after the password (the database gives
+  // admin access only to a session that has it)
+  if (isAdmin && aal !== 'aal2') return <MfaGate />
 
   if (!isAdmin && !isEmployee) {
     return (

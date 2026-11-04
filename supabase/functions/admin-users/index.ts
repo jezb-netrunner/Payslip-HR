@@ -6,12 +6,16 @@
 // Admin accounts (company admins only):
 //   create_admin               {email, password, full_name, role, entity_ids?}
 //   update_admin               {user_id, full_name?, entity_ids?, active?, password?}
-//   admin_security             {}         lockouts, last sign-in, password age
+//   admin_security             {}         lockouts, last sign-in, password age, two-step
 //   unlock_admin               {user_id}  ends a lockout after failed sign-ins
+//   reset_mfa                  {user_id}  removes an entity admin's authenticator apps
 // A password set here for someone else is temporary: the sign-in guard
-// (auth-guard) makes them change it at their next sign-in. It is kept at
-// the Auth server keyed (HMAC under ADMIN_PASSWORD_PEPPER), as the guard
-// keeps every admin password. Resets and unlocks are on the audit trail.
+// (auth-guard) makes them change it at their next sign-in. It follows the
+// guard's rule (12+ characters, screened against known breaches) and is kept
+// at the Auth server keyed (HMAC under ADMIN_PASSWORD_PEPPER), as the guard
+// keeps every admin password. Resets, unlocks and two-step resets are on the
+// audit trail. A caller's admin session must meet the guard's rules: the
+// admitted session, its second factor, within its time limits.
 //
 // Employee login codes are "<CLIENT CODE>-<PART>". Supabase Auth needs an
 // email, so each code maps to a synthetic address derived from a SHA-256 of
@@ -76,16 +80,38 @@ function weakCodeReason(part: string, employeeNo = "", names: string[] = []): st
 
 /** KEEP IN SYNC with passwordProblem in src/lib/password.ts and auth-guard. */
 function passwordProblem(password: string, email = ""): string | null {
-  if (password.length < 8) return "Use at least 8 characters.";
-  if (password.length > 72) return "Use at most 72 characters.";
-  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-    return "Mix letters and digits.";
-  }
+  const length = [...password].length;
+  if (length < 12) return "Use at least 12 characters: a few words make a strong passphrase.";
+  if (length > 128) return "Use at most 128 characters.";
+  if (/^(.)\1+$/su.test(password)) return "Don't repeat one character.";
+  const lower = password.toLowerCase();
   const local = email.split("@")[0]?.toLowerCase() ?? "";
-  if (local.length >= 3 && password.toLowerCase().includes(local)) {
+  if (local.length >= 3 && lower.includes(local)) {
     return "Don't put the email name in the password.";
   }
+  if (lower.includes("payslip")) return "Don't put the app's name in the password.";
   return null;
+}
+
+/**
+ * How often the password appears in known data breaches (Have I Been Pwned,
+ * k-anonymity); null when the service doesn't answer. KEEP IN SYNC with
+ * breachCount in auth-guard.
+ */
+async function breachCount(password: string, base: string): Promise<number | null> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", new TextEncoder().encode(password)));
+  const hex = [...digest].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  try {
+    const r = await fetch(`${base}/range/${hex.slice(0, 5)}`, { headers: { "Add-Padding": "true" }, signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return null;
+    for (const line of (await r.text()).split("\n")) {
+      const [suffix, count] = line.trim().split(":");
+      if (suffix === hex.slice(5)) return Number(count) || 0;
+    }
+    return 0;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -98,7 +124,7 @@ async function keyedPassword(password: string, pepper: string): Promise<string> 
   return "k1." + btoa(String.fromCharCode(...mac)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function tokenClaims(token: string): { iat?: number; session_id?: string } {
+function tokenClaims(token: string): { iat?: number; session_id?: string; aal?: string } {
   try {
     const part = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
     return JSON.parse(atob(part.padEnd(part.length + (4 - (part.length % 4)) % 4, "=")));
@@ -154,6 +180,24 @@ Deno.serve(async (req: Request) => {
     ) {
       return json({ error: "Your session ended: this account signed in elsewhere. Sign in again." }, 401);
     }
+    if (caller.admin_session_id) {
+      // the admin session rules (as admin_session_ok): the second factor, and
+      // within 12 hours of sign-in and 32 minutes of the last activity
+      if (token.aal !== "aal2") return json({ error: "Finish two-step sign-in first." }, 403);
+      const { data: clock, error: clockErr } = await admin
+        .from("admin_session_activity")
+        .select("started_at, seen_at")
+        .eq("user_id", callerId)
+        .eq("session_id", caller.admin_session_id)
+        .maybeSingle();
+      if (clockErr) throw clockErr;
+      if (
+        !clock || Date.now() - new Date(clock.started_at).getTime() >= 12 * 3600_000 ||
+        Date.now() - new Date(clock.seen_at).getTime() >= 32 * 60_000
+      ) {
+        return json({ error: "Your session timed out. Sign in again." }, 401);
+      }
+    }
     const isCompanyAdmin = caller.role === "company_admin";
 
     // Database writes from here on name the admin they act for: the audit
@@ -163,6 +207,9 @@ Deno.serve(async (req: Request) => {
       global: { headers: { "x-actor-id": callerId } },
     });
     const pepper = Deno.env.get("ADMIN_PASSWORD_PEPPER") ?? "";
+    const pwnedUrl = Deno.env.get("PWNED_PASSWORDS_URL") ?? "https://api.pwnedpasswords.com";
+    /** A temporary password from a known data breach is refused like a short one. */
+    const breached = async (pw: string) => ((await breachCount(pw, pwnedUrl)) ?? 0) > 0;
     const callerEmail = (caller.email as string | null) ?? null;
 
     // an admin account's action on the audit trail (the account rows hold no trace of it)
@@ -334,6 +381,7 @@ Deno.serve(async (req: Request) => {
       if (!email || !fullName) return json({ error: "Name and email are required" }, 400);
       const weak = passwordProblem(password, email);
       if (weak) return json({ error: `Temporary password: ${weak}` }, 400);
+      if (await breached(password)) return json({ error: "Temporary password: it appears in known data breaches. Choose another." }, 400);
       if (role !== "company_admin" && role !== "entity_admin") {
         return json({ error: "Role must be company_admin or entity_admin" }, 400);
       }
@@ -365,7 +413,9 @@ Deno.serve(async (req: Request) => {
       }
       if (role === "entity_admin") await setAssignments(created.user.id, body.entity_ids);
       // a temporary password: changed at the first sign-in
-      const { error: guardErr } = await db.from("auth_guard").upsert({ email, password_changed_at: null, updated_at: new Date().toISOString() });
+      const { error: guardErr } = await db
+        .from("auth_guard")
+        .upsert({ email, password_changed_at: null, temporary_password: true, updated_at: new Date().toISOString() });
       if (guardErr) return json({ error: guardErr.message }, 400);
       return json({ ok: true, user_id: created.user.id });
     }
@@ -406,6 +456,7 @@ Deno.serve(async (req: Request) => {
         const targetEmail = String(target.email ?? "").toLowerCase();
         const weak = passwordProblem(body.password, targetEmail);
         if (weak) return json({ error: `Password: ${weak}` }, 400);
+        if (await breached(body.password)) return json({ error: "Password: it appears in known data breaches. Choose another." }, 400);
         if (pepper.length < 32) return json({ error: "Admin passwords can't be set: the ADMIN_PASSWORD_PEPPER secret is missing." }, 500);
         const { error: pwErr } = await admin.auth.admin.updateUserById(userId, {
           password: await keyedPassword(body.password, pepper),
@@ -417,6 +468,7 @@ Deno.serve(async (req: Request) => {
           const { error: guardErr } = await db.from("auth_guard").upsert({
             email: targetEmail,
             password_changed_at: null,
+            temporary_password: true,
             updated_at: new Date().toISOString(),
           });
           if (guardErr) return json({ error: guardErr.message }, 400);
@@ -440,15 +492,49 @@ Deno.serve(async (req: Request) => {
         .in("role", ["company_admin", "entity_admin"]);
       const emails = (admins ?? []).map((a: { email: string | null }) => String(a.email ?? "").toLowerCase()).filter(Boolean);
       const { data: guards } = emails.length > 0
-        ? await db.from("auth_guard").select("email, failed_attempts, locked_until, last_sign_in_at, password_changed_at").in("email", emails)
+        ? await db
+          .from("auth_guard")
+          .select("email, failed_attempts, locked_until, last_sign_in_at, password_changed_at, temporary_password")
+          .in("email", emails)
         : { data: [] };
       const byEmail = new Map((guards ?? []).map((g: { email: string }) => [g.email, g]));
+      // each account's verified authenticator apps (two-step sign-in)
+      const factors = await Promise.all(
+        (admins ?? []).map(async (a: { id: string }) => {
+          const { data } = await admin.auth.admin.mfa.listFactors({ userId: a.id });
+          return (data?.factors ?? []).filter((f: { status: string }) => f.status === "verified").length;
+        }),
+      );
       return json({
-        accounts: (admins ?? []).map((a: { id: string; email: string | null }) => ({
+        accounts: (admins ?? []).map((a: { id: string; email: string | null }, i: number) => ({
           user_id: a.id,
           ...(byEmail.get(String(a.email ?? "").toLowerCase()) ?? {}),
+          mfa_factors: factors[i],
         })),
       });
+    }
+
+    if (action === "reset_mfa") {
+      // a lost phone: the account sets up two-step sign-in again at its next sign-in
+      const userId = String(body.user_id ?? "");
+      if (userId === callerId) return json({ error: "Manage your own two-step sign-in from the account menu." }, 400);
+      const { data: target } = await db.from("profiles").select("id, role, email").eq("id", userId).maybeSingle();
+      if (!target || (target.role !== "company_admin" && target.role !== "entity_admin")) {
+        return json({ error: "Admin account not found" }, 404);
+      }
+      if (target.role === "company_admin") {
+        return json({ error: "Another company admin's account cannot be managed here" }, 403);
+      }
+      const { data: listed, error: listErr } = await admin.auth.admin.mfa.listFactors({ userId });
+      if (listErr) return json({ error: listErr.message }, 400);
+      for (const f of listed?.factors ?? []) {
+        const { error: delErr } = await admin.auth.admin.mfa.deleteFactor({ id: f.id, userId });
+        if (delErr) return json({ error: delErr.message }, 400);
+      }
+      // its sessions end: the next sign-in sets up a new authenticator
+      await db.rpc("revoke_user_sessions", { p_user: userId });
+      await auditAccount("mfa_reset", String(target.email ?? userId).toLowerCase());
+      return json({ ok: true });
     }
 
     if (action === "unlock_admin") {

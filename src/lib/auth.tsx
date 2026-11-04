@@ -20,6 +20,11 @@ interface AuthState {
   isEmployee: boolean
   /** Arrived through a password-reset link: must choose a new password. */
   recovering: boolean
+  /** The session's assurance level: aal2 once the second factor (authenticator app) is verified. */
+  aal: 'aal1' | 'aal2' | null
+  /** aal2 when the account has an authenticator app to verify; aal1 when it has none yet. */
+  nextAal: 'aal1' | 'aal2' | null
+  refreshAal: () => Promise<void>
   clearRecovery: () => void
   refreshProfile: () => Promise<void>
   /** Signs this device out, on the audit trail (with the reason when the app did it). */
@@ -37,6 +42,9 @@ const AuthContext = createContext<AuthState>({
   isAdmin: false,
   isEmployee: false,
   recovering: false,
+  aal: null,
+  nextAal: null,
+  refreshAal: async () => {},
   clearRecovery: () => {},
   refreshProfile: async () => {},
   signOut: async () => {},
@@ -51,7 +59,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileFor, setProfileFor] = useState<string | null>(null)
   const [profileError, setProfileError] = useState(false)
   const [recovering, setRecovering] = useState(false)
+  // the assurance level, and the user it was read for (only the first read holds the app back)
+  const [assurance, setAssurance] = useState<{ current: AuthState['aal']; next: AuthState['aal']; user: string | null }>({
+    current: null,
+    next: null,
+    user: null,
+  })
   const forRef = useRef<string | null>(null)
+
+  async function loadAal(userId: string) {
+    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    setAssurance({ current: (data?.currentLevel as AuthState['aal']) ?? null, next: (data?.nextLevel as AuthState['aal']) ?? null, user: userId })
+  }
 
   // Reloads on every auth event (tab refocus, hourly token refresh). A failed
   // load — waking laptop, flaky network, a 5xx — must not throw a working
@@ -92,7 +111,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setSessionChecked(true)
-      if (data.session) loadProfile(data.session.user.id)
+      if (data.session) {
+        loadProfile(data.session.user.id)
+        void loadAal(data.session.user.id)
+      }
     })
     const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
       setSession(sess)
@@ -100,7 +122,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (event === 'SIGNED_OUT') setRecovering(false)
       if (sess) {
         // Defer Supabase calls out of the auth callback to avoid deadlocks.
-        setTimeout(() => loadProfile(sess.user.id), 0)
+        setTimeout(() => {
+          loadProfile(sess.user.id)
+          void loadAal(sess.user.id)
+        }, 0)
       } else {
         forRef.current = null
         setProfileFor(null)
@@ -114,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // never show "no access" screens while the signed-in user's profile is
   // still on its way
-  const loading = !sessionChecked || (!!session && profileFor !== session.user.id)
+  const loading = !sessionChecked || (!!session && (profileFor !== session.user.id || assurance.user !== session.user.id))
 
   const active = !!profile?.is_active
   const isCompanyAdmin = active && profile?.role === 'company_admin'
@@ -133,6 +158,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAdmin: isCompanyAdmin || isEntityAdmin,
         isEmployee: active && profile?.role === 'employee' && !!employee,
         recovering,
+        aal: assurance.current,
+        nextAal: assurance.next,
+        refreshAal: async () => {
+          if (session) await loadAal(session.user.id)
+        },
         clearRecovery: () => setRecovering(false),
         refreshProfile: async () => {
           if (session) await loadProfile(session.user.id)

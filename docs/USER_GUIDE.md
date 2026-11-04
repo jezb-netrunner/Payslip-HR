@@ -2,10 +2,11 @@
 
 ## Signing in
 - **Admins** (company admins and client payroll/HR staff): **Admin** tab → email + password.
-  - A password someone else set for you is temporary, and a password over 30 days old expires: the sign-in asks for a new one first. Passwords have at least 8 characters, mix letters and digits, and don't contain your email's name. Change yours any time with the key icon by your name.
+  - **Two-step sign-in**: after the password, enter the 6-digit code from an authenticator app on your phone (Google Authenticator, Microsoft Authenticator, Authy or 1Password). The first sign-in sets it up: scan the QR code, then enter the code. Add a second phone from the account menu (your initials, top right) → **Two-step sign-in**, so a lost phone doesn't lock you out. Lost it anyway? A company admin resets it: **Admin Users** → **Reset two-step**, and your next sign-in sets up a new one.
+  - Passwords: at least 12 characters — a few words make a good passphrase; no symbols or digits needed. Passwords found in known data breaches are refused, and so is one containing your email's name. There is no expiry: the sign-in asks for a new password only when someone else set it for you (temporary), or it turns up in a breach or is shorter than the rule. Change yours any time from the account menu → **Change password**.
   - Five wrong passwords in a row lock the account for 30 minutes. A company admin can unlock it sooner: **Admin Users** → **Unlock**.
-  - One session at a time: signing in on another device or browser signs the first one out (it shows why).
-- **Employees**: **Employee** tab → the login code from HR (e.g. `ACME-7Q4KX9TB`, dash included).
+  - One session at a time: signing in on another device or browser signs the first one out (it shows why). A session also ends after 30 minutes without activity (a warning comes at 25 — **Stay signed in**) and, for admins, 12 hours after signing in.
+- **Employees**: **Employee** tab → the login code from HR (e.g. `ACME-7Q4KX9TB`, dash included). The app signs you out after 30 minutes without activity.
 - First-ever setup: the first account created becomes the company admin; its first sign-in asks for the password again.
 
 ## Company admin — one-time setup

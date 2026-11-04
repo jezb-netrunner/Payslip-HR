@@ -69,13 +69,25 @@ rows; their generation is still on the audit trail.
 
 ## System security
 
+Two password items are **deliberately not followed**: changing passwords
+every 30 days and requiring letters plus digits. Current security guidance —
+NIST SP 800-63B-4, which also guides payroll services of this kind — forbids
+both, because in practice they produce weaker, predictable passwords
+(`Payroll2026`, then `Payroll2027`). Declare them as deviations, with the
+compensating controls in the rows that follow: longer passwords screened
+against known breaches, two-step sign-in, lockout and session timeouts.
+Restoring the two rules is a small code change if the BIR requires them for
+registration.
+
 | Requirement | Complied | Remarks |
 | --- | --- | --- |
 | Standard procedure and approval for user access | ✓ | Only a company admin creates admin accounts (Admin Users) and assigns each entity admin the clients they may handle; employees get a personal login code from their entity admin. Keep the written approval of each request. |
 | Users can't be active on multiple terminals at once | ✓ | An admin account has one active session: signing in elsewhere signs the earlier session out, and the database stops answering it as an admin at once (a sign-in made outside the app's sign-in has no admin access at all). Employee logins only view their own payslips and file requests. |
 | User IDs deactivated after unsuccessful sign-in attempts | ✓ | Five failed sign-ins in a row lock the account for 30 minutes; attempts are counted in the database one at a time, so a burst of them can't slip past the count. Passwords are kept at the Auth server only in a keyed form, so they can't be guessed around the lock either. A company admin can unlock an account sooner (Admin Users); unlocks and password resets are on the audit trail. |
-| Password changed every 30 days | ✓ | A password older than 30 days must be changed at the next sign-in. A password set by another admin is temporary: it must be changed at the first sign-in. Policy: changed every 30 days; the new password must differ from the current one. |
-| Passwords combine alphabetic and numeric characters | ✓ | Rule: at least 8 characters, letters and digits, not containing the email's name. Checked by the server. |
+| Password changed every 30 days | Deviation | Not followed (see above). A password must change when there is a reason: one set by another admin is temporary and changes at its first sign-in, and one found in a known data breach or below the rule changes at the next sign-in. The new password must differ from the current one. |
+| Passwords combine alphabetic and numeric characters | Deviation | Not followed (see above). Rule instead: at least 12 characters (a passphrase of a few words is fine), not one repeated character, not containing the email's name, and not found in known data breaches — checked against the Pwned Passwords service without the password leaving the server (only the first five characters of its hash are sent). Checked by the server. |
+| Two-step sign-in (compensating control) | ✓ | Every admin signs in with the password and a code from an authenticator app on their phone. The database gives admin access only to a session that verified the code, so a guessed, stolen or reset password alone opens nothing. A company admin can reset an entity admin's two-step sign-in for a lost phone; resets are on the audit trail. |
+| Session timeouts (compensating control) | ✓ | Signed out after 30 minutes without activity (a warning comes at 25), and an admin session lasts at most 12 hours. For admins the database enforces both, not just the app. |
 | Users other than administrators can't reach sensitive operating system commands | ✓ | It is a web application: no user has operating-system access. Database administration is only through the provider's console, by the account owner. |
 | Users can reach accounting information only through authorized transactions | ✓ | Row-level security: each admin reaches only their clients; employees only their own records. |
 | Access rights removed or revised on termination or transfer | ✓ | Deactivate the account or change its clients (Admin Users); a deactivated account's sessions end at once. |

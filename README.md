@@ -305,14 +305,22 @@ reminds company admins when this year's check is due).
    formula-like text so a typed name can't run as a spreadsheet formula.
 5. Employee login codes are client-prefixed (no cross-client guessing),
    high-entropy, revocable, and never stored in readable form.
-6. Admin sign-in goes through the `auth-guard` edge function: five failed
-   sign-ins lock the account for 30 minutes (counted in the database, one
-   attempt at a time), a temporary or 30-day-old password must be changed
-   first, passwords mix letters and digits, and an account has one session at
-   a time — the RLS helpers give admin access only to the session the guard
-   admitted (`profiles.admin_session_id`). The Auth server keeps an admin
-   password only keyed (an HMAC under the `ADMIN_PASSWORD_PEPPER` secret), so
-   it can't be guessed straight at the Auth API.
+6. Admin sign-in goes through the `auth-guard` edge function and follows
+   NIST SP 800-63B-4 rather than the letter of BIR Annex B: passwords of 12+
+   characters with no composition rules and no periodic changes, screened
+   against known breaches (Pwned Passwords, k-anonymity: only the first five
+   characters of the hash leave the server), and changed only when temporary
+   (set by another admin), breached or below the rule. Five failed sign-ins
+   lock the account for 30 minutes (counted in the database, one attempt at a
+   time). Every admin also verifies a code from an authenticator app
+   (two-step sign-in, TOTP). The RLS helpers give admin access only to the one
+   session the guard admitted (`profiles.admin_session_id`), at `aal2`,
+   within 12 hours of sign-in and 30 minutes of activity
+   (`admin_session_activity`, kept by `touch_admin_session`); the app warns at
+   25 idle minutes and signs everyone, employees too, out at 30. The Auth
+   server keeps an admin password only keyed (an HMAC under the
+   `ADMIN_PASSWORD_PEPPER` secret), so it can't be guessed straight at the
+   Auth API.
 7. Every report and export carries the client's name, address, VAT status
    and TIN, the user, the time and the software version; reports, prints,
    exports, sign-ins and sign-outs are on the audit trail, which no app user
@@ -386,8 +394,13 @@ migration (`*_cas_controls.sql`), both functions and the front end go live
 together: after the migration only a session the guard admitted has admin
 access, so an older front end can't sign admins in, and this front end needs
 the migration. Set the secret, deploy both functions, apply the migration,
-then merge to `main`; every admin signs in once more and chooses a new
-password. `npm run test:edge` runs the functions against a local stack
+then merge to `main`; every admin signs in once more and sets up two-step
+sign-in (an authenticator app); a password changes only if it is shorter than
+12 characters or found in a breach (others are re-keyed silently). TOTP
+multi-factor is on by default in Supabase Auth (Authentication → Multi-Factor);
+keep it on. The breach check calls `https://api.pwnedpasswords.com` from the
+functions (`PWNED_PASSWORDS_URL` overrides it) and lets a sign-in through when
+that service can't be reached. `npm run test:edge` runs the functions against a local stack
 (`supabase/functions/tests/`). Likewise the multi-client migrations
 (`*_multi_client_schema.sql`, `*_multi_client_security.sql`) replace the
 single-company schema, so an older front end stops working once they are
