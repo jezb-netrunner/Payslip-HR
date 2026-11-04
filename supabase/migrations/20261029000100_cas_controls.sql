@@ -773,7 +773,7 @@ revoke execute on function public.my_session_active() from public, anon;
 grant execute on function public.my_session_active() to authenticated;
 
 -- The app reports activity in the admitted admin session (at most about once
--- a minute), which keeps it from idling out; an idle or expired session
+-- a minute), which keeps it from idling out. An idle or expired session
 -- stays ended. Answers the session's state.
 create or replace function public.touch_admin_session()
 returns jsonb
