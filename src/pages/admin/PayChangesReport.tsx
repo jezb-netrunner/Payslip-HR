@@ -14,6 +14,7 @@ import { PAY_RATE_REASON_LABELS } from '../../lib/labels'
 import { rateText } from '../../lib/payHistory'
 import { supabase } from '../../lib/supabase'
 import { changesBetween } from '../../payroll/payRates'
+import { useReportStamp } from '../../lib/useReportStamp'
 
 interface Person {
   id: string
@@ -24,6 +25,7 @@ interface Person {
 }
 
 export function PayChanges({ entity, year }: { entity: Entity; year: number }) {
+  const stamp = useReportStamp(entity)
   const [data, setData] = useState<{ rates: EmployeePayRate[]; people: Person[] } | null>(null)
   const [loadError, setLoadError] = useState('')
   const [reload, setReload] = useState(0)
@@ -89,7 +91,7 @@ export function PayChanges({ entity, year }: { entity: Entity; year: number }) {
         r.row.approved_by,
         r.row.note,
       ]),
-    ])
+    ], stamp(`Pay changes ${year}`))
   }
 
   return (

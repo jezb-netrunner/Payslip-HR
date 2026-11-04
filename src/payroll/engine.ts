@@ -1291,7 +1291,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       const overEe = round2(Math.max(0, a.sssEe - sepSss.ee) + Math.max(0, a.sssMpfEe - sepSss.mpfEe))
       if (ee > 0 || er > 0 || overEe > 0) {
         warnings.push(
-          `${sep.label} contributions are short by ₱${ee.toLocaleString()} (employee) and ₱${er.toLocaleString()} (employer)${overEe > 0 ? `, and ₱${overEe.toLocaleString()} of the employee's SSS was over-deducted` : ''}: the payroll holding the last day was finalized before the separation was recorded. Reopen and recompute that payroll so it completes the month.`,
+          `${sep.label} contributions are short by ₱${ee.toLocaleString()} (employee) and ₱${er.toLocaleString()} (employer)${overEe > 0 ? `, and ₱${overEe.toLocaleString()} of the employee's SSS was over-deducted` : ''}: the payroll holding the last day was finalized before the separation was recorded. Void and reissue that payroll (recomputed) so it completes the month.`,
         )
       }
     }

@@ -443,7 +443,7 @@ function RowCells({
       <Td>
         <div className="flex items-center gap-2 whitespace-nowrap">
           {row.locked ? (
-            <span className="flex items-center gap-1 text-[11px] text-slate-400" title="Paid in a finalized payroll run — reopen the run to edit">
+            <span className="flex items-center gap-1 text-[11px] text-slate-400" title="Paid in a finalized payroll run — void and reissue the run to edit">
               <Lock className="size-3.5" /> paid
             </span>
           ) : (

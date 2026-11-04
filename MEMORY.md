@@ -459,9 +459,98 @@ outputs, a weekly run paying by-results holiday pay from the weeks before,
 EWT date overrides, the employee portal and its REST access) found no
 further bugs. Migrations applied live (see deployed state). Tests 400.
 
+### 2026-10-29 — BIR RMO 9-2021 Annex B controls (same branch, after PR #8)
+
+**Asked:** is the app compliant with Annex B (the CAS checklist)? Then: fix
+every code-side gap; for backups, an Excel export the users keep.
+
+**Review round:** two independent reviews (DB + edge, front end) found 10
++ 7 items, all fixed: a race that let concurrent wrong passwords count as
+one (now `guard_sign_in`, one transaction per attempt under the guard row's
+lock), the lockout's Auth ban (it ended live sessions too: dropped), guessing
+straight at the Auth API (admin passwords now kept keyed, HMAC under
+`ADMIN_PASSWORD_PEPPER`), a promotion to admin that left the session
+unrestricted (trigger now sets a random `admin_session_id`), silent failures
+of security writes, unlogged resets and unlocks, `$2b$` hashes misread by
+pgcrypto, control numbers truncated past 999,999, forgeable `log_activity`
+rows; in the app, self password reset through Admin Users (it ended the
+admin's own session), a watcher race during a password change, a Users page
+stuck loading, the reason a reset link was refused, the VOID note overflowing,
+voided payslips reloaded on every page load. Edge tests now in the repo
+(`npm run test:edge`, 12 scenarios).
+
+**Did:** migration `20261029000100_cas_controls.sql` (placeholder version;
+live 2026-11-04 as `20261104072713_cas_controls`): control numbers PR-/PS-000001 per client assigned at
+finalize (`document_counters`), the finalize cross-check
+(`payroll_run_out_of_balance`), void and reissue (`void_payroll_run`,
+`payroll_voids`) replacing reopen, `entities.vat_registered`, audit_logs
+closed to app writes plus `log_activity`, the sign-in guard's tables and
+`guard_check_password`, `profiles.admin_session_id` (one admitted admin
+session) and the reworded trigger messages. Edge functions: new
+`auth-guard` (lockout, forced and 30-day password change, one session),
+`admin-users` (password rule, lock status, unlock, admitted-session check).
+Front end: report identification on every PDF/CSV/print, VOID payslips,
+control totals and voided versions on the run page, guarded sign-in and
+password screens, the session watcher, Users lock status, Client Settings
+VAT field, Audit Log dates/print/Excel/CSV, **Data Export** (the Excel
+backup, `src/lib/xlsx.ts` + `backup.ts`), `docs/BIR_ANNEX_B.md`. Tests 400
+→ 417 (vitest), SQL suite 21, edge harness 9 (Node, scratchpad), Playwright
+walkthrough of every new flow on the local stack. Not done: 2316/2307 in
+the official BIR layout (needs the BIR's form templates; bir.gov.ph is
+outside the network policy).
+
+### 2026-11-04 — Industry practice over BIR for sign-in security (same branch, PR #9 still open)
+
+**Asked:** are the Annex B edits industry standard (e.g. Paylocity)? Answer:
+the payroll controls are; the 30-day rotation and letters-plus-digits rule
+are BIR-only and below NIST practice; missing were MFA, timeouts and breach
+screening. Then: "Follow industry's best practices over BIR".
+
+**Did (all still in the not-live `*_cas_controls.sql`, both functions, the
+front end):** password rule 12–128 characters, no composition, no expiry,
+breached passwords refused (Pwned Passwords range API); forced change only
+when temporary (`auth_guard.temporary_password`), weak or breached; legacy
+passwords re-keyed silently at sign-in. Two-step sign-in (TOTP) for every
+admin: `MfaGate` (enrol or code) before any admin page, account menu
+**Two-step sign-in** (add/remove phones), Admin Users status + **Reset
+two-step** (`admin-users` `reset_mfa`, audited `mfa_reset`). Timeouts:
+`admin_session_activity` + `admin_session_ok` in the RLS helpers (aal2, 12 h,
+32 min), `my_session_state` / `touch_admin_session`; the app warns at 25 idle
+minutes and signs out at 30, employees too (client-side only for them).
+Password fields got show/hide. Docs: Annex B rows marked *Deviation* with the
+compensating controls, README, guide. Tests: vitest 421, SQL suites 12 (21.5
+rewritten), edge 14 (real TOTP against the local GoTrue, HIBP stub), and a
+Playwright walkthrough (enrol, challenge, wrong code, warning, idle sign-out,
+skewed clock, employee return after 31 min) that found two bugs (lessons
+below). Not done: employee sessions have no server-side timeout (Free plan
+has no inactivity setting; employees only see their own records).
+
+**Live apply (owner: "go ahead with the go-live; you set the secret"):** the
+MCP secret tool was paused by Supabase, so the owner set
+`ADMIN_PASSWORD_PEPPER` in the dashboard. Then `auth-guard` v1, `admin-users`
+v7, the migration (as `20261104072713`, after removing a semicolon from a
+comment and two stale comments), the schema hash check against the replica
+(lesson below), advisors (nothing new beyond the intentional list), PR #9
+merged.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-04: the CAS controls, two-step sign-in and timeouts are live**
+(owner's approval): edge-function secret `ADMIN_PASSWORD_PEPPER` (set by the
+owner in the dashboard; 32+ random characters, **never rotate it**: admin
+passwords are kept keyed with it), `auth-guard` **v1** (verify_jwt **off**),
+`admin-users` **v7** (verify_jwt on; deployed source = repo copy), migration
+`20261104072713_cas_controls` (repo file renamed to it), front end through PR
+#9. Only the session the guard admitted, at aal2 and within the 12 h / 32 min
+limits, has admin access, so every admin signed out at the apply: each signs
+in once more and sets up an authenticator app; a password changes only if
+under 12 characters or breached (others are re-keyed silently). The
+functions call `api.pwnedpasswords.com` (fail open). After the apply, every
+public function body, policy, trigger, column, RLS flag and the new grants
+were hashed on live and on the local replica: identical, except CRLF line
+endings in 16 functions of older migrations (equal once normalized).
 
 **2026-10-28: the four pay-diversity migrations are live** (owner's
 approval), through MCP `apply_migration` as `20261028113903
@@ -476,9 +565,11 @@ career events' rates were moved off. Security advisors: the 10 intentional
 WARNs plus `can_manage_output_report` (executable by `authenticated` by
 design: the output-reports storage policies call it as the caller), and
 the leaked-password setting. Performance: INFO only (one new unindexed FK,
-`consultant_declarations.entity_id`, on a tiny table). Until the PR is
-merged and deployed, the live site (main) can't change a pay rate from the
-old Pay tab or a career event (the history guard refuses it): merge soon.
+`consultant_declarations.entity_id`, on a tiny table). PR #8 (this
+branch) was merged at the owner's request on 2026-10-28 (merge commit
+`45a8d5a`) and deployed by Pages run 11 (green, 11:49 UTC): the old Pay
+tab, whose direct rate edits the history guard refuses, was live only for
+the ~10 minutes after the migrations (11:39–11:42 UTC).
 
 **2026-10-26: the seven compliance migrations are live** (owner's
 approval), as `20261026084112 mwe_premium_pay` … `20261026084508
@@ -545,19 +636,25 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
   versions, 9 global leave templates, 21 national 2026 holidays; RLS on
   every table. Owner's test data since 2026-10-23: 1 client, 1 employee
   (hired 2026-10-23, has a login code), 1 finalized semi-monthly run.
-- Edge function **`admin-users` v5** live (verify_jwt on), deployed
+- (superseded 2026-11-04 by v7, above) Edge function **`admin-users` v5** live (verify_jwt on), deployed
   2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
   login codes refused, incl. all-letter codes and the employee's names).
-- Security advisors after the last DDL (2026-10-23, cash advances): 10 intentional WARNs (RLS helpers
-  `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
-  `current_employee_id` / `current_employee_entity_id` / `run_is_finalized`
-  and the RPCs `finalize_payroll_run` / `reopen_payroll_run` /
-  `review_time_correction` / `approve_advance_request` are executable by
-  `authenticated` by design; each checks the caller's client) and
-  "Leaked password protection disabled" (Auth dashboard setting, owner's
-  call). Performance advisors: INFO only for unindexed FKs / unused indexes
-  (no data yet) and WARN "multiple permissive policies" (admin + own-row
-  policies, by design).
+- Security advisors after the last DDL (2026-11-04, CAS controls): 17
+  intentional WARNs "SECURITY DEFINER executable by authenticated" (RLS
+  helpers `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
+  `can_manage_output_report` / `current_employee_id` /
+  `current_employee_entity_id` / `run_is_finalized`; RPCs
+  `finalize_payroll_run` / `void_payroll_run` / `reopen_payroll_run` (always
+  refuses) / `payroll_run_out_of_balance` / `review_time_correction` /
+  `approve_advance_request` / `log_activity`; the caller's own session:
+  `my_session_state` / `my_session_active` / `touch_admin_session`; each
+  checks the caller), INFO "RLS enabled, no policy" on `auth_guard`,
+  `admin_session_activity` and `document_counters` (service role and
+  definer functions only), and "Leaked password protection disabled" (a Pro
+  setting; auth-guard screens admin passwords itself, employees have login
+  codes). Performance advisors: INFO only for unindexed FKs / unused
+  indexes (little data) and WARN "multiple permissive policies" (admin +
+  own-row policies, by design).
 - Private storage buckets `punch-selfies` and `employee-photos` exist; after
   the migration nothing uses `punch-selfies` (empty; safe to delete).
 - **The owner's account exists** (created 2026-08-24, confirmed; role
@@ -1596,4 +1693,112 @@ Where the spec was silent (de minimis excess over a ceiling) the safe
 default was taken: taxed as supplementary pay. RR 2-98's last proviso of
 Sec. 2.78.1(A)(3) may instead put such excess in the ₱90,000 pool — asked
 the owner.
+
+
+### A posted payroll is voided and reissued, never reopened (design decision, 2026-10-29)
+
+> BIR RMO 9-2021 Annex B: "the transaction can be voided, but not modified once posted". `void_payroll_run(run, reason)` archives the run and its payslips in `payroll_voids` (immutable, printed VOID), restores what finalize moved (loans, rounding carry, payroll_seq) and returns the run to draft; `reopen_payroll_run` now only refuses. Control numbers come from `document_counters` at finalize and are never reused, so a reissue gets new ones.
+
+Why it mattered: reopen edited the posted record in place, leaving no
+trace of what employees had been shown. Every user-facing "reopen the run"
+message (DB triggers and UI) now says "void and reissue"; the consultants'
+quarter filing keeps "reopen" (a different thing).
+
+### One admin session: the guard admits it, RLS checks `admin_session_id` (design decision, 2026-10-29)
+
+> The Free plan has no single-session setting or password hook, so `auth-guard` signs every admin in, signs the account out elsewhere and stores the new session's id in `profiles.admin_session_id`; `is_company_admin()` / `can_manage_entity()` / `my_session_active()` give admin access only to that session (since 2026-11-04 through `admin_session_ok`, which also needs aal2 and the timeouts). Only the service role moves it (`guard_profile_sessions`).
+
+Why it mattered: the first version compared the token's `iat` with
+`sessions_revoked_at`, which let a sign-in made straight against the Auth
+API (skipping lockout, password expiry and the one-session rule) keep full
+admin access. Null means "not yet through the guard": the migration fills
+every existing admin with a random id (all sign in once more), and
+`supabase/tests/run.sh` clears it for the suites, which act through
+`request.jwt.claim.sub` without a session id. Keep null from ever meaning
+"unrestricted" again: `guard_profile_sessions` gives a random id to any
+profile promoted to an admin role, create_admin sets one (and deletes the
+Auth user if the profile write fails), and `admit()` refuses a token without
+a `session_id`. Only the very first sign-up of a deployment starts null.
+
+### The sign-in guard checks passwords in the database, and Auth keeps them keyed (correction, 2026-10-29)
+
+> Supabase Auth rate-limits `/auth/v1/token` per IP, and every request the guard makes comes from the edge function's IP. `guard_sign_in` (service role only) takes the account's guard row lock, refuses while locked, compares the password with the bcrypt hash via pgcrypto (only `$2a$`/`$2x$`: pgcrypto misreads `$2b$`/`$2y$`), and counts a failure with its audit row in the same transaction. Only a right password reaches Auth. Passwords the guard or admin-users set are stored at Auth as `k1.` + HMAC-SHA256(`ADMIN_PASSWORD_PEPPER`, password), so the Auth API alone can't confirm a guess.
+
+Why it mattered: first built, the guard asked Auth with every password — a
+flood of wrong ones would drain that one shared bucket and lock every admin
+out; then counting read-then-wrote, so concurrent guesses counted as one;
+and guessing straight at the Auth API was never counted at all. The lock
+no longer bans the user at Auth (a ban also kills the user's live sessions
+at their next refresh, so five anonymous requests could kick an admin out).
+Deliberate residual: an unknown email answers after a jittered delay instead
+of a dummy bcrypt (which would let anyone burn DB CPU), and only real
+accounts ever lock.
+
+### The finalize cross-check holds for every engine output (confirmed, 2026-10-29)
+
+> The engine sums gross and deductions from the lines and pays net = gross − deductions + rounding, so `payroll_run_out_of_balance` passes by construction; `fakeSupabase.finalize` enforces the same rule (`controlTotals`), so all flow tests exercise it.
+
+Why it mattered: a false out-of-balance would block real payrolls. SQL
+fixtures in older suites had unbalanced payslips and needed balancing lines.
+
+### Re-creating DB functions for a wording change: copy `pg_get_functiondef` from the replica
+
+> To change only the messages of trigger functions defined across several migrations, take each latest definition from `phr_test` (all migrations replayed) with `pg_get_functiondef`, replace the strings in a script that asserts each replacement, and append the results to the new migration.
+
+Why: hand-copying a function from an old migration risks reviving a
+version a later migration replaced. Check the copied bodies' comments for
+semicolons (the MCP splitter).
+
+### Sign-in security follows NIST SP 800-63B-4 over Annex B's letter (owner's decision, 2026-11-04)
+
+> Owner: "Follow industry's best practices over BIR". No 30-day rotation and no letters-plus-digits rule; instead 12+ characters, a breach blocklist, change only on evidence (temporary, breached, below the rule), two-step sign-in for every admin, 30-minute idle and 12-hour session limits. `docs/BIR_ANNEX_B.md` declares the two items as deviations with these compensating controls.
+
+Why it mattered: NIST forbids periodic changes and composition rules (they
+breed `Payroll2026` → `Payroll2027`) and asks for length, a blocklist and
+MFA; Annex B is a 2021 checklist. If an RDO insists on the two items for
+registration, restoring them is a small change in `passwordProblem` (three
+copies: `src/lib/password.ts`, both functions) and `changeDue` in auth-guard.
+Rev 4 allows passwords under 15 characters only as part of MFA — fine for
+admins (always aal2); revisit the 12 if a password ever stands alone.
+
+### MFA and session timeouts are enforced in RLS, not just the app (design decision, 2026-11-04)
+
+> `admin_session_ok(user, admitted)` needs the JWT's `session_id` = the admitted session, `aal` = aal2, and an `admin_session_activity` row started < 12 h and seen < 32 min ago (the app signs out at 30). `touch_admin_session()` moves `seen_at` only within those limits; `my_session_state()` says active / idle / expired / ended. Null `admin_session_id` (bootstrap, test fixtures) skips all of it.
+
+Why it mattered: Supabase's time-box, inactivity timeout, single-session and
+leaked-password settings are Pro-only; TOTP is free. Checked on the local
+GoTrue: once a factor is verified, enrolling another or unenrolling a
+verified one needs an aal2 session (403/422), so a stolen password can't
+swap the phone; an admin-API password update deletes all the user's
+sessions. In RLS, a reset link (aal1) opens nothing either. auth-guard's
+`set_password` (non-recovery) also requires aal2; admin-users refuses aal1
+callers and timed-out sessions.
+
+### Compare the device's clock only with itself (correction, 2026-11-04)
+
+> The idle clock stores `{session, at}` in localStorage (`payslip-hr:last-activity`), keyed by the JWT's `session_id`; activity from an earlier session is ignored. Never compare a server timestamp (e.g. `user.last_sign_in_at`) with `Date.now()` in the browser.
+
+Why it mattered: the first version took `max(stored, last_sign_in_at)` as
+the last activity; on a device clock 40+ minutes fast, every fresh sign-in
+looked 30 minutes idle and was signed straight out. The Playwright
+walkthrough (`page.clock.install({ time })`) caught it.
+
+### Effects that create server state run twice in dev (correction, 2026-11-04)
+
+> React strict mode runs effects twice; `EnrollAuthenticator` keeps its enrolment promise in a ref so the second run reuses it. GoTrue's `mfa_factors_user_friendly_name_unique` turned the duplicate enrol into a 500.
+
+Why it mattered: invisible in production builds but a real race; and two
+factors added in one minute would also collide, so friendly names now carry
+seconds.
+
+### Verify a live apply by hashing the schema against the replica (confirmed approach, 2026-11-04)
+
+> This container can't reach `*.supabase.co`, and an MCP apply means re-typing a large file, so after the apply hash on both live (MCP `execute_sql`) and the local replica (`phr_test`): every public function (name, arguments, `md5(prosrc)`, security definer, volatility, config, return type), `pg_policies`, `pg_get_triggerdef`, `information_schema.columns`, RLS flags and the grants that matter. Equal aggregates prove the apply; on a mismatch, send the replica's per-object hashes to live as a `values` list and let live name the differences.
+
+Why it mattered: it proved the 56 KB migration went in exactly as tested,
+and found that 16 functions from older migrations carry CRLF line endings on
+live (equal once `replace(prosrc, E'\r\n', E'\n')`), so normalize before
+comparing. Edge-function secrets: Supabase can pause the MCP secret tool;
+the owner then sets the value in the dashboard (Edge Functions → Secrets),
+and the functions refuse to set or check admin passwords without it.
 

@@ -7,7 +7,8 @@
 import type { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { safeDoc } from './text'
-import { fmtPeriod, fmtTin, fullName, plural } from '../lib/format'
+import { fmtPeriod, fullName, plural } from '../lib/format'
+import { stampFooter, tinLine, type ReportStamp } from '../lib/reportStamp'
 import { FREQUENCY_LABELS } from '../lib/labels'
 import { manilaHHMM, todayManila } from '../lib/manila'
 import { shiftShort } from '../lib/shiftText'
@@ -34,6 +35,7 @@ export interface ReportCompany {
   registered_address: string
   tin: string
   tin_branch_code: string
+  vat_registered?: boolean | null
 }
 
 type AutoTableDoc = jsPDF & { lastAutoTable: { finalY: number } }
@@ -42,6 +44,11 @@ const hrs = (minutes: number) => (minutes ? hoursOf(minutes).toFixed(2) : '')
 
 export function generatedAt(): string {
   return `${shortDate(todayManila(), true)} ${clock12(manilaHHMM(new Date().toISOString()))}`
+}
+
+/** "Generated <when> by <who> • <software>" (BIR RMO 9-2021 Annex B, item 4), or just when without a stamp. */
+export function generatedLine(stamp?: ReportStamp): string {
+  return stamp ? stampFooter(stamp) : `Generated ${generatedAt()}`
 }
 
 /** One line no wider than maxW (current font), cut with an ellipsis. */
@@ -75,8 +82,7 @@ export function drawHeader(doc: jsPDF, company: ReportCompany, title: string, pe
   doc.text(fitText(doc, name, leftW), MARGIN, 11)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
-  const tin = fmtTin(company.tin, company.tin_branch_code)
-  const sub = [company.registered_address, tin ? `TIN ${tin}` : ''].filter(Boolean).join('  •  ')
+  const sub = [company.registered_address, tinLine(company)].filter(Boolean).join('  •  ')
   if (sub) doc.text(fitText(doc, sub, leftW), MARGIN, 16.5)
 }
 
@@ -210,7 +216,7 @@ function drawDtr(doc: jsPDF, r: EmployeeTimeReport, company: ReportCompany, gene
   // ---- footer ----
   doc.setFontSize(7)
   doc.setFont('helvetica', 'italic')
-  const foot = doc.splitTextToSize(`${FOOTNOTE} Generated ${generated}.`, pageW - MARGIN * 2) as string[]
+  const foot = doc.splitTextToSize(`${FOOTNOTE} ${generated}.`, pageW - MARGIN * 2) as string[]
   doc.text(foot, MARGIN, y)
 }
 
@@ -223,9 +229,10 @@ export async function buildDtrDoc(
   reports: EmployeeTimeReport[],
   company: ReportCompany,
   onProgress?: (done: number) => void,
+  stamp?: ReportStamp,
 ): Promise<jsPDF> {
   const doc = safeDoc({ unit: 'mm', format: 'a4' })
-  const generated = generatedAt()
+  const generated = generatedLine(stamp)
   for (let i = 0; i < reports.length; i++) {
     if (i > 0) doc.addPage()
     drawDtr(doc, reports[i], company, generated)
@@ -238,7 +245,7 @@ export async function buildDtrDoc(
 }
 
 /** The whole report as one table: a row per employee and the totals (landscape). */
-export function buildTimeSummaryDoc(reports: EmployeeTimeReport[], company: ReportCompany, from: string, to: string): jsPDF {
+export function buildTimeSummaryDoc(reports: EmployeeTimeReport[], company: ReportCompany, from: string, to: string, stamp?: ReportStamp): jsPDF {
   const doc = safeDoc({ unit: 'mm', format: 'a4', orientation: 'landscape' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
@@ -283,7 +290,7 @@ export function buildTimeSummaryDoc(reports: EmployeeTimeReport[], company: Repo
   doc.setFontSize(7)
   doc.setTextColor(...SLATE)
   const foot = doc.splitTextToSize(
-    `${FOOTNOTE} Workdays are scheduled working days up to today, excluding holidays and rest days; an employee hired or separated within the period is reported for the days employed (shown under the name). Generated ${generatedAt()}.`,
+    `${FOOTNOTE} Workdays are scheduled working days up to today, excluding holidays and rest days; an employee hired or separated within the period is reported for the days employed (shown under the name). ${generatedLine(stamp)}.`,
     pageW - MARGIN * 2,
   ) as string[]
   doc.text(foot, MARGIN, y)

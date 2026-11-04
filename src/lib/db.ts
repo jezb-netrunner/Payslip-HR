@@ -59,6 +59,8 @@ export interface Entity {
   rounding_scope: 'cash_only' | 'all'
   pay_date_lag_days: number
   payslip_footer_note: string
+  /** VAT REG TIN or NON-VAT REG TIN on reports; null until set */
+  vat_registered: boolean | null
   /** an MWE's extra 30% for a regular holiday worked on the rest day is taxable */
   mwe_rh_restday_premium_taxable: boolean
   /** paid vacation leave days granted a year (5 or more: outside SIL, Labor Code Art. 95(b)) */
@@ -176,7 +178,7 @@ export interface Employee {
   login_code_hint: string | null
   login_code_set_at: string | null
   rounding_balance: number
-  /** Bumped by every finalize/reopen touching the employee (system-maintained). */
+  /** Bumped by every finalize/void touching the employee (system-maintained). */
   payroll_seq: number
   created_at: string
 }
@@ -470,6 +472,25 @@ export interface PayrollRun {
   totals: Record<string, number>
   finalized_at: string | null
   created_at: string
+  /** PR-000001: given when finalized (a reissued payroll gets a new one) */
+  control_no: string | null
+}
+
+/** A voided version without its payslips (they load when downloaded). */
+export type PayrollVoidSummary = Omit<PayrollVoid, 'payslips'>
+
+/** A posted payroll voided for reissue: the run and its payslips as they were posted. */
+export interface PayrollVoid {
+  id: string
+  entity_id: string
+  payroll_run_id: string
+  run_control_no: string | null
+  run_snapshot: PayrollRun
+  payslips: Payslip[]
+  reason: string
+  voided_by: string | null
+  voided_by_email: string | null
+  voided_at: string
 }
 
 export interface PayslipLine {
@@ -492,6 +513,8 @@ export interface Payslip {
   payroll_run_id: string
   employee_id: string
   entity_id: string
+  /** PS-000001: given when the payroll is finalized */
+  control_no?: string | null
   // Run info copied from the run by a DB trigger so employees never need
   // read access to payroll_runs (which carries company-wide totals/notes).
   period_start: string | null

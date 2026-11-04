@@ -447,7 +447,7 @@ export function PayHistoryTab({
             ))}
           </ul>
           <p className="mt-2">
-            Reopen and recompute those payrolls, or pay the difference as a one-time earning (salary differential) in the next payroll.
+            Void and reissue those payrolls, or pay the difference as a one-time earning (salary differential) in the next payroll.
           </p>
         </div>
       )}

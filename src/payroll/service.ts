@@ -748,8 +748,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         (s, p) => s + p.earnings.filter((l) => l.bir === bucket).reduce((a, l) => a + Number(l.amount), 0),
         0,
       )
-    // only what was paid by this payroll's pay date: a payroll reopened and
-    // recomputed ignores what later payrolls paid and withheld
+    // only what was paid by this payroll's pay date: a payroll voided and
+    // reissued ignores what later payrolls paid and withheld
     const taxBefore = empTax.filter((p) => (p.pay_date ?? '') <= run.pay_date)
     // 13th month pay and other benefits already paid in the tax year
     const taxYearBenefits = taxBefore.reduce(
@@ -1090,9 +1090,11 @@ export async function finalizeRun(run: PayrollRun): Promise<void> {
   if (error) throw error
 }
 
-export async function reopenRun(runId: string): Promise<void> {
-  // Atomic DB RPC: flips finalized/paid -> draft and restores loan balances
-  // and rounding carries this run had moved, in one transaction.
-  const { error } = await supabase.rpc('reopen_payroll_run', { p_run: runId })
+export async function voidRun(runId: string, reason: string): Promise<void> {
+  // Atomic DB RPC: archives the posted run and its payslips (payroll_voids,
+  // kept as VOID), turns the run back into a draft without control numbers,
+  // and restores the loan balances and rounding carries it had moved, in one
+  // transaction. Finalizing it again reissues it under new control numbers.
+  const { error } = await supabase.rpc('void_payroll_run', { p_run: runId, p_reason: reason })
   if (error) throw error
 }

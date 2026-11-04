@@ -72,7 +72,10 @@ export default function MyPayslips() {
                 </div>
                 <div>
                   <p className="text-sm font-bold text-ink-900">{runLabel(runFromSlip(s))}</p>
-                  <p className="text-xs text-slate-500">Paid {fmtDate(s.pay_date)}</p>
+                  <p className="text-xs text-slate-500">
+                    Paid {fmtDate(s.pay_date)}
+                    {s.control_no ? ` · ${s.control_no}` : ''}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">

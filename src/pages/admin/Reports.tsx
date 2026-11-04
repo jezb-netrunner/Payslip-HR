@@ -20,6 +20,9 @@ import { round2 } from '../../payroll/types'
 import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
 import Insights from './Insights'
+import { useReportStamp } from '../../lib/useReportStamp'
+import { stampHtml, tinLine, type ReportStamp } from '../../lib/reportStamp'
+import { logActivity } from '../../lib/activity'
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'))
 
@@ -190,6 +193,7 @@ function useAlphalist(entity: Entity, year: number) {
 // ---------- alphalist ----------
 
 function Alphalist({ entity, year }: { entity: Entity; year: number }) {
+  const stamp = useReportStamp(entity)
   const { rows, error } = useAlphalist(entity, year)
   const [viewing, setViewing] = useState<AlphalistRow | null>(null)
   if (error) return <Card><p className="text-sm text-rose-600">{error}</p></Card>
@@ -257,7 +261,7 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
             key={schedule}
             title={schedule === 1 ? 'Schedule 1 — Alphalist of Employees' : 'Schedule 2 — Alphalist of Minimum Wage Earners'}
             actions={
-              <Button variant="secondary" disabled={list.length === 0} onClick={() => downloadCsv(`alphalist_${entity.code}_${year}_schedule${schedule}.csv`, alphalistCsv(rows, schedule))}>
+              <Button variant="secondary" disabled={list.length === 0} onClick={() => downloadCsv(`alphalist_${entity.code}_${year}_schedule${schedule}.csv`, alphalistCsv(rows, schedule), stamp(`Alphalist of employees ${year}, schedule ${schedule}`), { agencyFormat: true })}>
                 <Download className="size-4" /> CSV
               </Button>
             }
@@ -322,13 +326,13 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
       <Card title="BIR Form 2316 — all employees" icon={<FileText />}>
         <p className="text-sm text-amber-700">{FORM_2316_REMINDER}</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => print2316(rows, entity, year)}>
+          <Button variant="secondary" onClick={() => print2316(rows, entity, year, stamp(`BIR 2316 data sheets ${year}`))}>
             <Printer className="size-4" /> Print all 2316 data sheets
           </Button>
           <Button
             variant="secondary"
             disabled={!rows.some((r) => r.substitutedFiling)}
-            onClick={() => downloadCsv(`annexF_substituted_filing_${entity.code}_${year}.csv`, annexFCsv(rows, entity, year))}
+            onClick={() => downloadCsv(`annexF_substituted_filing_${entity.code}_${year}.csv`, annexFCsv(rows, entity, year), stamp(`Annex F list of substituted filing ${year}`), { agencyFormat: true })}
           >
             <Download className="size-4" /> Annex F list (substituted filing)
           </Button>
@@ -378,9 +382,10 @@ const FORM_2316_REMINDER =
   "BIR copies of the 2316 need the employee's signature and are submitted to the BIR as scanned soft copies, with the certified list of employees qualified for substituted filing (Annex F)."
 
 /** Printable 2316 data sheets, one per page. */
-function print2316(rows: AlphalistRow[], entity: Entity, year: number) {
+function print2316(rows: AlphalistRow[], entity: Entity, year: number, stamp: ReportStamp) {
   const w = window.open('', '_blank', 'width=760,height=900')
   if (!w) return
+  void logActivity('print', entity.id, { report: stamp.title, employees: rows.length })
   const esc = (v: string) =>
     v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
   const val = (v: number | string) => (typeof v === 'number' ? v.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : esc(v))
@@ -400,9 +405,9 @@ function print2316(rows: AlphalistRow[], entity: Entity, year: number) {
       <p style="font-size:12px"><b>Employee:</b> ${esc(`${e.last_name}, ${e.first_name} ${e.middle_name ?? ''}`)} · TIN ${esc(e.tin ?? '—')} · Born ${esc(e.birth_date ?? '—')}<br/>
       <b>Address:</b> ${esc(e.address ?? '—')} ${esc(e.zip_code ?? '')} · <b>Period:</b> ${esc(row.from)} to ${esc(row.to)}${row.schedule === 2 ? ` · <b>MWE</b> ${esc(row.region)} SMW ₱${val(row.smwPerDay)}/day` : ''}<br/>
       ${row.issuedOn ? `<b>Date issued:</b> ${esc(row.issuedOn)} (last pay day of a separated employee)<br/>` : ''}
-      <b>Employer:</b> ${esc(entity.name)} · TIN ${esc(fmtTin(entity.tin, entity.tin_branch_code))} · ${esc(entity.registered_address)} ${esc(entity.zip_code)}
+      <b>Employer:</b> ${esc(entity.name)} · ${esc(tinLine(entity))} · ${esc(entity.registered_address)} ${esc(entity.zip_code)}
       ${row.prevEmployerTin ? `<br/><b>Previous employer:</b> ${esc(row.prevEmployerName)} · TIN ${esc(row.prevEmployerTin)}` : ''}</p>
-      ${sections}</section>`
+      ${sections}${stampHtml(stamp, esc)}</section>`
   }
   w.document.write(
     `<html><head><title>BIR 2316 data — ${esc(entity.name)} ${year}</title></head><body style="font-family:sans-serif;padding:24px;color:#0f172a">${rows.map(sheet).join('')}</body></html>`,
@@ -413,6 +418,7 @@ function print2316(rows: AlphalistRow[], entity: Entity, year: number) {
 
 function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; entity: Entity; year: number; onClose: () => void }) {
   const e = row.employee
+  const stamp = useReportStamp(entity)
   return (
     <Modal open onClose={onClose} title={`BIR 2316 figures — ${fullName(e)} (${year})`} wide>
       <div className="space-y-4">
@@ -435,7 +441,7 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
           </div>
         ))}
         <p className="text-xs text-amber-700">{FORM_2316_REMINDER}</p>
-        <Button variant="secondary" onClick={() => print2316([row], entity, year)}>
+        <Button variant="secondary" onClick={() => print2316([row], entity, year, stamp(`BIR 2316 data sheet ${year}, ${fullName(e)}`))}>
           <Printer className="size-4" /> Print
         </Button>
       </div>
@@ -446,6 +452,7 @@ function Form2316Modal({ row, entity, year, onClose }: { row: AlphalistRow; enti
 // ---------- 1604-C summary ----------
 
 function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
+  const stamp = useReportStamp(entity)
   const { rows, slips, error: alphaError } = useAlphalist(entity, year)
   const [remits, setRemits] = useState<TaxRemittance[]>([])
   const [remitError, setRemitError] = useState('')
@@ -518,7 +525,7 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
     out.push(['Total taxable compensation', sum((r) => r.summary.totalTaxablePresent)])
     out.push(['Total tax due', sum((r) => r.summary.taxDue)])
     out.push(['Total tax withheld (present employer, as adjusted)', sum((r) => r.summary.withheldAsAdjusted)])
-    downloadCsv(`1604C_${entity.code}_${year}.csv`, out)
+    downloadCsv(`1604C_${entity.code}_${year}.csv`, out, stamp(`BIR Form 1604-C working summary ${year}`))
   }
 
   const missing = header.filter(([k, v]) => !v && !['Contact number', 'Email address'].includes(k))
@@ -766,6 +773,7 @@ type ContribSlip = Pick<
 >
 
 function Contributions({ entity, year }: { entity: Entity; year: number }) {
+  const stamp = useReportStamp(entity)
   const [month, setMonth] = useState(() => {
     const t = todayManila()
     return t.slice(0, 4) === String(year) ? t.slice(5, 7) : '12'
@@ -835,7 +843,7 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
                 ['Employee No', 'Employee', 'SSS No', 'PhilHealth No', 'Pag-IBIG MID', ...cols],
                 ...rows.map((r) => [r.no, r.name, r.sss, r.ph, r.hdmf, ...r.v]),
                 ['', 'TOTAL', '', '', '', ...tot],
-              ])
+              ], stamp(`Contributions for ${fmtMonth(`${year}-${month}-01`)}`))
             }
           >
             <Download className="size-4" /> CSV

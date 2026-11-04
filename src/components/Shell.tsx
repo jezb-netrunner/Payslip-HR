@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Clock,
   FileBarChart,
+  FileSpreadsheet,
   FileText,
   HandCoins,
   KeyRound,
@@ -37,7 +38,10 @@ import { ROLE_LABELS } from '../lib/labels'
 import { onPendingChanged } from '../lib/pending'
 import { supabase } from '../lib/supabase'
 import ChangePassword from './ChangePassword'
-import { Avatar, Logo, Modal } from './ui'
+import { TwoStepSettings } from './TwoStep'
+import { IDLE_MINUTES, sessionOf, useSessionWatch, type SessionEnd } from '../lib/useSessionWatch'
+import { setSignInNotice } from '../lib/authGuard'
+import { Avatar, Button, Logo, Modal } from './ui'
 
 type Counter = 'corrections' | 'leaves' | 'advances'
 
@@ -77,6 +81,7 @@ const adminGroups: NavGroup[] = [
       { to: '/admin/advances', label: 'Cash Advances', icon: <HandCoins className={ic} />, counter: 'advances' },
       { to: '/admin/consultants', label: 'Consultants', icon: <BriefcaseBusiness className={ic} /> },
       { to: '/admin/reports', label: 'BIR & Reports', icon: <FileBarChart className={ic} /> },
+      { to: '/admin/export', label: 'Data Export', icon: <FileSpreadsheet className={ic} /> },
     ],
   },
   {
@@ -272,8 +277,23 @@ function EntitySwitcher({ variant }: { variant: 'bar' | 'drawer' }) {
   )
 }
 
+const SESSION_END_NOTICE: Record<SessionEnd, string> = {
+  ended: 'Your session ended: this account signed in on another device or browser, or its sign-in was reset. Sign in again.',
+  idle: `You were signed out after ${IDLE_MINUTES} minutes without activity. Sign in again.`,
+  expired: 'Admin sessions last at most 12 hours. Sign in again.',
+}
+const SESSION_END_REASON: Record<SessionEnd, string> = {
+  ended: 'session ended elsewhere',
+  idle: 'signed out after inactivity',
+  expired: 'session reached 12 hours',
+}
+
+function fmtCountdown(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
 export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
-  const { profile, employee, isCompanyAdmin, signOut } = useAuth()
+  const { session, profile, employee, isCompanyAdmin, signOut } = useAuth()
   const { entity } = useEntity()
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -281,6 +301,7 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
   const [quickOpen, setQuickOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [changingPw, setChangingPw] = useState(false)
+  const [twoStepOpen, setTwoStepOpen] = useState(false)
   const [employerName, setEmployerName] = useState('')
   const [counts, setCounts] = useState<{ entityId: string; corrections: number; leaves: number; advances: number } | null>(null)
   const [collapsed, setCollapsed] = useState(readCollapsed)
@@ -349,6 +370,16 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
     await signOut()
     navigate('/')
   }
+
+  const idle = useSessionWatch({
+    enabled: true,
+    admin: mode === 'admin',
+    session: sessionOf(session?.access_token),
+    onEnded: (why: SessionEnd) => {
+      setSignInNotice(SESSION_END_NOTICE[why])
+      void signOut(SESSION_END_REASON[why]).then(() => navigate('/'))
+    },
+  })
 
   const pills = (
     <>
@@ -467,6 +498,18 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
                       className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium hover:bg-slate-100"
                     >
                       <KeyRound className="size-4 text-slate-400" /> Change password
+                    </button>
+                  )}
+                  {mode === 'admin' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccountOpen(false)
+                        setTwoStepOpen(true)
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium hover:bg-slate-100"
+                    >
+                      <ShieldCheck className="size-4 text-slate-400" /> Two-step sign-in
                     </button>
                   )}
                   <button
@@ -688,6 +731,25 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
 
       <Modal open={changingPw} onClose={() => setChangingPw(false)} title="Change password">
         <ChangePassword onDone={() => setChangingPw(false)} />
+      </Modal>
+      <Modal open={twoStepOpen} onClose={() => setTwoStepOpen(false)} title="Two-step sign-in">
+        <TwoStepSettings />
+      </Modal>
+      <Modal open={idle.secondsLeft !== null} onClose={idle.stay} title="Still there?">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600" role="timer" aria-live="polite">
+            For your security you&apos;ll be signed out after {IDLE_MINUTES} minutes without activity — in{' '}
+            <span className="font-semibold tabular-nums text-ink-900">{fmtCountdown(idle.secondsLeft ?? 0)}</span>.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={doSignOut}>
+              Sign out
+            </Button>
+            <Button className="flex-1" onClick={idle.stay}>
+              Stay signed in
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

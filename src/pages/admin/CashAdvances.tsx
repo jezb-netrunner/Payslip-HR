@@ -46,7 +46,9 @@ import { notifyPendingChanged } from '../../lib/pending'
 import { useQuickAction } from '../../lib/quickAction'
 import { supabase } from '../../lib/supabase'
 import { round2 } from '../../payroll/types'
-import { generateAdvanceForm } from '../../pdf/advanceForm'
+import { generateAdvanceForm, type AdvanceFormData } from '../../pdf/advanceForm'
+import { logActivity } from '../../lib/activity'
+import { useReportStamp } from '../../lib/useReportStamp'
 
 type Person = Pick<Employee, 'id' | 'first_name' | 'middle_name' | 'last_name' | 'employee_no' | 'position' | 'separation_date' | 'pay_frequency'>
 type Advance = RecurringDeduction & { employees: Person }
@@ -63,6 +65,7 @@ export default function CashAdvances() {
 
 function Advances({ entity }: { entity: Entity }) {
   const toast = useToast()
+  const stamp = useReportStamp(entity)
   const [params, setParams] = useSearchParams()
   const [tab, setTab] = useState(() => (params.get('tab') === 'requests' ? 'requests' : params.get('tab') === 'paid' ? 'paid' : 'outstanding'))
   const [employeeFilter, setEmployeeFilter] = useState(() => params.get('employee'))
@@ -177,7 +180,7 @@ function Advances({ entity }: { entity: Entity }) {
       ADVANCE_STATUS_LABELS[advanceStatus(a, today)],
       a.authorized_on ?? '',
     ])
-    downloadCsv(`cash_advances_${entity.code}_${today}.csv`, [header, ...rows])
+    downloadCsv(`cash_advances_${entity.code}_${today}.csv`, [header, ...rows], stamp('Cash advances and loans'))
   }
 
   if (loading) return <Spinner />
@@ -347,6 +350,17 @@ function Advances({ entity }: { entity: Entity }) {
   )
 }
 
+/** The employer block of the cash advance agreement. */
+function advanceEmployer(entity: Entity): AdvanceFormData['employer'] {
+  return {
+    name: entity.name,
+    address: entity.registered_address,
+    tin: entity.tin,
+    tin_branch_code: entity.tin_branch_code,
+    vat_registered: entity.vat_registered,
+  }
+}
+
 function AdvanceRow({ advance: a, today, onOpen }: { advance: Advance; today: string; onOpen: () => void }) {
   const total = Number(a.total_amount)
   const balance = Number(a.balance)
@@ -413,6 +427,7 @@ function RecordAdvanceModal({
   onSaved: () => void
 }) {
   const toast = useToast()
+  const stamp = useReportStamp(entity)
   const today = todayManila()
   const [f, setF] = useState({
     employeeId: request?.employee_id ?? (employees.some((e) => e.id === employeeId) ? employeeId! : ''),
@@ -454,7 +469,7 @@ function RecordAdvanceModal({
       return
     }
     generateAdvanceForm({
-      employer: { name: entity.name, address: entity.registered_address, tin: entity.tin },
+      employer: advanceEmployer(entity),
       employee: { name: fullName(person), employeeNo: person.employee_no, position: person.position },
       amount,
       perPayroll: per,
@@ -462,7 +477,9 @@ function RecordAdvanceModal({
       releasedOn: f.releasedOn,
       firstDeduction: f.firstDeduction,
       releaseMethod: PAYMENT_METHOD_LABELS[f.method].toLowerCase(),
+      stamp: stamp('Cash advance agreement'),
     })
+    void logActivity('print', entity.id, { report: 'Cash advance agreement', employee_no: person.employee_no })
   }
 
   async function save() {
@@ -632,6 +649,7 @@ function AdvanceDetailModal({
   onChanged: () => Promise<void>
 }) {
   const toast = useToast()
+  const stamp = useReportStamp(entity)
   const today = todayManila()
   const [slips, setSlips] = useState<LedgerSlip[] | null>(null)
   const [repayments, setRepayments] = useState<AdvanceRepayment[]>([])
@@ -776,9 +794,9 @@ function AdvanceDetailModal({
           )}
           <Button
             variant="secondary"
-            onClick={() =>
+            onClick={() => {
               generateAdvanceForm({
-                employer: { name: entity.name, address: entity.registered_address, tin: entity.tin },
+                employer: advanceEmployer(entity),
                 employee: { name: fullName(a.employees), employeeNo: a.employees.employee_no, position: a.employees.position },
                 amount: Number(a.total_amount),
                 perPayroll: Number(a.amount_per_period),
@@ -786,8 +804,10 @@ function AdvanceDetailModal({
                 releasedOn: a.released_on ?? today,
                 firstDeduction: a.start_date ?? a.released_on ?? today,
                 releaseMethod: a.release_method ? PAYMENT_METHOD_LABELS[a.release_method].toLowerCase() : 'cash',
+                stamp: stamp('Cash advance agreement'),
               })
-            }
+              void logActivity('print', entity.id, { report: 'Cash advance agreement', employee_no: a.employees.employee_no })
+            }}
           >
             <Printer className="size-4" /> Agreement
           </Button>

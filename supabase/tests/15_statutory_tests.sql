@@ -87,10 +87,10 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', :owner, true);
 insert into payroll_runs (id, entity_id, run_type, pay_frequency, period_start, period_end, pay_date, period_month, period_index, periods_in_month)
 values ('3000000f-0000-0000-0000-000000000005', '10000000-0000-0000-0000-0000000000f5', 'regular', 'weekly', '2026-01-05', '2026-01-11', '2026-01-16', '2026-01-01', 2, 4);
-insert into payslips (payroll_run_id, employee_id, gross_pay, net_pay, total_deductions)
-values ('3000000f-0000-0000-0000-000000000005', '20000000-0000-0000-0000-0000000000f5', 4530, 4530, 0);
+insert into payslips (payroll_run_id, employee_id, gross_pay, net_pay, total_deductions, earnings)
+values ('3000000f-0000-0000-0000-000000000005', '20000000-0000-0000-0000-0000000000f5', 4530, 4530, 0, '[{"code": "basic", "label": "Basic Pay", "amount": 4530}]');
 update payslips p set employee_payroll_seq = e.payroll_seq from employees e where e.id = p.employee_id and p.payroll_run_id = '3000000f-0000-0000-0000-000000000005';
-update payroll_runs set totals = '{"employees":1}' where id = '3000000f-0000-0000-0000-000000000005';
+update payroll_runs set totals = '{"employees": 1, "gross": 4530, "net": 4530, "withholding_tax": 0}' where id = '3000000f-0000-0000-0000-000000000005';
 select public.finalize_payroll_run('3000000f-0000-0000-0000-000000000005');
 commit;
 select pg_temp.expect_error($$update statutory_versions set data = jsonb_set(data, '{rate}', '0.04') where kind = 'philhealth'$$, '%frozen%');
@@ -111,7 +111,7 @@ rollback;
 begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :owner, true);
-select public.reopen_payroll_run('3000000f-0000-0000-0000-000000000005');
+select public.void_payroll_run('3000000f-0000-0000-0000-000000000005', 'Test: corrected and reissued');
 commit;
 
 \echo 'PASSED 15'
