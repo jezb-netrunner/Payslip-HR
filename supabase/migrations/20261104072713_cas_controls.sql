@@ -4,8 +4,8 @@
 -- instead of reopening (the posted version stays on record, marked VOID),
 -- the client's VAT registration for report headings, an audit trail no app
 -- user can alter that also records sign-ins and report runs, and the
--- sign-in guard of admin accounts (lockout, one active session, password
--- age).
+-- sign-in guard of admin accounts (lockout, one active session, two-step
+-- sign-in and session time limits).
 
 -- ---------- the client's VAT registration (report headings) ----------
 -- null until set: reports then print the TIN without VAT REG or NON-VAT REG
@@ -505,8 +505,8 @@ grant execute on function public.log_activity(text, uuid, jsonb) to authenticate
 
 -- ---------- the sign-in guard of admin accounts ----------
 -- Failed sign-ins (a lockout after five), the last sign-in and when the
--- password last changed (a temporary password or one older than 30 days
--- must be changed). Kept by the sign-in edge function (service role only).
+-- password last changed (a temporary one, set by another admin, must be
+-- changed). Kept by the sign-in edge function (service role only).
 create table public.auth_guard (
   email text primary key constraint auth_guard_email_check check (email = lower(btrim(email)) and length(email) between 3 and 320),
   failed_attempts int not null default 0 constraint auth_guard_failed_attempts_check check (failed_attempts >= 0),

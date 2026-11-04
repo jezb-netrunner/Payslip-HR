@@ -479,8 +479,8 @@ stuck loading, the reason a reset link was refused, the VOID note overflowing,
 voided payslips reloaded on every page load. Edge tests now in the repo
 (`npm run test:edge`, 12 scenarios).
 
-**Did:** migration `20261029000100_cas_controls.sql` (placeholder version,
-**not live**): control numbers PR-/PS-000001 per client assigned at
+**Did:** migration `20261029000100_cas_controls.sql` (placeholder version;
+live 2026-11-04 as `20261104072713_cas_controls`): control numbers PR-/PS-000001 per client assigned at
 finalize (`document_counters`), the finalize cross-check
 (`payroll_run_out_of_balance`), void and reissue (`void_payroll_run`,
 `payroll_voids`) replacing reopen, `entities.vat_registered`, audit_logs
@@ -525,24 +525,32 @@ skewed clock, employee return after 31 min) that found two bugs (lessons
 below). Not done: employee sessions have no server-side timeout (Free plan
 has no inactivity setting; employees only see their own records).
 
+**Live apply (owner: "go ahead with the go-live; you set the secret"):** the
+MCP secret tool was paused by Supabase, so the owner set
+`ADMIN_PASSWORD_PEPPER` in the dashboard. Then `auth-guard` v1, `admin-users`
+v7, the migration (as `20261104072713`, after removing a semicolon from a
+comment and two stale comments), the schema hash check against the replica
+(lesson below), advisors (nothing new beyond the intentional list), PR #9
+merged.
+
 ---
 
 ## Current deployed state (update when it changes)
 
-**PENDING (2026-10-29, extended 2026-11-04, not live):**
-`20261029000100_cas_controls.sql`, the new `auth-guard` edge function (deploy
-with **verify_jwt off**) and `admin-users` v6 must go live **together with
-the front end**: after the migration only the session the guard admitted, at
-aal2 (two-step verified) and within the timeouts, has admin access, so the
-old front end can't sign admins in, and the new one needs the migration.
-Order: set the edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random
-characters, never rotated: admin passwords are kept keyed with it) → check
-Auth → Multi-Factor has TOTP on (the default) → deploy both functions →
-apply the migration (MCP: no DROP, every UPDATE has a WHERE) → run the
-advisors → merge to `main`. Every admin then signs in once more and sets up
-an authenticator app; a password changes only if under 12 characters or
-breached (others are re-keyed silently). The functions call
-`api.pwnedpasswords.com` (fail open if unreachable).
+**2026-11-04: the CAS controls, two-step sign-in and timeouts are live**
+(owner's approval): edge-function secret `ADMIN_PASSWORD_PEPPER` (set by the
+owner in the dashboard; 32+ random characters, **never rotate it**: admin
+passwords are kept keyed with it), `auth-guard` **v1** (verify_jwt **off**),
+`admin-users` **v7** (verify_jwt on; deployed source = repo copy), migration
+`20261104072713_cas_controls` (repo file renamed to it), front end through PR
+#9. Only the session the guard admitted, at aal2 and within the 12 h / 32 min
+limits, has admin access, so every admin signed out at the apply: each signs
+in once more and sets up an authenticator app; a password changes only if
+under 12 characters or breached (others are re-keyed silently). The
+functions call `api.pwnedpasswords.com` (fail open). After the apply, every
+public function body, policy, trigger, column, RLS flag and the new grants
+were hashed on live and on the local replica: identical, except CRLF line
+endings in 16 functions of older migrations (equal once normalized).
 
 **2026-10-28: the four pay-diversity migrations are live** (owner's
 approval), through MCP `apply_migration` as `20261028113903
@@ -628,19 +636,25 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
   versions, 9 global leave templates, 21 national 2026 holidays; RLS on
   every table. Owner's test data since 2026-10-23: 1 client, 1 employee
   (hired 2026-10-23, has a login code), 1 finalized semi-monthly run.
-- Edge function **`admin-users` v5** live (verify_jwt on), deployed
+- (superseded 2026-11-04 by v7, above) Edge function **`admin-users` v5** live (verify_jwt on), deployed
   2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
   login codes refused, incl. all-letter codes and the employee's names).
-- Security advisors after the last DDL (2026-10-23, cash advances): 10 intentional WARNs (RLS helpers
-  `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
-  `current_employee_id` / `current_employee_entity_id` / `run_is_finalized`
-  and the RPCs `finalize_payroll_run` / `reopen_payroll_run` /
-  `review_time_correction` / `approve_advance_request` are executable by
-  `authenticated` by design; each checks the caller's client) and
-  "Leaked password protection disabled" (Auth dashboard setting, owner's
-  call). Performance advisors: INFO only for unindexed FKs / unused indexes
-  (no data yet) and WARN "multiple permissive policies" (admin + own-row
-  policies, by design).
+- Security advisors after the last DDL (2026-11-04, CAS controls): 17
+  intentional WARNs "SECURITY DEFINER executable by authenticated" (RLS
+  helpers `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
+  `can_manage_output_report` / `current_employee_id` /
+  `current_employee_entity_id` / `run_is_finalized`; RPCs
+  `finalize_payroll_run` / `void_payroll_run` / `reopen_payroll_run` (always
+  refuses) / `payroll_run_out_of_balance` / `review_time_correction` /
+  `approve_advance_request` / `log_activity`; the caller's own session:
+  `my_session_state` / `my_session_active` / `touch_admin_session`; each
+  checks the caller), INFO "RLS enabled, no policy" on `auth_guard`,
+  `admin_session_activity` and `document_counters` (service role and
+  definer functions only), and "Leaked password protection disabled" (a Pro
+  setting; auth-guard screens admin passwords itself, employees have login
+  codes). Performance advisors: INFO only for unindexed FKs / unused
+  indexes (little data) and WARN "multiple permissive policies" (admin +
+  own-row policies, by design).
 - Private storage buckets `punch-selfies` and `employee-photos` exist; after
   the migration nothing uses `punch-selfies` (empty; safe to delete).
 - **The owner's account exists** (created 2026-08-24, confirmed; role
@@ -1776,3 +1790,15 @@ walkthrough (`page.clock.install({ time })`) caught it.
 Why it mattered: invisible in production builds but a real race; and two
 factors added in one minute would also collide, so friendly names now carry
 seconds.
+
+### Verify a live apply by hashing the schema against the replica (confirmed approach, 2026-11-04)
+
+> This container can't reach `*.supabase.co`, and an MCP apply means re-typing a large file, so after the apply hash on both live (MCP `execute_sql`) and the local replica (`phr_test`): every public function (name, arguments, `md5(prosrc)`, security definer, volatility, config, return type), `pg_policies`, `pg_get_triggerdef`, `information_schema.columns`, RLS flags and the grants that matter. Equal aggregates prove the apply; on a mismatch, send the replica's per-object hashes to live as a `values` list and let live name the differences.
+
+Why it mattered: it proved the 56 KB migration went in exactly as tested,
+and found that 16 functions from older migrations carry CRLF line endings on
+live (equal once `replace(prosrc, E'\r\n', E'\n')`), so normalize before
+comparing. Edge-function secrets: Supabase can pause the MCP secret tool;
+the owner then sets the value in the dashboard (Edge Functions → Secrets),
+and the functions refuse to set or check admin passwords without it.
+
