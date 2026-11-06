@@ -29,6 +29,10 @@ export function priorFromTaxYear(t: EmployeeTaxYear | undefined): PriorEmployerI
   }
 }
 
+/** Longer than any payroll's wait for its first payday: pay before it is missing, not late. */
+const MISSING_PAY_DAYS = 45
+const daysBetween = (from: string, to: string) => (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+
 export interface AlphalistRow {
   schedule: 1 | 2
   employee: Employee
@@ -124,6 +128,13 @@ export function buildAlphalist(params: {
     if (ty?.has_previous_employer && !ty.prev_employer_tin) issues.push('Previous employer TIN missing')
     if (ty?.has_previous_employer && (!ty.prev_employment_from || !ty.prev_employment_to)) {
       issues.push('Previous employment period missing')
+    }
+    // employed well before the first pay the app holds, and no opening
+    // balances: this employer's earlier pay is missing from the 2316
+    const firstPay = own.map((f) => f.payDate ?? '').filter(Boolean).sort()[0]
+    const employedFrom = e.hire_date > jan1 ? e.hire_date : jan1
+    if (!opening && !separatedBefore && firstPay && daysBetween(employedFrom, firstPay) > MISSING_PAY_DAYS) {
+      issues.push(`No pay in the app before ${firstPay} (employed from ${employedFrom}): enter opening balances if this employer paid earlier in ${year}`)
     }
     const twice = openingOverlaps(opening, own.map((f) => f.payDate))
     if (opening && twice.length > 0) {

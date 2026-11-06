@@ -574,6 +574,42 @@ one with opening balances — same separation tax, 13th month, cumulative
 average and alphalist), SQL suite 22. Card checked in a scratch Vite
 harness with Playwright at 1280 and 390 px (lesson *Browser walkthroughs*).
 
+### 2026-11-06 — Whole-app walkthrough (owner: "test the features for bugs, missing features, gaps")
+
+**Did:** the real stack was blocked (running the downloaded GoTrue binary
+was refused by the session's permission policy, see lesson), so three
+harnesses instead: (1) the DEMO workflow on a Postgres replay as the company
+admin — approvals through `review_time_correction` /
+`approve_advance_request`, runs created, payslips written and finalized /
+voided through the real RPCs, guards probed (10 runs, PR/PS numbers in
+order, 1–15 Oct net = the seed README); (2) the same workflow through
+`computeRun` on a JSON snapshot; (3) the whole React app under Vite with
+`lib/supabase` aliased to an in-memory client loaded from the walked-through
+DB, crawled by Playwright (every route and tab, owner / entity admin /
+employee, 1280 and 390 px) and driven through the main flows (adjustment →
+recompute → finalize → register CSV / payslips PDF → void and reissue → new
+run → compute; Excel backup; employee payslip PDF). Scripts in the
+session's scratchpad, not committed.
+
+**Found and fixed:** the cumulative average divided the pay the app holds
+by every period since January (a go-live client's ₱60,000 earner with a
+₱40,000 commission: ₱0 withheld on ₱68,275) — periods now start at the
+first payroll in the app unless opening balances (or a previous employer's
+2316) cover the months before, and year-level payrolls, the 13th month and
+the alphalist say when this employer's earlier pay is missing; a first
+payroll in the app that starts mid-month deducts the whole month's
+PhilHealth/Pag-IBIG (warned); the alphalist KPI said "all reconciled" while
+5 employees had year-end gaps; the dashboard's "last payroll" cost was a
+one-person final pay; long consultant badges ran off phone screens; a
+13th month finalized ahead of its pay date read "paid Dec 10" on 6 Nov.
+Tests 433 → 440 (`flows/goLive.test.ts`, alphalist case), 4 shown failing
+on the old code. Seed README: Liza's first week ₱4,820.00 → ₱4,818.20.
+
+**Gaps reported, not built:** no bulk import (employees, opening balances,
+time in/out); no bank file or SSS R3 / PhilHealth / Pag-IBIG upload formats
+(one generic CSV); no BIR DAT; payslips not emailed; employee sessions have
+no server-side timeout; mid-month go-live contributions only warned.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -1116,6 +1152,17 @@ inside a transaction. Differences from Supabase (PG17, real GoTrue/storage)
 remain, so the security advisors still run after the live apply. Why it
 mattered: RLS mistakes are silent — a policy that is too open never errors.
 
+### The year to date is only what the app holds: count periods from there (correction, 2026-11-06)
+
+> The cumulative average divides the year's taxable pay by its payroll periods. Without opening balances the app knows pay only from the employee's first payroll in it, so periods count from that payroll (plus a previous employer's span); with opening balances, from 1 January or the hire date.
+
+Why it mattered: counting from January (or a July hire date) while holding
+only October's pay averaged it down to the zero bracket: the DEMO's Liza
+(₱4,820 a week) and a ₱60,000 earner with a commission were withheld ₱0.
+The fix cannot make annualization right without the earlier pay: December
+then refunds what October to November withheld, so every year-level payroll,
+the 13th month and the alphalist warn until opening balances are entered.
+
 ### Opening balances are this employer's pay: one more payslip of the year (design decision, 2026-11-06)
 
 > `employee_opening_balances` (a new table, not columns on `employee_tax_years`) holds the old payroll's January-to-go-live totals by BIR 2316 column. `openingFact()` turns a row into one `AnnualPayslipFact` dated `paid_through`, so `summarizeYear` (annualization, the ₱90,000 cap, MWE exemptions, contribution carve, Jan–Nov vs December) treats it exactly like the payslips it replaces.
@@ -1252,6 +1299,18 @@ Postgres again as its own user (`pg_ctl -D … -o '-p 54329 -k /tmp' start`).
 Why it mattered: the walkthrough found what unit tests and SQL tests
 couldn't — wrong-date saves, mislabeled controls, phone overflow, a
 double-click that duplicated loans.
+
+When the real stack can't run (2026-11-06: the session refused to execute
+the downloaded GoTrue binary — "code from external"; don't work around it,
+ask the owner), the whole app still runs under Vite with `lib/supabase`
+aliased to an in-memory client (builder with embeds, aliases, counts,
+upsert; auth faking a signed-in owner / entity admin / employee at
+aal2/aal1; the RPCs the pages call), loaded from a JSON snapshot of the
+Postgres replay after the workflow ran there. It has no RLS or triggers,
+so an employee sees drafts and adjustments don't stale a draft: check those
+in SQL. Match real column names in faked RPC writes (`payroll_voids`
+`run_snapshot`), and return `{data, error}` once (not nested) from insert/
+update `.select()` — both cost a false alarm.
 
 For one new component, a scratch Vite harness is enough (2026-11-06, ~10
 minutes): root in the scratchpad with `node_modules` symlinked from the

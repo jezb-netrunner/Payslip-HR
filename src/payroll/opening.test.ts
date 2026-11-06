@@ -156,6 +156,22 @@ describe('alphalist with opening balances', () => {
     expect(left.to).toBe('2026-06-30')
   })
 
+  it('flags an employee whose pay before the app is missing', () => {
+    const rows = buildAlphalist({
+      year: 2026,
+      entity,
+      employees: [emp('golive'), emp('hired', { hire_date: '2026-10-01' })],
+      payslips: [10, 11].flatMap((m) => [{ employee_id: 'golive', fact: monthFact(m) }, { employee_id: 'hired', fact: monthFact(m) }]),
+      taxYears: [],
+      annual: BIR_ANNUAL_2023,
+    })
+    expect(rows.find((r) => r.employee.id === 'golive')!.issues).toEqual([
+      'No pay in the app before 2026-10-28 (employed from 2026-01-01): enter opening balances if this employer paid earlier in 2026',
+    ])
+    // hired in October, first paid on the 28th: nothing is missing
+    expect(rows.find((r) => r.employee.id === 'hired')!.issues).toEqual([])
+  })
+
   it('flags payslips the opening balances already cover', () => {
     const rows = buildAlphalist({
       year: 2026,

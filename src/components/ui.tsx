@@ -323,17 +323,20 @@ export function Badge({
   tone = 'slate',
   dot = true,
   icon,
+  wrap = false,
   children,
 }: {
   tone?: string
   dot?: boolean
   icon?: ReactNode
+  /** Long text: wraps inside its container instead of running off a phone's screen. */
+  wrap?: boolean
   children: ReactNode
 }) {
   const t = badgeTones[tone] ?? badgeTones.slate
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${t.chip}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-semibold ${wrap ? 'max-w-full rounded-xl' : 'whitespace-nowrap rounded-full'} ${t.chip}`}
     >
       {icon ? <span className="[&>svg]:size-3.5">{icon}</span> : dot && <span className={`size-1.5 shrink-0 rounded-full ${t.dot}`} />}
       {children}

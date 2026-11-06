@@ -224,8 +224,14 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
         <StatCard
           label="Withheld as adjusted"
           value={money(sum((r) => r.summary.withheldAsAdjusted + r.summary.prevTaxWithheld))}
-          sub={withIssues.length ? `${plural(withIssues.length, 'employee')} need${withIssues.length === 1 ? 's' : ''} attention` : 'all reconciled'}
-          tone={withIssues.length ? 'warn' : 'good'}
+          sub={
+            withIssues.length
+              ? `${plural(withIssues.length, 'employee')} need${withIssues.length === 1 ? 's' : ''} attention`
+              : gaps.length
+                ? `${plural(gaps.length, 'employee')} to settle by annualization`
+                : 'all reconciled'
+          }
+          tone={withIssues.length ? 'warn' : gaps.length ? undefined : 'good'}
         />
       </StatGroup>
 

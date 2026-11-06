@@ -205,9 +205,15 @@ describe('opening balances: going live mid-year', () => {
     // December's annualization withholds what the year still owes...
     expect(slips.b[2].computation_trace.tax.method).toBe('annualized')
     expect(slips.b[2].withholding_tax).toBeGreaterThan(0)
-    // ...where October onward alone looks like a ₱240,000 year: nothing is
-    // withheld at all, and November's bonus is never taxed
-    expect(slips.c.map((p) => p.withholding_tax)).toEqual([0, 0, 0])
+    // ...where October onward alone looks like a ₱240,000 year: the
+    // cumulative average counts October's periods only (no dilution), but
+    // December's annualization refunds all of it, and each payroll says the
+    // months before the app are missing
+    expect(slips.c[0].computation_trace.tax).toMatchObject({ method: 'cumulative_average', periods: 1 })
+    expect(slips.c[0].withholding_tax).toBeGreaterThan(20000)
+    expect(slips.c[2].withholding_tax).toBe(-round2(slips.c[0].withholding_tax + slips.c[1].withholding_tax))
+    for (const p of slips.c) expect(p.computation_trace.warnings.some((w: string) => w.includes('no opening balances are entered'))).toBe(true)
+    for (const p of slips.b) expect(p.computation_trace.warnings.some((w: string) => w.includes('no opening balances'))).toBe(false)
     expect(slips.c[1].taxable_income).toBeLessThan(slips.b[1].taxable_income)
     const [rowA, rowB] = [await alphalistRow(all, a), await alphalistRow(live, b)]
     expect(rowA.summary.taxable13thOtherBenefits).toBe(10000)

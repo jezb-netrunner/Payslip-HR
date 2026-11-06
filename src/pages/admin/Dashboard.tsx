@@ -607,7 +607,10 @@ function derive(data: DashData, entity: Entity, today: string) {
   }
 
   // ---- obligations for the latest finalized payroll month ----
-  const lastRun = data.runs.find((r) => r.status !== 'draft' && r.run_type !== 'thirteenth_month') ?? null
+  // the latest regular payroll (a one-person final pay or special run is not
+  // the client's usual payroll cost), else the latest of any other kind
+  const posted = data.runs.filter((r) => r.status !== 'draft' && r.run_type !== 'thirteenth_month')
+  const lastRun = posted.find((r) => r.run_type === 'regular') ?? posted[0] ?? null
   const lastMonthKey = data.slips.map((s) => s.period_month).filter(Boolean).sort().at(-1)?.slice(0, 7)
   // withholding tax goes on the 1601-C of the month the pay was RELEASED
   // (pay date); contributions belong to the payroll month

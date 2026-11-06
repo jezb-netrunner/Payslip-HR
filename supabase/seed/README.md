@@ -62,7 +62,7 @@ Liza's correction changes her 19–25 Oct week):
 |---|---|
 | 1–15 Oct | Maria 21,707.28 · Jose 13,360.28 · Ana 16,024.19 · Pedro 9,956.56 · Carmela 17,435.90 · Daniel 9,957.34 · Grace 12,011.97 · Mark 4,256.32 |
 | 16–31 Oct | Maria 19,433.14 · Jose 15,183.38 · Ana 16,265.71 · Pedro 10,623.47 · Carmela 17,435.90 · Daniel 9,808.16 · Grace 11,817.29 · Mark 15,524.86 |
-| Weekly, Liza | 4,820.00 · 4,715.42 · 4,471.67 · 3,719.57 · 4,587.89 |
+| Weekly, Liza | 4,818.20 · 4,715.42 · 4,471.67 · 3,719.57 · 4,587.89 |
 | Weekly, Ramon | 2,303.72 · 3,256.59 · 3,333.43 · 4,071.81 · 4,098.78 |
 
 Payroll history starts in October, so without opening balances any
