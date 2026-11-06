@@ -655,6 +655,17 @@ Deferred: wrapping `current_employee_id()` as `(select …)` in the employee
 policies (about 4× per-row cost for employees, small at this scale; ALTER
 POLICY, no DROP needed).
 
+**Final review before the merge** (owner: "one final bug check, create the PR,
+merge it, then apply the migration") of the review-fix commit found, and
+fixed with tests that fail on the old code (469 → 472): `periods_paid`
+dropped a previous employer's periods (₱21,581 withheld where ₱0 was right);
+go-live final pays lost the missing-pay warning (only someone who left in an
+earlier year is quiet now); a false gap warning for staff who left before
+go-live; a deactivated employee signed out as "ended" instead of seeing
+Access disabled, and a failed sign-out left a spinner; one bad byte sent a
+UTF-8 import to Windows-1252 (now stays UTF-8, row flagged). Lesson again:
+the fixes needed their own review.
+
 ---
 
 ## Current deployed state (update when it changes)

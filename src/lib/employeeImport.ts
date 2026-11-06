@@ -67,12 +67,17 @@ export function templateRows(): string[][] {
 /**
  * A CSV file's text. Excel's "CSV (Comma delimited)" is Windows-1252, not
  * UTF-8: a name like Peña would come through garbled. Valid UTF-8 (with or
- * without a BOM) is read as UTF-8, anything else as Windows-1252.
+ * without a BOM) is read as UTF-8; a UTF-8 file with a stray bad byte stays
+ * UTF-8 (that character shows as \uFFFD and its row is flagged); anything
+ * else is read as Windows-1252.
  */
 export function decodeCsv(bytes: ArrayBuffer | Uint8Array): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch {
+    const lenient = new TextDecoder('utf-8').decode(bytes)
+    // real multi-byte characters decoded: it is UTF-8 with a few bad bytes
+    if (/[^\x00-\x7F\uFFFD]/.test(lenient)) return lenient
     return new TextDecoder('windows-1252').decode(bytes)
   }
 }
@@ -234,6 +239,9 @@ export function checkImport(
     const errors: string[] = []
     const warnings: string[] = []
     const get = (k: string) => col(cells, k)
+    if (cells.some((c) => c.includes('\uFFFD'))) {
+      warnings.push('has characters that could not be read (\uFFFD): save the file as "CSV UTF-8" and check the names')
+    }
     const employeeNo = get('employee_no')
     const first = get('first_name')
     const last = get('last_name')

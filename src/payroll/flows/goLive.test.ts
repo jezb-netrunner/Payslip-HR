@@ -188,6 +188,44 @@ describe('review of 2026-11-06: periods, opening balances, warnings', () => {
     expect(warned(slip, 'no opening balances are entered')).toBe(false)
   })
 
+  it('with a previous employer, the old payroll\'s period count adds to the previous employer\'s', async () => {
+    const ent = addEntity()
+    const e = addEmployee(ent, { monthly_rate: 30000, hire_date: '2026-04-01' })
+    addAttendance(e, '2026-10-01', '2026-10-15')
+    db.t.employee_tax_years.push({
+      id: newId(), employee_id: e.id, entity_id: ent.id, year: 2026, has_previous_employer: true,
+      prev_employment_from: '2026-01-01', prev_employment_to: '2026-03-31',
+      prev_taxable_basic: 330000, prev_taxable_13th_other_benefits: 0, prev_taxable_other: 0, prev_tax_withheld: 50000,
+      prev_mwe_exempt: 0, prev_13th_other_benefits_exempt: 0, prev_de_minimis: 0, prev_contributions: 0, prev_other_non_taxable: 0,
+    })
+    opening(ent, e, { basic_salary: 180000, contributions: 12000, tax_withheld: 6000, thirteenth_basis: 180000, periods_paid: 12 })
+    const r = await run(ent, { period_start: '2026-10-01', period_end: '2026-10-15', pay_date: '2026-10-20' })
+    // January–March at the previous employer (6) + April–September here (12) + 1–15 October
+    expect(slipsOf(r.id, e.id)[0].computation_trace.tax).toMatchObject({ method: 'cumulative_average', periods: 19 })
+  })
+
+  it('a final pay after go-live for someone who left before it still says the earlier pay is missing', async () => {
+    const ent = addEntity()
+    const e = addEmployee(ent, { monthly_rate: 30000, hire_date: '2024-01-01', separation_date: '2026-09-20', separation_reason: 'resignation' })
+    const fp = addRun(ent, { run_type: 'final_pay', period_start: '2026-10-01', period_end: '2026-10-15', pay_date: '2026-10-20', employee_ids: [e.id] })
+    db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: fp.id, employee_id: e.id, entity_id: ent.id, kind: 'earning', label: 'Unused SIL', amount: 5000, category: 'other_taxable' })
+    await computeRun(fp as never, ent as never)
+    const slip = slipsOf(fp.id, e.id)[0]
+    expect(slip.computation_trace.tax.method).toBe('annualized')
+    expect(warned(slip, 'no opening balances are entered')).toBe(true)
+    // with the opening balances through the last pay: no gap to report
+    resetDb()
+    const ent2 = addEntity()
+    const e2 = addEmployee(ent2, { monthly_rate: 30000, hire_date: '2024-01-01', separation_date: '2026-08-31', separation_reason: 'resignation' })
+    opening(ent2, e2, { paid_through: '2026-08-31', basic_salary: 240000, contributions: 16000, tax_withheld: 8000, thirteenth_basis: 240000 })
+    const fp2 = addRun(ent2, { run_type: 'final_pay', period_start: '2026-10-01', period_end: '2026-10-15', pay_date: '2026-10-20', employee_ids: [e2.id] })
+    db.t.payroll_adjustments.push({ id: newId(), payroll_run_id: fp2.id, employee_id: e2.id, entity_id: ent2.id, kind: 'earning', label: 'Unused SIL', amount: 5000, category: 'other_taxable' })
+    await computeRun(fp2 as never, ent2 as never)
+    const slip2 = slipsOf(fp2.id, e2.id)[0]
+    expect(warned(slip2, 'pay released in between is in neither')).toBe(false)
+    expect(warned(slip2, 'no opening balances')).toBe(false)
+  })
+
   it('a final pay released next year for someone who left this year raises no go-live warnings', async () => {
     const ent = addEntity()
     const e = addEmployee(ent, { monthly_rate: 30000, hire_date: '2024-01-01', separation_date: '2026-12-20', separation_reason: 'resignation' })

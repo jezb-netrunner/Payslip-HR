@@ -36,6 +36,15 @@ describe('CSV parsing', () => {
     expect(decodeCsv(new TextEncoder().encode('\ufeffPeña,Núñez'))).toBe('Peña,Núñez')
     expect(parseCsv(decodeCsv(new TextEncoder().encode('\ufeffPeña,Núñez')))).toEqual([['Peña', 'Núñez']])
   })
+  it('keeps a UTF-8 file with one stray byte as UTF-8, and flags that row', () => {
+    const good = new TextEncoder().encode('employee_no,last_name,first_name,hire_date,pay_type,rate\nE1,Peña,Ana,2026-09-01,daily,800\nE2,')
+    const bytes = new Uint8Array([...good, 0xff, ...new TextEncoder().encode('X,Bo,2026-09-01,daily,800')])
+    const text = decodeCsv(bytes)
+    expect(text).toContain('Peña')
+    const r = checkImport(parseCsv(text), ctx as never)
+    expect(r.rows[0].warnings).toEqual([])
+    expect(r.rows[1].warnings).toEqual(['has characters that could not be read (\uFFFD): save the file as "CSV UTF-8" and check the names'])
+  })
   it('gives each row its first line in the file', () => {
     expect(parseCsvRows('h1,h2\n"two\nlines",x\ny,z').map((r) => r.line)).toEqual([1, 2, 4])
   })

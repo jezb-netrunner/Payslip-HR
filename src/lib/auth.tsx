@@ -116,7 +116,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return settle(false)
       }
       emp = (data as Employee) ?? null
-      if (!emp) {
+      // (a deactivated account keeps its "Access disabled" screen)
+      if (!emp && prof.is_active) {
         // The database hides an employee's records once the session has ended
         // (idle, past 12 hours, signed out elsewhere) — e.g. a phone tab
         // reopened the next day. Sign out with the reason instead of showing
@@ -131,6 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await endSession(SESSION_END_REASON[state as SessionEnd])
             return
           }
+        } catch {
+          // offline or the sign-out failed: settle as before (the watcher retries)
         } finally {
           endingRef.current = false
         }

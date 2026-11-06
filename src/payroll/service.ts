@@ -828,7 +828,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     const periodsSoFar = opening
       ? // the old payroll's own count when entered, else the calendar from January
         opening.periods_paid !== null && opening.periods_paid !== undefined
-        ? Number(opening.periods_paid) + (fromApp ?? 1)
+        ? (earlierEmployerFrom ? priorPeriods : 0) + Number(opening.periods_paid) + (fromApp ?? 1)
         : fromJanuary
       : earlierEmployerFrom
         ? missingBefore
@@ -982,14 +982,18 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : undefined,
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
-    // a final pay released this year for someone who left last year has no
-    // year here to complete, and takes no contributions
-    const noYearHere = extrasOnly(emp, run) || (!!emp.separation_date && emp.separation_date < yearStart)
+    // someone who left in an earlier year (a final pay released this year)
+    // has no year here to complete
+    const leftEarlier = !!emp.separation_date && emp.separation_date < yearStart
+    // and a final pay after the last day takes no contributions
+    const noContributions = leftEarlier || extrasOnly(emp, run)
     if (openingRow) {
       const twice = overlapWarning(openingRow, openingOverlaps(openingRow, empTax.map((p) => p.pay_date)))
       if (twice) slip.trace.warnings.push(twice)
-      // pay released between the old payroll's last payday and the app's first
-      if (opening && firstHere && firstHere.pay && daysBetween(opening.paid_through, firstHere.pay) > OPENING_GAP_DAYS) {
+      // pay released between the old payroll's last payday and the app's
+      // first (for a leaver, the opening balances end at the last pay)
+      const leftBeforeApp = !!opening && !!emp.separation_date && emp.separation_date <= opening.paid_through
+      if (opening && !leftBeforeApp && firstHere && firstHere.pay && daysBetween(opening.paid_through, firstHere.pay) > OPENING_GAP_DAYS) {
         slip.trace.warnings.push(
           `Opening balances cover pay through ${fmtDate(opening.paid_through)}, but the first payroll in the app was paid on ${fmtDate(firstHere.pay)}: pay released in between is in neither. Move the "paid through" date and add that pay to the opening balances.`,
         )
@@ -1006,7 +1010,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       slip.trace.tax?.method === 'annualized' ||
       slip.trace.tax?.method === 'cumulative_average' ||
       slip.earnings.some((l) => isBenefit(l.bir ?? ''))
-    if (missingBefore && !openingRow && yearLevel && !noYearHere) {
+    if (missingBefore && !openingRow && yearLevel && !leftEarlier) {
       slip.trace.warnings.push(
         `${emp.first_name} was employed before ${fmtDate(missingBefore)}, the first payroll in the app for ${taxYear}, and no opening balances are entered: the year's tax${slip.trace.tax?.method === 'annualized' ? '' : ' to date'} and the ₱90,000 exemption count pay from then on only. If this employer paid ${emp.first_name} earlier in ${taxYear}, enter that pay on the employee's BIR tab (Before going live on the app) and recompute.`,
       )
@@ -1016,7 +1020,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     const monthOpensHere = !isThirteenth && !empMonth.some((p) => p.run_type !== 'thirteenth_month')
     if (
       monthOpensHere &&
-      !noYearHere &&
+      !noContributions &&
       run.period_index > 1 &&
       emp.hire_date < run.period_start &&
       !taxBefore.some((p) => p.run_type !== 'thirteenth_month')

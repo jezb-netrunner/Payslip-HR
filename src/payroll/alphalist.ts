@@ -136,7 +136,8 @@ export function buildAlphalist(params: {
     if (!opening && !separatedBefore && firstPay && daysBetween(employedFrom, firstPay) > MISSING_PAY_DAYS) {
       issues.push(`No pay in the app before ${firstPay} (employed from ${employedFrom}): enter opening balances if this employer paid earlier in ${year}`)
     }
-    if (opening && firstPay && daysBetween(opening.paid_through, firstPay) > MISSING_PAY_DAYS) {
+    const leftBeforeApp = !!e.separation_date && opening && e.separation_date <= opening.paid_through
+    if (opening && !leftBeforeApp && firstPay && daysBetween(opening.paid_through, firstPay) > MISSING_PAY_DAYS) {
       issues.push(`Opening balances end ${opening.paid_through} but the first payroll in the app was paid ${firstPay}: pay in between is missing`)
     }
     const twice = openingOverlaps(opening, own.map((f) => f.payDate))
