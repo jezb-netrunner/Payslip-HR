@@ -548,9 +548,153 @@ throwaway test, not committed), then ran both on live: KM5VALLEY gone,
 DEMO's row counts and time-entry hash equal to the rehearsal. No DDL, so no
 advisors run. Not done: employee logins and client admins (app only).
 
+### 2026-11-06 — Opening balances for a mid-year go-live (branch `claude/zealous-archimedes-w8ec9y`)
+
+**Asked:** a client going live mid-year (the DEMO client, October) paid
+January–September elsewhere; annualization saw October onward only
+(Grace Torres's separation refunded her 1–15 Oct tax), and the ₱90,000
+exemption, 13th month, alphalist and 2316 were understated.
+`employee_tax_years` can't hold it (previous-employer semantics).
+
+**Did:** table `employee_opening_balances` (migration
+`20261106060259_opening_balances`, live — see deployed state): per employee
+and tax year, the old payroll's totals by 2316 column, contributions, tax
+withheld, 13th month basis, `paid_through`. `src/payroll/opening.ts` turns
+a row into one payslip fact (lesson below); `computeRun` adds it to
+annualization, the cumulative average year to date, the exemption left and
+the 13th month basis/installments, and warns when a payroll in the app is
+paid on or before `paid_through` (counted twice) or the run itself is;
+`buildAlphalist` adds it (an employee who left before go-live is listed;
+overlap is an issue). UI: employee BIR tab → *Before going live on the app*
+(`src/pages/admin/OpeningBalances.tsx`, live preview of gross / exempt /
+taxable). `reset_client.sql` deletes the new table. Docs: user guide,
+README, seed README. Tests 421 → 433 (`opening.test.ts`, flow
+`openingBalances.test.ts`: a control employee paid all year in the app vs
+one with opening balances — same separation tax, 13th month, cumulative
+average and alphalist), SQL suite 22. Card checked in a scratch Vite
+harness with Playwright at 1280 and 390 px (lesson *Browser walkthroughs*).
+
+### 2026-11-06 — Whole-app walkthrough (owner: "test the features for bugs, missing features, gaps")
+
+**Did:** the real stack was blocked (running the downloaded GoTrue binary
+was refused by the session's permission policy, see lesson), so three
+harnesses instead: (1) the DEMO workflow on a Postgres replay as the company
+admin — approvals through `review_time_correction` /
+`approve_advance_request`, runs created, payslips written and finalized /
+voided through the real RPCs, guards probed (10 runs, PR/PS numbers in
+order, 1–15 Oct net = the seed README); (2) the same workflow through
+`computeRun` on a JSON snapshot; (3) the whole React app under Vite with
+`lib/supabase` aliased to an in-memory client loaded from the walked-through
+DB, crawled by Playwright (every route and tab, owner / entity admin /
+employee, 1280 and 390 px) and driven through the main flows (adjustment →
+recompute → finalize → register CSV / payslips PDF → void and reissue → new
+run → compute; Excel backup; employee payslip PDF). Scripts in the
+session's scratchpad, not committed.
+
+**Found and fixed:** the cumulative average divided the pay the app holds
+by every period since January (a go-live client's ₱60,000 earner with a
+₱40,000 commission: ₱0 withheld on ₱68,275) — periods now start at the
+first payroll in the app unless opening balances (or a previous employer's
+2316) cover the months before, and year-level payrolls, the 13th month and
+the alphalist say when this employer's earlier pay is missing; a first
+payroll in the app that starts mid-month deducts the whole month's
+PhilHealth/Pag-IBIG (warned); the alphalist KPI said "all reconciled" while
+5 employees had year-end gaps; the dashboard's "last payroll" cost was a
+one-person final pay; long consultant badges ran off phone screens; a
+13th month finalized ahead of its pay date read "paid Dec 10" on 6 Nov.
+Tests 433 → 440 (`flows/goLive.test.ts`, alphalist case), 4 shown failing
+on the old code. Seed README: Liza's first week ₱4,820.00 → ₱4,818.20.
+
+**Gaps reported, not built:** no bulk import (employees, opening balances,
+time in/out); no bank file or SSS R3 / PhilHealth / Pag-IBIG upload formats
+(one generic CSV); no BIR DAT; payslips not emailed; employee sessions have
+no server-side timeout; mid-month go-live contributions only warned.
+
+### 2026-11-06 — Bulk employee import, employee session timeout, session-wide check (same branch)
+
+**Asked:** build the bulk employee import and a timeout for employee
+sign-ins, then check everything added or edited this session for bugs.
+
+**Did:** Employees → **Import** (`src/lib/employeeImport.ts` pure parse +
+check, `src/pages/admin/EmployeeImport.tsx`): CSV template of every column
+payroll and the BIR forms read, a preview by line (errors leave the row
+out, warnings don't), each passing row inserted like the Add form plus its
+career events; rows whose employee no. is already in the client are
+skipped, so the file can be re-uploaded. Payloads were inserted into the
+replica as an admin (constraints, pay-history seed, events) and the modal
+driven at 1280/390 px in the harness. Employee sessions end in the
+database (migration `20261106120000_employee_session_timeout`, lesson
+below); the watcher touches and checks for employees too. Tests 440 → 455,
+SQL suite 23. Then two independent reviews (DB/security, engine/UI), the DB
+walkthrough re-run on a fresh replay and a re-crawl of every screen.
+
+**Review round, found and fixed** (each engine fix with a flow test that
+fails on the old code; tests 455 → 469, suites 22–23 extended):
+cumulative-average periods counted calendar halves from the first app
+payroll's START (a 26th–10th cutoff counted 2, withholding 31% too little) —
+now from its END; a previous employer without an end date counted 1 period
+(₱40,099 withheld on ₱20,000) — now to the eve of the hire; the opening's
+13th month (the 2316 total, which can be last year's paid in January) was
+subtracted from this year's 13th month (paid ₱0) — new
+`thirteenth_installments`; the old payroll's own period count wasn't known
+(a December period paid in January) — new `periods_paid` (migration
+`20261106074338_opening_balance_periods`, live); missing warnings (13th
+month basis left 0, a gap between the opening and the first app payroll),
+false or doubled ones (next-year final pays, an opening that doesn't
+apply); an MWE's hazard pay in the opening exempt without certification;
+the card writing back stale state after a save; the import reading Excel's
+Windows-1252 CSV as UTF-8 (Peña garbled), the same file not re-selectable,
+Excel scientific notation and >2 decimals accepted, a blank status making
+long-time staff probationary silently, line numbers off after multi-line
+cells. DB side: an employee reopening an ended session got "No access yet"
+(the watcher lives in the Shell) — the profile load now touches and signs
+out with the reason; `reset_client.sql` orphaned activity rows; an ended
+session's sign-out was filed under no client (`log_activity` fallback); the
+touch now deletes an idle/expired Auth session so its refresh token stops.
+Deferred: wrapping `current_employee_id()` as `(select …)` in the employee
+policies (about 4× per-row cost for employees, small at this scale; ALTER
+POLICY, no DROP needed).
+
+**Final review before the merge** (owner: "one final bug check, create the PR,
+merge it, then apply the migration") of the review-fix commit found, and
+fixed with tests that fail on the old code (469 → 472): `periods_paid`
+dropped a previous employer's periods (₱21,581 withheld where ₱0 was right);
+go-live final pays lost the missing-pay warning (only someone who left in an
+earlier year is quiet now); a false gap warning for staff who left before
+go-live; a deactivated employee signed out as "ended" instead of seeing
+Access disabled, and a failed sign-out left a spinner; one bad byte sent a
+UTF-8 import to Windows-1252 (now stays UTF-8, row flagged). Lesson again:
+the fixes needed their own review.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: `20261106074338_opening_balance_periods` is live** (MCP, two
+columns on the empty `employee_opening_balances`); the table hashes the same
+on live and the replica (31 constraints); advisors unchanged. Checked on
+live before the timeout migration: `postgres` can select and delete
+`auth.sessions` (columns id, user_id, created_at present).
+
+**2026-11-06: `20261106120000_employee_session_timeout` is NOT live.**
+Apply it only after (or with) the front end of this branch: the deployed
+app never touches employee sessions, so with the migration alone every
+employee would lose data access 32 minutes after signing in. The branch's
+front end works with or without it (a missing `touch_employee_session` is
+ignored). At the apply, employee sessions older than 32 minutes end once
+(sign in again), like the admins' at the CAS go-live. Expect two new
+intentional advisor lines then: WARN `touch_employee_session` (definer,
+authenticated) and INFO `employee_session_activity` (RLS, no policy).
+
+**2026-11-06: `employee_opening_balances` is live** (migration applied
+through MCP as `20261106060259 opening_balances`, repo file renamed). The
+table's columns, 28 constraints, policy, triggers, index, grants and RLS
+flag hash the same on live and the replica. Security advisors unchanged;
+performance adds only the INFO "unused index" on the new table. No data in
+it. The front end that uses it is on branch
+`claude/zealous-archimedes-w8ec9y`, not merged: `main`'s front end never
+reads the table, but the branch's `computeRun` and alphalist do, so merge
+only with the table live (it is).
 
 **2026-11-06: live data is the DEMO test client only** (owner's request).
 Client KM5VALLEY, its 2 employees, the employee's login, its finalized run
@@ -1080,6 +1224,74 @@ inside a transaction. Differences from Supabase (PG17, real GoTrue/storage)
 remain, so the security advisors still run after the live apply. Why it
 mattered: RLS mistakes are silent — a policy that is too open never errors.
 
+### Employee sessions: Auth's start, the app's activity, no bypass for API tokens (design decision, 2026-11-06)
+
+> `employee_session_ok(user)` in `current_employee_id()` / `current_employee_entity_id()`: the JWT's `session_id` must still exist in `auth.sessions` for that user, `created_at` within 12 h, and `coalesce(employee_session_activity.seen_at, created_at)` within 32 min. `touch_employee_session()` extends only a session that is still valid. Claims with no `role` (direct DB sessions: SQL editor, migrations, the suites) skip the rule.
+
+Why: employees sign in straight at Auth (no guard to record a start), so the
+start comes from Auth's own row, which no client can move, and the sign-in
+counts as the first activity (no race before the app's first touch). A
+signed-out session reads nothing at once (PostgREST used to accept its JWT
+until expiry). Every PostgREST request as `authenticated` carries a `role`
+claim, so the escape hatch can't be reached through the API — unlike the
+admin rule's null `admin_session_id`, which was a per-account state.
+Consequences found by the review: the employee's own `employees` row is
+hidden once the session ends, so `auth.tsx` touches when it comes back
+empty and signs out with the reason (else "No access yet"); the touch
+deletes an idle/expired session at Auth (its refresh token stops);
+`log_activity` files an ended session's sign-out under the employee's
+client; Studio's "impersonate user" (role, no session id) now shows an
+employee nothing.
+
+### The year to date is only what the app holds: count periods from there (correction, 2026-11-06)
+
+> The cumulative average divides the year's taxable pay by its payroll periods. Without opening balances the app knows pay only from the employee's first payroll in it, so periods count from that payroll (plus a previous employer's span); with opening balances, from 1 January or the hire date.
+
+Count from the first app payroll's END, not its start: `periodsThisYear`
+counts calendar halves/months, so a 26th–10th period touches two halves.
+With opening balances, `periods_paid` (the old payroll's own count) beats
+the calendar from January when entered.
+Why it mattered: counting from January (or a July hire date) while holding
+only October's pay averaged it down to the zero bracket: the DEMO's Liza
+(₱4,820 a week) and a ₱60,000 earner with a commission were withheld ₱0.
+The fix cannot make annualization right without the earlier pay: December
+then refunds what October to November withheld, so every year-level payroll,
+the 13th month and the alphalist warn until opening balances are entered.
+
+### Opening balances are this employer's pay: one more payslip of the year (design decision, 2026-11-06)
+
+> `employee_opening_balances` (a new table, not columns on `employee_tax_years`) holds the old payroll's January-to-go-live totals by BIR 2316 column. `openingFact()` turns a row into one `AnnualPayslipFact` dated `paid_through`, so `summarizeYear` (annualization, the ₱90,000 cap, MWE exemptions, contribution carve, Jan–Nov vs December) treats it exactly like the payslips it replaces.
+
+Why a new table: `employee_tax_years` means a *previous employer* (its own
+2316 section, `has_previous_employer` gates it, forces the cumulative
+average method, breaks substituted filing); opening balances are the
+present employer's own columns and "withheld as adjusted". Amounts are
+gross as the register shows them (contributions carved out of basic like
+the app's payslips; 13th month and bonuses before the cap, the year applies
+it), so the admin types register totals, not 2316 figures. The row counts
+only for a payroll paid after `paid_through` (pay date rules the tax year);
+a payroll in the app paid by then is flagged as counted twice. Left out on
+purpose: monthly 1601-C figures (the old payroll remitted them), de minimis
+ceilings per benefit (only a total is kept), SSS/PhilHealth month
+completion for a go-live mid-month, and the sticky cumulative-average flag
+(the old payroll's method is unknown). The 13th month reads the payroll
+year's row (`thirteenth_basis`, `thirteenth_month`), which differs from
+the tax year only for a 13th month paid in January.
+
+### A mid-year separation usually refunds, even with the whole year in (correction, 2026-11-06)
+
+> Per-period tables assume a full year's pay, so annualizing ten months almost always gives back tax. The DEMO's Grace (₱25,000 a month, leaving 31 Oct: ₱229,250 taxable) owes nothing for the year: with her January–September entered the separation still refunds — all the year's tax, not just 1–15 October's.
+
+The ask framed the fix as "no spurious refund"; the honest test is the
+same answer as a control employee paid all year in the app
+(`flows/openingBalances.test.ts`). A refund disappears only where the old
+payroll under-withheld (e.g. it left a bonus's excess over ₱90,000 for
+December, the test's ₱50,000 case). Without opening balances the October
+go-live client under-withholds too: October onward looks like a ₱240,000
+year, so a ₱60,000 earner's cumulative average and December true-up
+withheld ₱0. Also: `round2` can return `-0`, and vitest's `toBe`/`toEqual`
+use `Object.is`, so add `+ 0` before comparing a computed zero.
+
 ### Year-end tax true-up is a flag on the last run, not a separate run
 
 > Annualization (RR 11-2018 / Form 2316) happens inside the last regular payroll of the year or the final-pay run (`payroll_runs.annualize = true`): that run's withholding becomes annual tax due minus tax already withheld, refunds included.
@@ -1182,6 +1394,27 @@ Postgres again as its own user (`pg_ctl -D … -o '-p 54329 -k /tmp' start`).
 Why it mattered: the walkthrough found what unit tests and SQL tests
 couldn't — wrong-date saves, mislabeled controls, phone overflow, a
 double-click that duplicated loans.
+
+When the real stack can't run (2026-11-06: the session refused to execute
+the downloaded GoTrue binary — "code from external"; don't work around it,
+ask the owner), the whole app still runs under Vite with `lib/supabase`
+aliased to an in-memory client (builder with embeds, aliases, counts,
+upsert; auth faking a signed-in owner / entity admin / employee at
+aal2/aal1; the RPCs the pages call), loaded from a JSON snapshot of the
+Postgres replay after the workflow ran there. It has no RLS or triggers,
+so an employee sees drafts and adjustments don't stale a draft: check those
+in SQL. Match real column names in faked RPC writes (`payroll_voids`
+`run_snapshot`), and return `{data, error}` once (not nested) from insert/
+update `.select()` — both cost a false alarm.
+
+For one new component, a scratch Vite harness is enough (2026-11-06, ~10
+minutes): root in the scratchpad with `node_modules` symlinked from the
+repo, a CSS file that `@import`s `src/index.css` plus `@source` on the
+repo's `src`, and `resolve.alias` sending every `../lib/supabase` **and**
+`./supabase` (what `lib/api.ts` imports) to a wrapper of
+`flows/fakeSupabase` (add `upsert` there). Missing the second alias sent
+`getStatutoryTables` to the real project (proxy error) and silently hid the
+component's preview.
 
 Rebuilt 2026-10-24 in ~5 minutes for the Time report QA (no edge function
 needed for pages that don't manage logins): the Postgres data directory

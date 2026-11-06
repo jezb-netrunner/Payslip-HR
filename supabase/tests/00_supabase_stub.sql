@@ -28,7 +28,8 @@ create table auth.users (
 );
 create table auth.sessions (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz default now()
 );
 create or replace function auth.uid() returns uuid language sql stable as $$
   select coalesce(

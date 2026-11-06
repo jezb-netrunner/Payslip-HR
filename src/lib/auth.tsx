@@ -3,6 +3,8 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import type { Employee, Profile } from './db'
 import { logActivity } from './activity'
+import { setSignInNotice } from './authGuard'
+import { SESSION_END_NOTICE, SESSION_END_REASON, type SessionEnd } from './useSessionWatch'
 
 interface AuthState {
   session: Session | null
@@ -66,10 +68,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: null,
   })
   const forRef = useRef<string | null>(null)
+  // the profile loads several times at start-up (session check, auth event):
+  // an ended session is checked and signed out once
+  const endingRef = useRef(false)
 
   async function loadAal(userId: string) {
     const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
     setAssurance({ current: (data?.currentLevel as AuthState['aal']) ?? null, next: (data?.nextLevel as AuthState['aal']) ?? null, user: userId })
+  }
+
+  // This device only (see signOut below), logged first while the token works
+  async function endSession(reason?: string) {
+    // a slow network never holds the sign-out up
+    await Promise.race([
+      logActivity('sign_out', null, reason ? { reason } : {}),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ])
+    await supabase.auth.signOut({ scope: 'local' })
   }
 
   // Reloads on every auth event (tab refocus, hourly token refresh). A failed
@@ -101,6 +116,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return settle(false)
       }
       emp = (data as Employee) ?? null
+      // (a deactivated account keeps its "Access disabled" screen)
+      if (!emp && prof.is_active) {
+        // The database hides an employee's records once the session has ended
+        // (idle, past 12 hours, signed out elsewhere) — e.g. a phone tab
+        // reopened the next day. Sign out with the reason instead of showing
+        // "no access" (the touch also ends the session at Auth).
+        if (endingRef.current) return
+        endingRef.current = true
+        try {
+          const { data: st, error: stErr } = await supabase.rpc('touch_employee_session')
+          const state = (st as { state?: string } | null)?.state
+          if (!stErr && (state === 'idle' || state === 'expired' || state === 'ended')) {
+            setSignInNotice(SESSION_END_NOTICE[state as SessionEnd])
+            await endSession(SESSION_END_REASON[state as SessionEnd])
+            return
+          }
+        } catch {
+          // offline or the sign-out failed: settle as before (the watcher retries)
+        } finally {
+          endingRef.current = false
+        }
+      }
     }
     setProfile((prof as Profile) ?? null)
     setEmployee(emp)
@@ -170,14 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // This device only. Supabase's default ('global') ends every session of
         // the account — signing out on a phone left the desktop tab with a
         // token the admin-users function rejects as "Not authenticated".
-        signOut: async (reason?: string) => {
-          // logged while the token still works; a slow network never holds the sign-out up
-          await Promise.race([
-            logActivity('sign_out', null, reason ? { reason } : {}),
-            new Promise((resolve) => setTimeout(resolve, 1500)),
-          ])
-          await supabase.auth.signOut({ scope: 'local' })
-        },
+        signOut: endSession,
       }}
     >
       {children}

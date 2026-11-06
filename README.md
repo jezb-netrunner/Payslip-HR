@@ -197,8 +197,9 @@ The app captures everything the annual information return needs:
 - Employee: TIN, name, birth date, nationality, address + ZIP, employment
   status (regular / casual / contractual / probationary / seasonal…),
   inclusive dates of employment, reason of separation, previous employer
-  (TIN, name, compensation and tax withheld), PERA tax credit, substituted
-  filing
+  (TIN, name, compensation and tax withheld), this employer's opening
+  balances from before the client went live on the app (counted as its own
+  pay), PERA tax credit, substituted filing
 - Every earning carries its BIR classification (basic, holiday, overtime,
   night differential, hazard, 13th month & other benefits, de minimis,
   representation, transportation, COLA, housing, commission, profit
@@ -317,7 +318,11 @@ reminds company admins when this year's check is due).
    session the guard admitted (`profiles.admin_session_id`), at `aal2`,
    within 12 hours of sign-in and 30 minutes of activity
    (`admin_session_activity`, kept by `touch_admin_session`); the app warns at
-   25 idle minutes and signs everyone, employees too, out at 30. The Auth
+   25 idle minutes and signs everyone, employees too, out at 30. Employee
+   sessions are held to the same 12 hours and 32 minutes in the database
+   (`employee_session_ok` in `current_employee_id()`: Auth's session start,
+   `employee_session_activity` kept by `touch_employee_session`), so a signed-
+   out, idle or copied token reads nothing. The Auth
    server keeps an admin password only keyed (an HMAC under the
    `ADMIN_PASSWORD_PEPPER` secret), so it can't be guessed straight at the
    Auth API.

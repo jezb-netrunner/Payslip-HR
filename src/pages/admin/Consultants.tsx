@@ -351,7 +351,7 @@ function ConsultantList({
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {c.signed_off_at ? (
-                <Badge tone={concerns.length ? 'amber' : 'green'}>
+                <Badge tone={concerns.length ? 'amber' : 'green'} wrap>
                   Signed off by {c.signed_off_by}, {fmtDate(c.signed_off_at.slice(0, 10))}
                   {concerns.length ? ` · ${concerns.length} answer${concerns.length === 1 ? '' : 's'} pointing to employment` : ''}
                 </Badge>
@@ -359,7 +359,7 @@ function ConsultantList({
                 <Badge tone="red">Checklist not signed off: no billing yet</Badge>
               )}
               {rule && (
-                <Badge tone="blue">
+                <Badge tone="blue" wrap>
                   Next billing: EWT {pct(rule.rate)} ({rule.atc}), {ewtReasonText(rule.reason, rule.threshold)}
                 </Badge>
               )}

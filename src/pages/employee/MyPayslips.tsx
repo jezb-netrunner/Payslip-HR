@@ -4,6 +4,7 @@ import PayslipView, { runFromSlip, runLabel } from '../../components/PayslipView
 import { Badge, Card, EmptyState, Modal, PageHeader, Select, Spinner } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import type { Entity, Payslip } from '../../lib/db'
+import { todayManila } from '../../lib/manila'
 import { fmtDate, money } from '../../lib/format'
 import { supabase } from '../../lib/supabase'
 
@@ -73,7 +74,7 @@ export default function MyPayslips() {
                 <div>
                   <p className="text-sm font-bold text-ink-900">{runLabel(runFromSlip(s))}</p>
                   <p className="text-xs text-slate-500">
-                    Paid {fmtDate(s.pay_date)}
+                    {(s.pay_date ?? '') > todayManila() ? 'Payday' : 'Paid'} {fmtDate(s.pay_date)}
                     {s.control_no ? ` · ${s.control_no}` : ''}
                   </p>
                 </div>

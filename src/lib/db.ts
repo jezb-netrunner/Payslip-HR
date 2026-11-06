@@ -660,6 +660,51 @@ export interface EmployeeTaxYear {
   notes: string
 }
 
+/**
+ * What THIS employer paid and withheld in a tax year before the client went
+ * live on the app (not a previous employer): gross amounts by BIR Form 2316
+ * column, 13th month and other benefits before the ₱90,000 cap.
+ */
+export interface EmployeeOpeningBalance {
+  id: string
+  employee_id: string
+  entity_id: string
+  year: number
+  /** the last pay date the old payroll covers */
+  paid_through: string
+  minimum_wage_earner: boolean
+  basic_salary: number
+  cola: number
+  representation: number
+  transportation: number
+  housing: number
+  other_taxable_regular: number
+  holiday_pay: number
+  premium_pay: number
+  overtime_pay: number
+  night_diff: number
+  hazard_pay: number
+  commission: number
+  profit_sharing: number
+  fees: number
+  other_supplementary: number
+  thirteenth_month: number
+  other_benefits: number
+  de_minimis: number
+  other_non_taxable: number
+  /** employee SSS, PhilHealth and Pag-IBIG shares and union dues */
+  contributions: number
+  /** tax withheld as adjusted (net of refunds) */
+  tax_withheld: number
+  /** basic salary earned in the calendar year, for the 13th month (PD 851) */
+  thirteenth_basis: number
+  /** of thirteenth_month: this year's 13th month paid in advance (installments) */
+  thirteenth_installments: number
+  /** payroll periods the old payroll paid in the tax year; null = counted from 1 January */
+  periods_paid: number | null
+  notes: string
+}
+
 export interface AuditLog {
   id: number
   actor_id: string | null

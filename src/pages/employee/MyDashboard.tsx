@@ -149,7 +149,7 @@ export default function MyDashboard() {
             <div>
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <p className="text-xs text-slate-500">{runLabel(runFromSlip(latest))} · paid {fmtDate(latest.pay_date)}</p>
+                  <p className="text-xs text-slate-500">{runLabel(runFromSlip(latest))} · {(latest.pay_date ?? '') > today ? 'payday' : 'paid'} {fmtDate(latest.pay_date)}</p>
                   <p className="mt-1 text-4xl font-bold tracking-tight text-ink-900">{money(Number(latest.net_pay))}</p>
                   <p className="text-xs text-slate-400">take-home pay</p>
                 </div>

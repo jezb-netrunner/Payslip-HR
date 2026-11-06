@@ -2,13 +2,25 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
 import { passwordChangeUnderWay } from './authGuard'
 
-/** Minutes without activity before the app signs out (the database ends an admin session at 32). */
+/** Minutes without activity before the app signs out (the database ends the session at 32). */
 export const IDLE_MINUTES = 30
 const WARN_MINUTES = 25
 const ACTIVITY_KEY = 'payslip-hr:last-activity'
 
 /** Why a session ended: replaced or revoked, idle, or past its 12 hours. */
 export type SessionEnd = 'ended' | 'idle' | 'expired'
+
+/** What the sign-in page says after the app ended a session, and the reason the audit trail records. */
+export const SESSION_END_NOTICE: Record<SessionEnd, string> = {
+  ended: 'Your session ended: this account signed in on another device or browser, or its sign-in was reset. Sign in again.',
+  idle: `You were signed out after ${IDLE_MINUTES} minutes without activity. Sign in again.`,
+  expired: 'A session lasts at most 12 hours. Sign in again.',
+}
+export const SESSION_END_REASON: Record<SessionEnd, string> = {
+  ended: 'session ended elsewhere',
+  idle: 'signed out after inactivity',
+  expired: 'session reached 12 hours',
+}
 
 /**
  * The last activity in any of the app's tabs on this session (one busy tab
@@ -50,10 +62,11 @@ async function currentToken(): Promise<string | null> {
 
 /**
  * Session timeouts (NIST SP 800-63B, OWASP): everyone is signed out after 30
- * minutes without activity, warned from 25. For an admin the database keeps
- * the clock too — the app reports activity (at most once a minute) and reads
- * the session's state every minute, on focus and on return to the tab: a
- * sign-in elsewhere, a revocation, idling or the 12-hour limit ends it.
+ * minutes without activity, warned from 25. The database keeps the clock too
+ * (admins and, since 2026-11-06, employees) — the app reports activity (at
+ * most once a minute) and reads the session's state every minute, on focus
+ * and on return to the tab: a sign-in elsewhere (admins), a sign-out or
+ * revocation, idling or the 12-hour limit ends it.
  * Opening the app counts as activity, unless it comes back to a session idle
  * for 30 minutes already (a closed browser, a sleeping laptop) — that one
  * ends. `onEnded` runs once. A failed check (offline, the server busy) never
@@ -115,9 +128,9 @@ export function useSessionWatch(opts: {
         checking = false
       }
     }
-    const touch = () => supabase.rpc('touch_admin_session')
+    const touch = () => supabase.rpc(admin ? 'touch_admin_session' : 'touch_employee_session')
     const check = () => {
-      if (admin && document.visibilityState !== 'hidden') void settle(() => supabase.rpc('my_session_state'))
+      if (document.visibilityState !== 'hidden') void settle(() => supabase.rpc('my_session_state'))
     }
 
     activity.current = () => {
@@ -127,7 +140,7 @@ export function useSessionWatch(opts: {
         shared = now
         shareActivity(session, now)
       }
-      if (admin && now - touched > 60_000 && ready()) {
+      if (now - touched > 60_000 && ready()) {
         touched = now
         void settle(touch)
       }
@@ -143,7 +156,7 @@ export function useSessionWatch(opts: {
       else setSecondsLeft(idle >= WARN_MINUTES * 60_000 ? Math.ceil((IDLE_MINUTES * 60_000 - idle) / 1000) : null)
     }, 1000)
     const poller = window.setInterval(check, 60_000)
-    if (admin) void settle(touch)
+    void settle(touch)
     const events = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'mousemove'] as const
     for (const e of events) window.addEventListener(e, onActivity, { passive: true })
     window.addEventListener('focus', onShow)
