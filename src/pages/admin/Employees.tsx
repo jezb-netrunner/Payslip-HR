@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Building, ChevronRight, Hash, KeyRound, LayoutGrid, List, Repeat, Search, UserPlus, Wallet } from 'lucide-react'
+import { Building, ChevronRight, FileUp, Hash, KeyRound, LayoutGrid, List, Repeat, Search, UserPlus, Wallet } from 'lucide-react'
 import {
   Avatar,
   Badge,
@@ -38,6 +38,7 @@ import { supabase } from '../../lib/supabase'
 import type { PayFrequency } from '../../payroll/types'
 import { errorMessage } from '../../lib/errors'
 import { useQuickAction } from '../../lib/quickAction'
+import { EmployeeImportModal } from './EmployeeImport'
 
 const statusTones: Record<string, string> = {
   regular: 'green',
@@ -75,6 +76,7 @@ function EmployeeList({ entity }: { entity: Entity }) {
   const [showSeparated, setShowSeparated] = useState(false)
   const [frequency, setFrequency] = useState('')
   const [adding, setAdding] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [view, setView] = useState<View>(readView)
   const navigate = useNavigate()
   const today = todayManila()
@@ -133,9 +135,14 @@ function EmployeeList({ entity }: { entity: Entity }) {
           />
         }
         actions={
-          <Button onClick={() => setAdding(true)}>
-            <UserPlus className="size-4" /> Add employee
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setImporting(true)}>
+              <FileUp className="size-4" /> Import
+            </Button>
+            <Button onClick={() => setAdding(true)}>
+              <UserPlus className="size-4" /> Add employee
+            </Button>
+          </div>
         }
       />
 
@@ -291,6 +298,7 @@ function EmployeeList({ entity }: { entity: Entity }) {
         }}
         nextNumber={`${entity.code}-${String(employees.length + 1).padStart(4, '0')}`}
       />
+      <EmployeeImportModal open={importing} entity={entity} onClose={() => setImporting(false)} onImported={() => void load()} />
     </div>
   )
 }
