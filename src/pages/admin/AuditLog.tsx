@@ -25,6 +25,7 @@ const ACTIONS: Record<string, { label: string; tone: string }> = {
   sign_in: { label: 'signed in', tone: 'green' },
   sign_in_failed: { label: 'failed sign-in', tone: 'amber' },
   sign_in_locked: { label: 'locked out', tone: 'red' },
+  employee_sign_in_throttled: { label: 'too many wrong login codes', tone: 'red' },
   password_change: { label: 'password changed', tone: 'violet' },
   password_reset: { label: 'reset a password', tone: 'violet' },
   unlock: { label: 'unlocked an account', tone: 'violet' },

@@ -3,16 +3,14 @@
 // Employees sign in with one code, "<CLIENT CODE>-<PART>" (e.g.
 // ACME-7Q4KX9TB). The entity admin sets PART; the client prefix keeps codes
 // unique per client, so trying codes can never reveal another client's
-// employees. Supabase Auth needs an email, so each code maps to a synthetic
-// address derived from a SHA-256 of the code, and the code itself is the
-// password: knowing the code is the whole credential, and only Supabase's
-// bcrypt hash of it is stored. The address lives on this app's own domain
-// (Supabase rejects example/test domains); no mail is ever sent to it.
+// employees. The code is the whole credential. Supabase Auth needs an email,
+// so the auth-guard edge function maps the code to an address and a password
+// (HMACs under a server secret) and signs the employee in: the browser never
+// knows the address, so a session left on a shared computer can't be worked
+// back into the code. No mail is ever sent to the address.
 //
-// KEEP IN SYNC with supabase/functions/admin-users/index.ts.
-
-export const EMPLOYEE_LOGIN_DOMAIN = 'jezb-netrunner.github.io'
-const HASH_PREFIX = 'payslip-hr/employee-login/v1:'
+// KEEP normalizeLoginCode, isValidLoginCode and weakCodeReason IN SYNC with
+// supabase/functions/auth-guard and admin-users.
 
 /** Uppercase, strip whitespace, normalize dash-like characters. */
 export function normalizeLoginCode(input: string): string {
@@ -25,13 +23,6 @@ export function normalizeLoginCode(input: string): string {
 /** Valid full code: client code (2–10) + '-' + 8–24 letters/digits. */
 export function isValidLoginCode(code: string): boolean {
   return /^[A-Z][A-Z0-9]{1,9}-[A-Z0-9]{8,24}$/.test(code)
-}
-
-export async function employeeLoginEmail(code: string): Promise<string> {
-  const data = new TextEncoder().encode(HASH_PREFIX + code)
-  const digest = await crypto.subtle.digest('SHA-256', data)
-  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
-  return `emp-${hex.slice(0, 32)}@${EMPLOYEE_LOGIN_DOMAIN}`
 }
 
 /**

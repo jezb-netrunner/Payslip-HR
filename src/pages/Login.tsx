@@ -1,29 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Check, KeyRound, Lock, Mail, User } from 'lucide-react'
 import { supabase, urlAuthError } from '../lib/supabase'
-import { employeeLoginEmail, isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
+import { isValidLoginCode, normalizeLoginCode } from '../lib/loginCode'
 import { Button, Input, Logo } from '../components/ui'
 import { errorMessage } from '../lib/errors'
-import { clearSignInNotice, guardChangePassword, guardSignIn, peekSignInNotice, type ChangeReason } from '../lib/authGuard'
+import { clearSignInNotice, guardChangePassword, guardEmployeeSignIn, guardSignIn, peekSignInNotice, type ChangeReason } from '../lib/authGuard'
 import { PASSWORD_MIN, PASSWORD_RULE, passwordProblem } from '../lib/password'
 import PasswordInput from '../components/PasswordInput'
 import { logActivity } from '../lib/activity'
 
-// 'change': an admin's temporary or 30-day-old password, changed before the session starts
+// 'change': an admin's temporary, short or breached password, changed before the session starts
 type Mode = 'employee' | 'admin' | 'reset' | 'bootstrap' | 'change'
-
-/**
- * A rejected code and a busy or unreachable server need different advice:
- * on payday many employees sign in from one office IP and can hit the
- * sign-in rate limit with a perfectly good code.
- */
-function signInProblem(err: { status?: number; name?: string }, badCredentials: string): string {
-  if (err.status === 429) return 'Too many sign-in attempts from this network. Wait a few minutes, then try again.'
-  if (err.name === 'AuthRetryableFetchError' || !err.status || err.status >= 500) {
-    return "Can't reach the server right now. Check your connection and try again."
-  }
-  return badCredentials
-}
 
 /** A link the Auth server refused, in words. */
 function linkProblem(): string {
@@ -75,15 +62,12 @@ export default function Login() {
         if (!isValidLoginCode(normalized)) {
           throw new Error('Enter your full login code, including the dash — e.g. ACME-7Q4KX9TB.')
         }
-        const { error: err } = await supabase.auth.signInWithPassword({
-          email: await employeeLoginEmail(normalized),
-          password: normalized,
-        })
-        if (err) throw new Error(signInProblem(err, 'That code did not work. Check it with your HR or payroll officer.'))
+        // the guard maps the code to its account and counts wrong codes
+        await guardEmployeeSignIn(normalized)
         void logActivity('sign_in', null, { method: 'login code' })
       } else if (mode === 'admin') {
         // the guard counts failures, admits this one session and asks for a
-        // new password when the current one is temporary or 30 days old
+        // new password when the current one is temporary, short or breached
         const outcome = await guardSignIn(email.trim(), password)
         if (outcome.kind === 'change_password') {
           setChangeReason(outcome.reason)
