@@ -428,10 +428,11 @@ select set_config('request.jwt.claim.sub', :ea, true);
 select pg_temp.check((select count(*) from employees) = 0, 'archived client hidden from its entity admin');
 commit;
 
-\echo '--- 10. anon sees nothing'
+\echo '--- 10. anon sees nothing: no table privileges at all'
 begin;
 set local role anon;
-select pg_temp.check((select count(*) from entities) = 0 and (select count(*) from statutory_versions) = 0, 'anon blocked');
+select pg_temp.expect_error('select count(*) from entities', '%permission denied%');
+select pg_temp.expect_error('select count(*) from statutory_versions', '%permission denied%');
 commit;
 
 \echo 'ALL RLS TESTS PASSED'

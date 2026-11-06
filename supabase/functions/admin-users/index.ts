@@ -18,15 +18,16 @@
 // admitted session, its second factor, within its time limits.
 //
 // Employee login codes are "<CLIENT CODE>-<PART>". Supabase Auth needs an
-// email, so each code maps to a synthetic address derived from a SHA-256 of
-// the code, and the code itself is the password (stored only as Supabase's
-// bcrypt hash; the derived address is kept only in auth.users, never in
-// admin-readable tables). KEEP THE DERIVATION IN SYNC with src/lib/loginCode.ts.
+// email, so each code maps to an address and a password, both HMACs of the
+// code under ADMIN_PASSWORD_PEPPER: the address is in every access token and
+// stored session, and without the secret it says nothing about the code, nor
+// can the Auth API alone confirm a guessed code. Employees sign in through
+// auth-guard, which makes the same two. KEEP THE DERIVATION IN SYNC with
+// auth-guard.
 // Another company admin's account can never be managed from here.
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const EMPLOYEE_LOGIN_DOMAIN = "jezb-netrunner.github.io";
-const HASH_PREFIX = "payslip-hr/employee-login/v1:";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -42,16 +43,24 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-async function employeeLoginEmail(code: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(HASH_PREFIX + code),
-  );
-  const hex = Array.from(
-    new Uint8Array(digest),
-    (b) => b.toString(16).padStart(2, "0"),
-  ).join("");
-  return `emp-${hex.slice(0, 32)}@${EMPLOYEE_LOGIN_DOMAIN}`;
+async function hmac(key: string, message: string): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(message)));
+}
+
+const base64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+/** The Auth address of an employee login code. KEEP IN SYNC with auth-guard. */
+export async function employeeLoginEmail(code: string, pepper: string): Promise<string> {
+  const mac = await hmac(pepper, "payslip-hr/employee-login-email/v2:" + code);
+  const hex = [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `emp2-${hex.slice(0, 32)}@${EMPLOYEE_LOGIN_DOMAIN}`;
+}
+
+/** The password the Auth server keeps for an employee login code. KEEP IN SYNC with auth-guard. */
+export async function employeeLoginPassword(code: string, pepper: string): Promise<string> {
+  return "e1." + base64url(await hmac(pepper, "payslip-hr/employee-login-password/v2:" + code));
 }
 
 /** KEEP IN SYNC with weakCodeReason in src/lib/loginCode.ts. */
@@ -118,10 +127,8 @@ async function breachCount(password: string, base: string): Promise<number | nul
  * The password as the Auth server keeps it: an HMAC of it under a server
  * secret. KEEP IN SYNC with keyedPassword in auth-guard.
  */
-async function keyedPassword(password: string, pepper: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(password)));
-  return "k1." + btoa(String.fromCharCode(...mac)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+export async function keyedPassword(password: string, pepper: string): Promise<string> {
+  return "k1." + base64url(await hmac(pepper, password));
 }
 
 function tokenClaims(token: string): { iat?: number; session_id?: string; aal?: string } {
@@ -269,8 +276,12 @@ Deno.serve(async (req: Request) => {
       const weak = weakCodeReason(part, emp.employee_no, [emp.first_name, emp.last_name]);
       if (weak) return json({ error: weak }, 400);
 
+      if (pepper.length < 32) {
+        return json({ error: "Login codes can't be set: the ADMIN_PASSWORD_PEPPER secret is missing." }, 500);
+      }
       const code = `${emp.entities.code}-${part}`;
-      const email = await employeeLoginEmail(code);
+      const email = await employeeLoginEmail(code, pepper);
+      const loginPassword = await employeeLoginPassword(code, pepper);
       const fullName = `${emp.first_name} ${emp.last_name}`.trim();
       const inUse = {
         error: "That code is already used by another employee of this client. Choose a different code.",
@@ -286,7 +297,7 @@ Deno.serve(async (req: Request) => {
         const { data: created, error: createErr } = await admin.auth.admin
           .createUser({
             email,
-            password: code,
+            password: loginPassword,
             email_confirm: true,
             app_metadata: { role: "employee", employee_id: emp.id },
             user_metadata: { full_name: fullName },
@@ -297,7 +308,8 @@ Deno.serve(async (req: Request) => {
         }
         // The on_auth_user_created trigger creates the profile; upsert to be
         // safe and to guarantee the employee link. No email on the profile:
-        // it is derived from the code, and admins can read profiles.
+        // it is derived from the code, and admins can read profiles (keyed,
+        // it would give nothing away, but nothing needs it there).
         await db.from("profiles").upsert({
           id: created.user.id,
           role: "employee",
@@ -309,7 +321,7 @@ Deno.serve(async (req: Request) => {
       } else {
         const { error: updErr } = await admin.auth.admin.updateUserById(
           existing.id,
-          { email, password: code, email_confirm: true },
+          { email, password: loginPassword, email_confirm: true },
         );
         if (updErr) {
           if (isAlreadyRegistered(updErr.message)) return json(inUse, 409);

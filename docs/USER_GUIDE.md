@@ -6,7 +6,7 @@
   - Passwords: at least 12 characters — a few words make a good passphrase; no symbols or digits needed. Passwords found in known data breaches are refused, and so is one containing your email's name. There is no expiry: the sign-in asks for a new password only when someone else set it for you (temporary), or it turns up in a breach or is shorter than the rule. Change yours any time from the account menu → **Change password**.
   - Five wrong passwords in a row lock the account for 30 minutes. A company admin can unlock it sooner: **Admin Users** → **Unlock**.
   - One session at a time: signing in on another device or browser signs the first one out (it shows why). A session also ends after 30 minutes without activity (a warning comes at 25 — **Stay signed in**) and 12 hours after signing in.
-- **Employees**: **Employee** tab → the login code from HR (e.g. `ACME-7Q4KX9TB`, dash included). The app signs you out after 30 minutes without activity, and 12 hours after you sign in.
+- **Employees**: **Employee** tab → the login code from HR (e.g. `ACME-7Q4KX9TB`, dash included). The app signs you out after 30 minutes without activity, and 12 hours after you sign in. Many wrong codes for one company within 15 minutes pause its employees' sign-ins until the 15 minutes are up (the Audit Log shows "too many wrong login codes").
 - First-ever setup: the first account created becomes the company admin; its first sign-in asks for the password again.
 
 ## Company admin — one-time setup

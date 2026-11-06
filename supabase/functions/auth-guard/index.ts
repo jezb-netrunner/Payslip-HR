@@ -23,16 +23,34 @@
 // straight against the Auth API gets nowhere either. Every sign-in, failure,
 // lockout and password change is on the audit trail.
 //
-//   sign_in          {email, password}
-//   change_password  {email, password, new_password}   (signs in afterwards)
-//   set_password     {new_password, current_password?} (signed in: after a
-//                    reset link, or from the account menu)
+//
+// Employees sign in here too, with their login code. The code maps to an Auth
+// address and a password, both HMACs of it under the same secret (made only
+// here and in admin-users), so the address, which every access token and
+// stored session carries, gives nothing away. A code names no account, so a
+// per-account lockout can't slow guessing: each client's codes share a budget
+// of failed sign-ins per window (employee_sign_in_check, in the database),
+// and a wrong code never reaches the Auth server.
+//
+// Only the app's own pages may call this function (APP_ORIGINS): another
+// site can't turn its visitors' browsers into guessers.
+//
+//   sign_in            {email, password}
+//   change_password    {email, password, new_password}   (signs in afterwards)
+//   set_password       {new_password, current_password?} (signed in: after a
+//                      reset link, or from the account menu)
+//   employee_sign_in   {code}
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const MAX_FAILURES = 5;
 const LOCK_MINUTES = 30;
 const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 128;
+// failed employee sign-ins a client's codes may take per window
+const EMPLOYEE_MAX_FAILURES = 50;
+const EMPLOYEE_WINDOW_MINUTES = 15;
+const EMPLOYEE_LOGIN_DOMAIN = "jezb-netrunner.github.io";
+const DEFAULT_APP_ORIGINS = "https://jezb-netrunner.github.io,http://localhost:5173,http://localhost:4173";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -90,15 +108,46 @@ export async function breachCount(password: string, base: string): Promise<numbe
   }
 }
 
+async function hmac(key: string, message: string): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(message)));
+}
+
+const base64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
 /**
  * The password as the Auth server keeps it: an HMAC of it under a server
  * secret, so the Auth API alone can't confirm a guess. KEEP IN SYNC with
  * admin-users.
  */
 export async function keyedPassword(password: string, pepper: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pepper), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(password)));
-  return "k1." + btoa(String.fromCharCode(...mac)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return "k1." + base64url(await hmac(pepper, password));
+}
+
+/** KEEP IN SYNC with normalizeLoginCode in src/lib/loginCode.ts. */
+export function normalizeLoginCode(input: string): string {
+  return input.toUpperCase().replace(/\s+/g, "").replace(/[‐-―−_.]/g, "-");
+}
+
+/** KEEP IN SYNC with isValidLoginCode in src/lib/loginCode.ts. */
+export function isValidLoginCode(code: string): boolean {
+  return /^[A-Z][A-Z0-9]{1,9}-[A-Z0-9]{8,24}$/.test(code);
+}
+
+/**
+ * The Auth address of an employee login code: an HMAC under the secret, so
+ * the address gives nothing away without it. KEEP IN SYNC with admin-users.
+ */
+export async function employeeLoginEmail(code: string, pepper: string): Promise<string> {
+  const mac = await hmac(pepper, "payslip-hr/employee-login-email/v2:" + code);
+  const hex = [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `emp2-${hex.slice(0, 32)}@${EMPLOYEE_LOGIN_DOMAIN}`;
+}
+
+/** The password the Auth server keeps for an employee login code. KEEP IN SYNC with admin-users. */
+export async function employeeLoginPassword(code: string, pepper: string): Promise<string> {
+  return "e1." + base64url(await hmac(pepper, "payslip-hr/employee-login-password/v2:" + code));
 }
 
 interface Session {
@@ -125,6 +174,13 @@ Deno.serve(async (req: Request) => {
   }
   if (req.method !== "POST") {
     return json({ error: "Method not allowed" }, 405);
+  }
+  // a browser names the page that sent the request; scripts send no Origin
+  // and their attempts count like any others
+  const origin = req.headers.get("origin");
+  const appOrigins = (Deno.env.get("APP_ORIGINS") ?? DEFAULT_APP_ORIGINS).split(",").map((o) => o.trim().replace(/\/+$/, ""));
+  if (origin && !appOrigins.includes(origin)) {
+    return json({ error: "origin_not_allowed" }, 403);
   }
 
   try {
@@ -327,6 +383,35 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body?.action ?? "");
 
+    if (action === "employee_sign_in") {
+      const code = normalizeLoginCode(String(body.code ?? ""));
+      if (!isValidLoginCode(code)) return json({ error: "invalid" }, 401);
+      const email = await employeeLoginEmail(code, pepper);
+      const { data, error } = await db.rpc("employee_sign_in_check", {
+        p_client: code.split("-")[0],
+        p_email: email,
+        p_max: EMPLOYEE_MAX_FAILURES,
+        p_window_minutes: EMPLOYEE_WINDOW_MINUTES,
+        p_ip: ip,
+        p_agent: agent,
+      });
+      if (error) throw error;
+      const r = data as { result: string; user_id?: string; retry_at?: string };
+      if (r.result === "throttled") return json({ error: "throttled", retry_at: r.retry_at }, 429);
+      if (r.result === "deactivated") return json({ error: "deactivated" }, 403);
+      if (r.result !== "ok") return json({ error: "invalid" }, 401);
+      const granted = await passwordGrant(email, await employeeLoginPassword(code, pepper));
+      if (granted.session && granted.session.user.id === r.user_id) return json({ status: "ok", session: granted.session });
+      if (granted.session) {
+        await signOut(granted.session.access_token, "local");
+        return json({ error: "invalid" }, 401);
+      }
+      if (/banned/i.test(`${granted.code} ${granted.message}`)) return json({ error: "deactivated" }, 403);
+      if (granted.status === 429) return json({ error: "rate_limited" }, 429);
+      // an account whose password isn't this code's: a new code from HR fixes it
+      return json({ error: "invalid" }, 401);
+    }
+
     if (action === "sign_in" || action === "change_password") {
       const email = String(body.email ?? "").trim().toLowerCase();
       const password = String(body.password ?? "");
@@ -416,6 +501,8 @@ Deno.serve(async (req: Request) => {
 
     return json({ error: `Unknown action: ${action}` }, 400);
   } catch (e) {
-    return json({ error: String((e as Error)?.message ?? e) }, 500);
+    // the details stay in the function's log: this endpoint answers anyone
+    console.error(e);
+    return json({ error: "server_error" }, 500);
   }
 });

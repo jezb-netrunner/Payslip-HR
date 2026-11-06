@@ -1,0 +1,22 @@
+# Update pull requests for the npm packages and the deploy workflow's actions,
+# weekly. A release must be a week old before it is proposed: most poisoned
+# releases are caught and pulled within days. Security fixes need
+# Dependabot alerts and security updates on (Settings → Code security).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

@@ -1,7 +1,9 @@
-// Admin sign-in through the auth-guard edge function (BIR RMO 9-2021 Annex B,
-// system security): it locks an account after five failed sign-ins, admits
-// one session at a time (the only one with admin access) and makes a
-// temporary or 30-day-old password be changed first. The session it returns
+// Sign-in through the auth-guard edge function. Admins (BIR RMO 9-2021
+// Annex B, system security): it locks an account after five failed sign-ins,
+// admits one session at a time (the only one with admin access) and makes a
+// temporary, short or breached password be changed first. Employees: it maps
+// the login code to its account (the browser can't) and refuses a client's
+// sign-ins for a while after too many wrong codes. The session it returns
 // becomes the app's session.
 
 import type { Session } from '@supabase/supabase-js'
@@ -21,6 +23,7 @@ interface GuardPayload {
   error?: string
   message?: string
   locked_until?: string
+  retry_at?: string
 }
 
 const OFFLINE = "Can't reach the server right now. Check your connection and try again."
@@ -47,7 +50,26 @@ export function guardProblem(status: number, p: GuardPayload): string {
   return p.error ?? 'Sign-in failed.'
 }
 
-async function post(body: Record<string, unknown>, token?: string): Promise<GuardPayload> {
+/**
+ * What an employee is told for a refused login code. A rejected code and a
+ * busy server need different advice: on payday many employees sign in at
+ * once and can hit the sign-in rate limit with a perfectly good code.
+ */
+export function employeeProblem(status: number, p: GuardPayload): string {
+  switch (p.error) {
+    case 'invalid':
+      return 'That code did not work. Check it with your HR or payroll officer.'
+    case 'throttled':
+      return `Too many wrong codes were tried for your company. Try again after ${p.retry_at ? manilaStamp(new Date(p.retry_at)) : 'a few minutes'}, or ask your HR or payroll officer.`
+    case 'deactivated':
+      return 'This login is deactivated. Ask your HR or payroll officer.'
+    case 'rate_limited':
+      return 'Many people are signing in right now. Wait a minute, then try again.'
+  }
+  return guardProblem(status, p)
+}
+
+async function post(body: Record<string, unknown>, token?: string, problem = guardProblem): Promise<GuardPayload> {
   let res: Response
   try {
     res = await fetch(edgeFunctionUrl('auth-guard'), {
@@ -64,7 +86,7 @@ async function post(body: Record<string, unknown>, token?: string): Promise<Guar
   } catch {
     // a gateway error page
   }
-  if (!res.ok || payload.error) throw new Error(guardProblem(res.status, payload))
+  if (!res.ok || payload.error) throw new Error(problem(res.status, payload))
   return payload
 }
 
@@ -80,6 +102,11 @@ export async function guardSignIn(email: string, password: string): Promise<Sign
   if (p.status === 'password_change_required') return { kind: 'change_password', reason: p.reason ?? 'new' }
   await adopt(p)
   return { kind: 'signed_in' }
+}
+
+/** An employee's login code (already normalized and checked for its form). */
+export async function guardEmployeeSignIn(code: string): Promise<void> {
+  await adopt(await post({ action: 'employee_sign_in', code }, undefined, employeeProblem))
 }
 
 /** Before a session: the current password, then the new one (signs in with it). */

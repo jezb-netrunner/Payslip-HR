@@ -58,3 +58,14 @@ work:
   rules*; suites 23–24 enforce it).
 - A read that can return more than 1,000 rows (one row per employee, a
   client's month) goes through `fetchAll`; PostgREST silently caps the rest.
+- Credentials are keyed server-side only: an employee login code's Auth
+  address and password, and admin passwords, are HMACs under
+  `ADMIN_PASSWORD_PEPPER` made in the edge functions (`auth-guard`,
+  `admin-users`, KEEP IN SYNC). Never derive them in the browser, and never
+  store a value derived from a credential where admins can read it.
+- `anon` has no table privileges (default privileges revoked too); never
+  grant it any. Signed-out code paths don't query tables.
+- The built app runs under a Content-Security-Policy (`vite.config.ts`):
+  scripts from the app only, requests to the app and its Supabase project
+  only. A new external origin goes in the policy, and is checked in a
+  browser (`vite preview`) for violations.

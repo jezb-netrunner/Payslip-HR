@@ -5,7 +5,8 @@ service company (the *company*) runs HR, timekeeping, payroll and BIR
 reporting for many client employers (*clients*), on **Supabase** (Postgres +
 Auth + Edge Functions) with a **React + TypeScript + Tailwind** front end.
 
-**New here?** See the [Quick Guide](docs/USER_GUIDE.md).
+**New here?** See the [Quick Guide](docs/USER_GUIDE.md). Security, personal
+data and what to do after a breach: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Who uses it
 
@@ -19,7 +20,11 @@ Login codes are prefixed with the client code, can be changed or disabled by
 the entity admin at any time (signing the employee out everywhere), and are
 never stored — only their last characters are kept as a hint. Guessable
 codes (all digits, runs, too few different characters, the employee number)
-are refused; the Generate button makes random ones.
+are refused; the Generate button makes random ones. Employees sign in through
+the `auth-guard` edge function, which maps the code to its account with a
+server secret (the browser never learns the account's address) and, after 50
+wrong codes for a client within 15 minutes, pauses that client's employee
+sign-ins until the window ends.
 
 ## What it does
 
@@ -305,7 +310,14 @@ reminds company admins when this year's check is due).
    totals, payroll sequence) are skipped. CSV exports neutralize
    formula-like text so a typed name can't run as a spreadsheet formula.
 5. Employee login codes are client-prefixed (no cross-client guessing),
-   high-entropy, revocable, and never stored in readable form.
+   high-entropy, revocable, and never stored in readable form. The code's
+   Auth address and password are HMACs under the `ADMIN_PASSWORD_PEPPER`
+   secret, made only by the edge functions: the address, which every access
+   token and stored session carries, can't be worked back into the code, and
+   the Auth API alone can't confirm a guess. A code names no account, so
+   wrong codes count per client (`employee_sign_in_check`): the 50th within
+   15 minutes pauses that client's employee sign-ins until the window ends
+   and goes on the audit trail.
 6. Admin sign-in goes through the `auth-guard` edge function and follows
    NIST SP 800-63B-4 rather than the letter of BIR Annex B: passwords of 12+
    characters with no composition rules and no periodic changes, screened
@@ -339,7 +351,8 @@ See `docs/BIR_ANNEX_B.md` for these controls item by item against BIR RMO
 
 - **Backend**: Supabase (project `ruuhpghcgccvezkjhisy`, ap-southeast-1) —
   Postgres 17, RLS, triggers, RPCs, `admin-users` edge function for login
-  codes and admin accounts, `auth-guard` edge function for admin sign-in
+  codes and admin accounts, `auth-guard` edge function for admin and
+  employee sign-in
 - **Frontend**: Vite + React 19 + TypeScript + Tailwind CSS v4, React Router,
   Recharts, jsPDF, Lucide icons; each page is its own chunk and jsPDF loads
   when a PDF is made, so the first load is the shell and the sign-in only
@@ -389,13 +402,49 @@ from `import.meta.env.BASE_URL`, and `index.html` is copied to `404.html` so
 deep links survive refreshes. No secrets are needed in CI: the Supabase URL
 and anon key are public by design (RLS protects all data).
 
+The build puts a Content-Security-Policy in `index.html` (a meta tag: Pages
+can't send response headers): scripts only from the app, requests only to the
+app and its Supabase project (`VITE_SUPABASE_URL`, default in
+`vite.config.ts`), fonts bundled with the app (no font host). A new external
+origin (an API, an image host) must be added to the policy in
+`vite.config.ts`. `auth-guard` answers only the app's own pages
+(`APP_ORIGINS`, default the Pages site and localhost): on another host, set
+that edge-function secret to the site's origin.
+
+### Backups
+
+The Supabase Free plan keeps no database backups. Upgrade to Pro (daily
+backups kept 7 days; point-in-time recovery as an add-on), or take one
+yourself regularly (the Supabase CLI runs `pg_dump` in Docker; `$DB_URL` is
+the connection string from the dashboard's **Connect** button, session
+pooler):
+
+```bash
+npx supabase db dump --db-url "$DB_URL" -f roles.sql --role-only
+npx supabase db dump --db-url "$DB_URL" -f schema.sql
+npx supabase db dump --db-url "$DB_URL" -f data.sql --use-copy --data-only
+tar czf - roles.sql schema.sql data.sql | gpg --symmetric --cipher-algo AES256 -o "payslip-hr-$(date +%F).tgz.gpg"
+rm roles.sql schema.sql data.sql
+```
+
+The dump holds every employee's personal data and the Auth accounts: keep it
+encrypted and off the laptop, and never commit it or the connection string.
+Storage files (output reports) are not in it. Restoring:
+[Supabase → Backup and restore using the CLI](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
+See also `docs/SECURITY.md` (what the app holds, the owner's checklist, what
+to do after a suspected breach).
+
 ### Database
 
 Migrations are in `supabase/migrations/` and the edge functions are in
 `supabase/functions/` (`admin-users` with JWT verification on, `auth-guard`
 with it **off**: it is called before there is a session). Both need the
 edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random characters; never
-change it: admin passwords are kept keyed with it). The CAS-controls
+change it: admin passwords and employee login codes are kept keyed with it).
+The employee sign-in migration (`*_employee_sign_in_guard.sql`), both
+functions and the front end go live together: apply the migration, deploy
+both functions, then merge to `main`. Codes set before it map to the old
+address and must be set again (Login tab). The CAS-controls
 migration (`*_cas_controls.sql`), both functions and the front end go live
 together: after the migration only a session the guard admitted has admin
 access, so an older front end can't sign admins in, and this front end needs
@@ -423,10 +472,13 @@ per query, `(select public.current_employee_id())`,
 hundred rows or a hundred thousand. Keep new policies in that form; suites
 23 and 24 check it and count the calls. Reads that can return more than
 1,000 rows (PostgREST's cap) page through `fetchAll` (`src/lib/fetchAll.ts`).
+The anonymous role has no table privileges at all (a signed-out caller gets
+"permission denied"), and tables made later start without them: never grant
+`anon` anything.
 
 **Live against the repo.** `supabase/tests/fingerprint.sql` hashes the
 public schema (tables, columns, constraints, indexes, policies, functions,
-grants, triggers) and the storage policies. Run it on the live project and
+function and table grants, triggers) and the storage policies. Run it on the live project and
 on the replica `supabase/tests/run.sh` builds: equal hashes mean live runs
 exactly the tested schema.
 
@@ -443,7 +495,7 @@ src/
                   # management reports (insights.ts: pure aggregations + tests)
   pdf/            # payslip PDFs, cash advance agreement, time and insight reports
 supabase/         # migrations + edge functions (source of truth for schema)
-docs/             # user guide; BIR RMO 9-2021 Annex B notes
+docs/             # user guide; BIR RMO 9-2021 Annex B notes; security and data protection
 MEMORY.md         # running memory log: session history, deployed state, lessons
 ```
 

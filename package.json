@@ -12,6 +12,7 @@
     "test:edge": "vitest run --config supabase/functions/tests/vitest.config.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/figtree": "^5.3.0",
     "@supabase/supabase-js": "^2.112.3",
     "@tailwindcss/vite": "^4.3.3",
     "date-fns": "^4.4.0",
@@ -32,7 +33,7 @@
     "@vitejs/plugin-react": "^6.0.4",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0",
-    "vitest": "^4.1.11"
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12"
   }
 }

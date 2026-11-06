@@ -1,7 +1,9 @@
 @import "tailwindcss";
+/* Figtree, served with the app: no request to a font host (privacy, and a strict CSP) */
+@import '@fontsource-variable/figtree';
 
 @theme {
-  --font-sans: "Figtree", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Figtree Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
 
   /* Brand: deep teal green — primary actions, links, active states */
   --color-brand-50: #f0f6f5;

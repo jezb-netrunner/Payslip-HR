@@ -84,7 +84,7 @@ select pg_temp.check((select amount = 5000.00 and entity_id = '10000000-0000-000
 insert into employee_outputs (id, employee_id, output_date, description, amount, accepted_by)
 values ('60000000-0000-0000-0000-0000000019a2', '20000000-0000-0000-0000-0000000019f1', '2026-10-09', 'Market study', 20000, 'Project lead');
 select pg_temp.expect_error($$insert into employee_outputs (employee_id, output_date, description, quantity, amount) values ('20000000-0000-0000-0000-0000000019f1', '2026-10-05', 'Article', 2, 100)$$, '%employee_outputs_units%');
-select pg_temp.expect_error($$insert into employee_outputs (employee_id, output_date, description, amount) values ('20000000-0000-0000-0000-0000000019f1', current_date + 1, 'Report', 100)$$, '%can''t be in the future%');
+select pg_temp.expect_error($$insert into employee_outputs (employee_id, output_date, description, amount) values ('20000000-0000-0000-0000-0000000019f1', (now() at time zone 'Asia/Manila')::date + 1, 'Report', 100)$$, '%can''t be in the future%');
 select pg_temp.expect_error($$insert into employee_outputs (employee_id, output_date, description, amount) values ('20000000-0000-0000-0000-0000000019f1', '2026-02-27', 'Report', 100)$$, '%before the employee''s hire date%');
 select pg_temp.expect_error($$update employee_outputs set report_path = '10000000-0000-0000-0000-0000000019f0/someone-else/r.pdf', report_name = 'r.pdf' where id = '60000000-0000-0000-0000-0000000019a2'$$, '%employee''s folder%');
 update employee_outputs set report_path = '10000000-0000-0000-0000-0000000019f0/20000000-0000-0000-0000-0000000019f1/a1-study.pdf', report_name = 'study.pdf'

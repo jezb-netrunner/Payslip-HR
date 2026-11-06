@@ -100,9 +100,7 @@ export async function getEmployees(entityId: string): Promise<Employee[]> {
 }
 
 export function edgeFunctionUrl(name: string): string {
-  const base =
-    import.meta.env.VITE_SUPABASE_URL ?? 'https://ruuhpghcgccvezkjhisy.supabase.co'
-  return `${base}/functions/v1/${name}`
+  return `${__SUPABASE_URL__}/functions/v1/${name}`
 }
 
 /** Shown when the access token outlived its session (signed out elsewhere, or revoked). */

@@ -37,7 +37,7 @@ create or replace function pg_temp.calls(p_fn regprocedure) returns bigint
 language sql as $$ select coalesce(pg_stat_get_xact_function_calls(p_fn), 0) $$;
 grant execute on function pg_temp.calls(regprocedure) to authenticated;
 
--- can_manage_entity as it was before 20261106130000 (one per-row lookup)
+-- can_manage_entity as it was before 20261106083347_admin_policies_initplan (one per-row lookup)
 create or replace function pg_temp.old_can_manage_entity(p_entity uuid) returns boolean
 language sql stable as $$
   select p_entity is not null and exists (

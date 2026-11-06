@@ -2,7 +2,8 @@
 -- on the live project (Supabase SQL editor / MCP execute_sql) and on a local
 -- replica built by run.sh (database phr_test); matching hashes mean the live
 -- database has exactly the tested tables, columns, constraints, indexes,
--- policies (and the storage bucket policies), functions, grants and
+-- policies (and the storage bucket policies), functions, function and
+-- table grants (anon, authenticated) and
 -- triggers. Function bodies are compared
 -- without carriage returns (text pasted into the SQL editor from Windows
 -- arrives with CRLF line endings, which change nothing).
@@ -21,6 +22,10 @@ fn as (select string_agg(proname || '(' || pg_get_function_identity_arguments(oi
       from pg_proc where pronamespace = 'public'::regnamespace),
 fg as (select string_agg(proname || ':' || has_function_privilege('anon', oid, 'execute') || ':' || has_function_privilege('authenticated', oid, 'execute'), ';' order by proname, pg_get_function_identity_arguments(oid)) s
       from pg_proc where pronamespace = 'public'::regnamespace),
+tgr as (select string_agg(c.relname || ':' || has_table_privilege('anon', c.oid, 'select,insert,update,delete')
+        || ':' || has_table_privilege('authenticated', c.oid, 'select') || has_table_privilege('authenticated', c.oid, 'insert')
+        || has_table_privilege('authenticated', c.oid, 'update') || has_table_privilege('authenticated', c.oid, 'delete'), ';' order by c.relname) s
+      from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'),
 spol as (select string_agg(tablename || ':' || policyname || ':' || cmd || ':' || roles::text || ':' || coalesce(qual, '') || ':' || coalesce(with_check, ''), ';' order by tablename, policyname) s, count(*) n
       from pg_policies where schemaname = 'storage'),
 tg as (select string_agg(tgrelid::regclass::text || ':' || tgname || ':' || pg_get_triggerdef(oid), ';' order by tgrelid::regclass::text, tgname) s, count(*) n
@@ -32,5 +37,6 @@ select 'indexes', idx.n, md5(idx.s) from idx union all
 select 'policies', pol.n, md5(pol.s) from pol union all
 select 'functions', fn.n, md5(fn.s) from fn union all
 select 'fn_grants', null, md5(fg.s) from fg union all
+select 'table_grants', null, md5(tgr.s) from tgr union all
 select 'triggers', tg.n, md5(tg.s) from tg union all
 select 'storage_policies', spol.n, md5(spol.s) from spol;
