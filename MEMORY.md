@@ -768,10 +768,10 @@ plan** (no automatic backups, paused after 7 idle days); repo **public**,
 hold full SQL on production through the Supabase MCP; employee codes
 recoverable offline from a stale session; no CSP; 5 npm advisories.
 
-Done (repo only — **not deployed**, see *Current deployed state*):
+Done, and live the same day (owner: "yes, deploy it"; see *Current deployed state*):
 - Employee sign-in through `auth-guard` with keyed address and password and
   a per-client failure budget (lesson *Employee logins: code → keyed
-  address*); migration `20261106130000_employee_sign_in_guard`
+  address*); migration `20261106234101_employee_sign_in_guard`
   (`employee_sign_in_failures`, `employee_sign_in_check`); `admin-users`
   sets codes in the new form; the browser no longer derives anything.
 - `auth-guard`: answers only `APP_ORIGINS` (default the Pages origin and
@@ -804,18 +804,27 @@ Done (repo only — **not deployed**, see *Current deployed state*):
 
 ## Current deployed state (update when it changes)
 
-**2026-11-06: the repo is ahead of live (branch
-`claude/quirky-pascal-ceio6w`, not merged).** Not applied/deployed:
-migration `20261106130000_employee_sign_in_guard`, `auth-guard` with
-`employee_sign_in` and `APP_ORIGINS`, `admin-users` with keyed codes, the
-CSP front end. They go together: migration → deploy both functions → merge
-to `main` (the old front end signs employees in straight at Auth, which the
-new functions' accounts don't answer; live has 0 employee logins, so nothing
-breaks in between and no code needs setting again). After the apply,
-`fingerprint.sql` (now with `table_grants`) must match the replica. Owner
-items outstanding: Pro or a backup routine, branch protection on `main`,
-MCP read-only, delete the empty `punch-selfies` / `employee-photos` buckets
-(`docs/SECURITY.md` → *Only the owner can do these*).
+**2026-11-06 (23:41–23:46 UTC): the security hardening is live** (owner:
+"yes, deploy it"). Through MCP: migration `20261106234101
+employee_sign_in_guard` (repo file renamed from the `20261106130000`
+placeholder), `auth-guard` **v2** (verify_jwt **off**) and `admin-users`
+**v8** (verify_jwt on), both from the repo copies; then the front end through
+PR (branch `claude/quirky-pascal-ceio6w`) and the Pages workflow. Order
+mattered: the old front end signs employees in straight at Auth, which
+accounts made by the new `admin-users` don't answer; live had 0 employee
+logins, so the minutes in between broke nothing. `fingerprint.sql` on live
+= replica on all ten lines: tables 44 `de0ce9b5`, columns 621 `0e7ce703`,
+constraints 342 `d02b8eea`, indexes 126 `eed92050`, policies 70 `5d84aa29`,
+functions 92 `26dfde8f`, fn_grants `abe77da8`, table_grants `6ba8c56b`,
+triggers 124 `1726a39f`, storage_policies 3 `e7dbd16f`. Security advisors:
+the accepted 22 lint-0029 lines (unchanged; `employee_sign_in_check` is
+service-role only), RLS-no-policy INFO now on 5 service-role tables (+
+`employee_sign_in_failures`), leaked password protection (Pro). Live data
+checked (aggregates): `punch-selfies` and `employee-photos` empty, no
+`photo_url`, the owner has 1 verified authenticator (asked to add a second).
+Owner items outstanding: Pro or a backup routine, branch protection on
+`main`, MCP read-only, delete the two empty buckets (`docs/SECURITY.md` →
+*Only the owner can do these*).
 
 **2026-11-06, release 1.0.0: live = repo.** Last migration
 `20261106090036 foreign_key_indexes`. `supabase/tests/fingerprint.sql` on
