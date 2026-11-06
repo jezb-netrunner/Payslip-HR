@@ -46,7 +46,7 @@ import { notifyPendingChanged } from '../../lib/pending'
 import { useQuickAction } from '../../lib/quickAction'
 import { supabase } from '../../lib/supabase'
 import { round2 } from '../../payroll/types'
-import { generateAdvanceForm, type AdvanceFormData } from '../../pdf/advanceForm'
+import type { AdvanceFormData } from '../../pdf/advanceForm'
 import { logActivity } from '../../lib/activity'
 import { useReportStamp } from '../../lib/useReportStamp'
 
@@ -351,6 +351,12 @@ function Advances({ entity }: { entity: Entity }) {
 }
 
 /** The employer block of the cash advance agreement. */
+/** The agreement PDF; its library loads on first use, not with the page. */
+async function generateAdvanceForm(data: AdvanceFormData) {
+  const { generateAdvanceForm: generate } = await import('../../pdf/advanceForm')
+  generate(data)
+}
+
 function advanceEmployer(entity: Entity): AdvanceFormData['employer'] {
   return {
     name: entity.name,
@@ -463,22 +469,27 @@ function RecordAdvanceModal({
                 ? 'The employee must sign the agreement (authorization to deduct) first.'
                 : ''
 
-  function printForm() {
+  async function printForm() {
     if (!person || amount <= 0 || (!f.agreed && per <= 0)) {
       toast('error', 'Fill in the employee, the amount and the deduction per payroll first.')
       return
     }
-    generateAdvanceForm({
-      employer: advanceEmployer(entity),
-      employee: { name: fullName(person), employeeNo: person.employee_no, position: person.position },
-      amount,
-      perPayroll: per,
-      payrolls,
-      releasedOn: f.releasedOn,
-      firstDeduction: f.firstDeduction,
-      releaseMethod: PAYMENT_METHOD_LABELS[f.method].toLowerCase(),
-      stamp: stamp('Cash advance agreement'),
-    })
+    try {
+      await generateAdvanceForm({
+        employer: advanceEmployer(entity),
+        employee: { name: fullName(person), employeeNo: person.employee_no, position: person.position },
+        amount,
+        perPayroll: per,
+        payrolls,
+        releasedOn: f.releasedOn,
+        firstDeduction: f.firstDeduction,
+        releaseMethod: PAYMENT_METHOD_LABELS[f.method].toLowerCase(),
+        stamp: stamp('Cash advance agreement'),
+      })
+    } catch (err) {
+      toast('error', errorMessage(err, 'Could not prepare the agreement'))
+      return
+    }
     void logActivity('print', entity.id, { report: 'Cash advance agreement', employee_no: person.employee_no })
   }
 
@@ -794,18 +805,23 @@ function AdvanceDetailModal({
           )}
           <Button
             variant="secondary"
-            onClick={() => {
-              generateAdvanceForm({
-                employer: advanceEmployer(entity),
-                employee: { name: fullName(a.employees), employeeNo: a.employees.employee_no, position: a.employees.position },
-                amount: Number(a.total_amount),
-                perPayroll: Number(a.amount_per_period),
-                payrolls: payrollsToRepay(Number(a.total_amount), Number(a.amount_per_period)),
-                releasedOn: a.released_on ?? today,
-                firstDeduction: a.start_date ?? a.released_on ?? today,
-                releaseMethod: a.release_method ? PAYMENT_METHOD_LABELS[a.release_method].toLowerCase() : 'cash',
-                stamp: stamp('Cash advance agreement'),
-              })
+            onClick={async () => {
+              try {
+                await generateAdvanceForm({
+                  employer: advanceEmployer(entity),
+                  employee: { name: fullName(a.employees), employeeNo: a.employees.employee_no, position: a.employees.position },
+                  amount: Number(a.total_amount),
+                  perPayroll: Number(a.amount_per_period),
+                  payrolls: payrollsToRepay(Number(a.total_amount), Number(a.amount_per_period)),
+                  releasedOn: a.released_on ?? today,
+                  firstDeduction: a.start_date ?? a.released_on ?? today,
+                  releaseMethod: a.release_method ? PAYMENT_METHOD_LABELS[a.release_method].toLowerCase() : 'cash',
+                  stamp: stamp('Cash advance agreement'),
+                })
+              } catch (err) {
+                toast('error', errorMessage(err, 'Could not prepare the agreement'))
+                return
+              }
               void logActivity('print', entity.id, { report: 'Cash advance agreement', employee_no: a.employees.employee_no })
             }}
           >

@@ -29,7 +29,7 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '../lib/auth'
 import { useFocusTrap } from '../lib/focus'
 import { useEntity } from '../lib/entity'
@@ -41,7 +41,8 @@ import ChangePassword from './ChangePassword'
 import { TwoStepSettings } from './TwoStep'
 import { IDLE_MINUTES, SESSION_END_NOTICE, SESSION_END_REASON, sessionOf, useSessionWatch, type SessionEnd } from '../lib/useSessionWatch'
 import { setSignInNotice } from '../lib/authGuard'
-import { Avatar, Button, Logo, Modal } from './ui'
+import { Avatar, Button, Logo, Modal, Spinner } from './ui'
+import PageBoundary from './PageBoundary'
 
 type Counter = 'corrections' | 'leaves' | 'advances'
 
@@ -607,7 +608,17 @@ export default function Shell({ mode }: { mode: 'admin' | 'employee' }) {
 
         <main className="scroll-thin min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[1400px] p-4 sm:p-6 lg:p-8">
-            <Outlet />
+            <PageBoundary resetKey={pathname}>
+              <Suspense
+                fallback={
+                  <div className="flex justify-center py-16">
+                    <Spinner />
+                  </div>
+                }
+              >
+                <Outlet />
+              </Suspense>
+            </PageBoundary>
           </div>
         </main>
       </div>

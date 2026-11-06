@@ -6,32 +6,35 @@ import ChangePassword from './components/ChangePassword'
 import { MfaGate } from './components/TwoStep'
 import Login from './pages/Login'
 import Shell from './components/Shell'
-import AdminDashboard from './pages/admin/Dashboard'
-import Clients from './pages/admin/Clients'
-import Users from './pages/admin/Users'
-import Employees from './pages/admin/Employees'
-import EmployeeDetail from './pages/admin/EmployeeDetail'
-import Timesheets from './pages/admin/Timesheets'
-import Schedules from './pages/admin/Schedules'
-import LeavesAdmin from './pages/admin/LeavesAdmin'
-import Payroll from './pages/admin/Payroll'
-import PayrollRunDetail from './pages/admin/PayrollRunDetail'
-import CashAdvances from './pages/admin/CashAdvances'
-import Consultants from './pages/admin/Consultants'
-import Announcements from './pages/admin/Announcements'
-import Reports from './pages/admin/Reports'
-import Statutory from './pages/admin/Statutory'
-import Holidays from './pages/admin/Holidays'
-import Settings from './pages/admin/Settings'
-import AuditLog from './pages/admin/AuditLog'
-import DataExport from './pages/admin/DataExport'
-import MyDashboard from './pages/employee/MyDashboard'
-import MyAttendance from './pages/employee/MyAttendance'
-import MyPayslips from './pages/employee/MyPayslips'
-import MyLeaves from './pages/employee/MyLeaves'
-import MyAdvances from './pages/employee/MyAdvances'
-import MyAnnouncements from './pages/employee/MyAnnouncements'
-import MyProfile from './pages/employee/MyProfile'
+import { lazyPage } from './lib/lazyPage'
+
+// each page is its own chunk, loaded on first visit
+const AdminDashboard = lazyPage(() => import('./pages/admin/Dashboard'))
+const Clients = lazyPage(() => import('./pages/admin/Clients'))
+const Users = lazyPage(() => import('./pages/admin/Users'))
+const Employees = lazyPage(() => import('./pages/admin/Employees'))
+const EmployeeDetail = lazyPage(() => import('./pages/admin/EmployeeDetail'))
+const Timesheets = lazyPage(() => import('./pages/admin/Timesheets'))
+const Schedules = lazyPage(() => import('./pages/admin/Schedules'))
+const LeavesAdmin = lazyPage(() => import('./pages/admin/LeavesAdmin'))
+const Payroll = lazyPage(() => import('./pages/admin/Payroll'))
+const PayrollRunDetail = lazyPage(() => import('./pages/admin/PayrollRunDetail'))
+const CashAdvances = lazyPage(() => import('./pages/admin/CashAdvances'))
+const Consultants = lazyPage(() => import('./pages/admin/Consultants'))
+const Announcements = lazyPage(() => import('./pages/admin/Announcements'))
+const Reports = lazyPage(() => import('./pages/admin/Reports'))
+const Statutory = lazyPage(() => import('./pages/admin/Statutory'))
+const Holidays = lazyPage(() => import('./pages/admin/Holidays'))
+const Settings = lazyPage(() => import('./pages/admin/Settings'))
+const AuditLog = lazyPage(() => import('./pages/admin/AuditLog'))
+const DataExport = lazyPage(() => import('./pages/admin/DataExport'))
+const MyDashboard = lazyPage(() => import('./pages/employee/MyDashboard'))
+const MyAttendance = lazyPage(() => import('./pages/employee/MyAttendance'))
+const MyPayslips = lazyPage(() => import('./pages/employee/MyPayslips'))
+const MyLeaves = lazyPage(() => import('./pages/employee/MyLeaves'))
+const MyAdvances = lazyPage(() => import('./pages/employee/MyAdvances'))
+const MyAnnouncements = lazyPage(() => import('./pages/employee/MyAnnouncements'))
+const MyProfile = lazyPage(() => import('./pages/employee/MyProfile'))
 
 function Centered({ title, body, children }: { title: string; body: string; children?: React.ReactNode }) {
   return (

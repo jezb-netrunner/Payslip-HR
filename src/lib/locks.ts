@@ -2,6 +2,7 @@
 // payroll is locked in the database (attendance_locked); screens grey those
 // days out instead of letting a save fail.
 
+import { fetchAll } from './fetchAll'
 import { eachDate } from './manila'
 import { supabase } from './supabase'
 
@@ -18,13 +19,18 @@ export async function lockedKeys(entityId: string, start: string, end: string): 
   if (error) throw error
   const out = new Set<string>()
   if (!runs?.length) return out
-  const { data: slips, error: slipErr } = await supabase
-    .from('payslips')
-    .select('employee_id, payroll_run_id')
-    .in('payroll_run_id', runs.map((r) => r.id))
-  if (slipErr) throw slipErr
-  for (const s of slips ?? []) {
-    const r = runs.find((x) => x.id === s.payroll_run_id)
+  // every employee of every overlapping run: past 1,000 rows on a large client
+  const slips = await fetchAll<{ employee_id: string; payroll_run_id: string }>((from, to) =>
+    supabase
+      .from('payslips')
+      .select('employee_id, payroll_run_id')
+      .in('payroll_run_id', runs.map((r) => r.id))
+      .order('id')
+      .range(from, to),
+  )
+  const byId = new Map(runs.map((r) => [r.id as string, r]))
+  for (const s of slips) {
+    const r = byId.get(s.payroll_run_id)
     if (!r) continue
     for (const d of eachDate(r.period_start > start ? r.period_start : start, r.period_end < end ? r.period_end : end)) {
       out.add(`${s.employee_id as string}|${d}`)

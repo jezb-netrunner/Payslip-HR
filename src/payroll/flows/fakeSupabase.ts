@@ -63,6 +63,9 @@ function resolve(row: Row, path: string): any {
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v))
 
+/** PostgREST answers at most this many rows per request (Supabase's max-rows), whatever the range. */
+export const MAX_ROWS = 1000
+
 class Q implements PromiseLike<{ data: any; error: any }> {
   private filters: ((r: Row) => boolean)[] = []
   private orders: { col: string; asc: boolean }[] = []
@@ -223,6 +226,7 @@ class Q implements PromiseLike<{ data: any; error: any }> {
     }
     if (this.rangeArg) rows = rows.slice(this.rangeArg[0], this.rangeArg[1] + 1)
     if (this.limitN !== undefined) rows = rows.slice(0, this.limitN)
+    rows = rows.slice(0, MAX_ROWS)
     const out = rows.map((r) => {
       const c = clone(r)
       for (const rel of this.embeds) {

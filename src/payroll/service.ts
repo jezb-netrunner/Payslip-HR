@@ -209,24 +209,17 @@ export function toAnnualFact(p: YearPayslip): AnnualPayslipFact {
 }
 
 export async function fetchTaxYears(entityId: string, year: number): Promise<EmployeeTaxYear[]> {
-  const { data, error } = await supabase
-    .from('employee_tax_years')
-    .select('*')
-    .eq('entity_id', entityId)
-    .eq('year', year)
-  if (error) throw error
-  return (data ?? []) as EmployeeTaxYear[]
+  // one row per employee: a client past 1,000 employees needs more than one page
+  return fetchAll<EmployeeTaxYear>((from, to) =>
+    supabase.from('employee_tax_years').select('*').eq('entity_id', entityId).eq('year', year).order('id').range(from, to),
+  )
 }
 
 /** Opening balances of one client's tax year: this employer's pay before going live on the app. */
 export async function fetchOpeningBalances(entityId: string, year: number): Promise<EmployeeOpeningBalance[]> {
-  const { data, error } = await supabase
-    .from('employee_opening_balances')
-    .select('*')
-    .eq('entity_id', entityId)
-    .eq('year', year)
-  if (error) throw error
-  return (data ?? []) as EmployeeOpeningBalance[]
+  return fetchAll<EmployeeOpeningBalance>((from, to) =>
+    supabase.from('employee_opening_balances').select('*').eq('entity_id', entityId).eq('year', year).order('id').range(from, to),
+  )
 }
 
 /** Employees a run covers: right client, frequency, employment overlapping the period. */
