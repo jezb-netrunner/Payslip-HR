@@ -623,7 +623,7 @@ career events; rows whose employee no. is already in the client are
 skipped, so the file can be re-uploaded. Payloads were inserted into the
 replica as an admin (constraints, pay-history seed, events) and the modal
 driven at 1280/390 px in the harness. Employee sessions end in the
-database (migration `20261106120000_employee_session_timeout`, lesson
+database (migration `20261106080630_employee_session_timeout`, lesson
 below); the watcher touches and checks for employees too. Tests 440 → 455,
 SQL suite 23. Then two independent reviews (DB/security, engine/UI), the DB
 walkthrough re-run on a fresh replay and a re-crawl of every screen.
@@ -676,15 +676,19 @@ on live and the replica (31 constraints); advisors unchanged. Checked on
 live before the timeout migration: `postgres` can select and delete
 `auth.sessions` (columns id, user_id, created_at present).
 
-**2026-11-06: `20261106120000_employee_session_timeout` is NOT live.**
-Apply it only after (or with) the front end of this branch: the deployed
-app never touches employee sessions, so with the migration alone every
-employee would lose data access 32 minutes after signing in. The branch's
-front end works with or without it (a missing `touch_employee_session` is
-ignored). At the apply, employee sessions older than 32 minutes end once
-(sign in again), like the admins' at the CAS go-live. Expect two new
-intentional advisor lines then: WARN `touch_employee_session` (definer,
-authenticated) and INFO `employee_session_activity` (RLS, no policy).
+**2026-11-06: the employee session timeout is live** (owner: "create the PR
+and merge it, then apply the migration"). PR #11 (this branch's work since
+b2af6c5) merged as `ccfc7d5`; Pages run 14 green (build with the engine
+tests, deploy done 08:05:44 UTC); then the migration through MCP as
+`20261106080630 employee_session_timeout` (repo file renamed from the
+`20261106120000` placeholder in the follow-up PR). Order mattered: the old
+front end never touched employee sessions. No employee login existed on
+live (one profile, the owner), so no one was signed out. Checked after the
+apply: the seven session functions (body, security, volatility, config,
+result, anon/authenticated execute) and `employee_session_activity`
+(columns, constraints, index, grants, RLS) hash the same on live and the
+replica; security advisors = the list below plus exactly the two expected
+lines.
 
 **2026-11-06: `employee_opening_balances` is live** (migration applied
 through MCP as `20261106060259 opening_balances`, repo file renamed). The
@@ -806,7 +810,9 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
 - (superseded 2026-11-04 by v7, above) Edge function **`admin-users` v5** live (verify_jwt on), deployed
   2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
   login codes refused, incl. all-letter codes and the employee's names).
-- Security advisors after the last DDL (2026-11-04, CAS controls): 17
+- Security advisors after the last DDL (2026-11-06, employee session
+  timeout; the list below is 2026-11-04's plus WARN `touch_employee_session`
+  and INFO `employee_session_activity`): 18
   intentional WARNs "SECURITY DEFINER executable by authenticated" (RLS
   helpers `is_company_admin` / `can_manage_entity` / `can_manage_employee` /
   `can_manage_output_report` / `current_employee_id` /
@@ -814,9 +820,10 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
   `finalize_payroll_run` / `void_payroll_run` / `reopen_payroll_run` (always
   refuses) / `payroll_run_out_of_balance` / `review_time_correction` /
   `approve_advance_request` / `log_activity`; the caller's own session:
-  `my_session_state` / `my_session_active` / `touch_admin_session`; each
-  checks the caller), INFO "RLS enabled, no policy" on `auth_guard`,
-  `admin_session_activity` and `document_counters` (service role and
+  `my_session_state` / `my_session_active` / `touch_admin_session` /
+  `touch_employee_session`; each checks the caller), INFO "RLS enabled, no
+  policy" on `auth_guard`, `admin_session_activity`,
+  `employee_session_activity` and `document_counters` (service role and
   definer functions only), and "Leaked password protection disabled" (a Pro
   setting; auth-guard screens admin passwords itself, employees have login
   codes). Performance advisors: INFO only for unindexed FKs / unused
