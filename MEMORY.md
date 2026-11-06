@@ -610,9 +610,35 @@ time in/out); no bank file or SSS R3 / PhilHealth / Pag-IBIG upload formats
 (one generic CSV); no BIR DAT; payslips not emailed; employee sessions have
 no server-side timeout; mid-month go-live contributions only warned.
 
+### 2026-11-06 — Bulk employee import, employee session timeout, session-wide check (same branch)
+
+**Asked:** build the bulk employee import and a timeout for employee
+sign-ins, then check everything added or edited this session for bugs.
+
+**Did:** Employees → **Import** (`src/lib/employeeImport.ts` pure parse +
+check, `src/pages/admin/EmployeeImport.tsx`): CSV template of every column
+payroll and the BIR forms read, a preview by line (errors leave the row
+out, warnings don't), each passing row inserted like the Add form plus its
+career events; rows whose employee no. is already in the client are
+skipped, so the file can be re-uploaded. Payloads were inserted into the
+replica as an admin (constraints, pay-history seed, events) and the modal
+driven at 1280/390 px in the harness. Employee sessions end in the
+database (migration `20261106120000_employee_session_timeout`, lesson
+below); the watcher touches and checks for employees too. Tests 440 → 455,
+SQL suite 23. Then two independent reviews (DB/security, engine/UI), the DB
+walkthrough re-run on a fresh replay and a re-crawl of every screen.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: `20261106120000_employee_session_timeout` is NOT live.**
+Apply it only after (or with) the front end of this branch: the deployed
+app never touches employee sessions, so with the migration alone every
+employee would lose data access 32 minutes after signing in. The branch's
+front end works with or without it (a missing `touch_employee_session` is
+ignored). At the apply, employee sessions older than 32 minutes end once
+(sign in again), like the admins' at the CAS go-live.
 
 **2026-11-06: `employee_opening_balances` is live** (migration applied
 through MCP as `20261106060259 opening_balances`, repo file renamed). The
@@ -1151,6 +1177,18 @@ or it dies with the tool's shell; impersonate users with
 inside a transaction. Differences from Supabase (PG17, real GoTrue/storage)
 remain, so the security advisors still run after the live apply. Why it
 mattered: RLS mistakes are silent — a policy that is too open never errors.
+
+### Employee sessions: Auth's start, the app's activity, no bypass for API tokens (design decision, 2026-11-06)
+
+> `employee_session_ok(user)` in `current_employee_id()` / `current_employee_entity_id()`: the JWT's `session_id` must still exist in `auth.sessions` for that user, `created_at` within 12 h, and `coalesce(employee_session_activity.seen_at, created_at)` within 32 min. `touch_employee_session()` extends only a session that is still valid. Claims with no `role` (direct DB sessions: SQL editor, migrations, the suites) skip the rule.
+
+Why: employees sign in straight at Auth (no guard to record a start), so the
+start comes from Auth's own row, which no client can move, and the sign-in
+counts as the first activity (no race before the app's first touch). A
+signed-out session reads nothing at once (PostgREST used to accept its JWT
+until expiry). Every PostgREST request as `authenticated` carries a `role`
+claim, so the escape hatch can't be reached through the API — unlike the
+admin rule's null `admin_session_id`, which was a per-account state.
 
 ### The year to date is only what the app holds: count periods from there (correction, 2026-11-06)
 
