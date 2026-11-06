@@ -678,15 +678,42 @@ read policies on the tables employees read, `(select caller_is_admin()) AND
 latest 50 entries 383 → 1 ms. Suite 23.11 counts calls in the transaction
 (`track_functions = 'all'`, `pg_stat_get_xact_function_calls`): one
 `current_employee_id()` per statement, no `can_manage_*` — fails on the old
-policies — plus the policy form. Not done (separate change): admin reads
-still pay `can_manage_entity` per row (56k rows ≈ 4.2 s; real admin pages
-filter by client and period first). Fix would be
-`entity_id = any((select managed_entity_ids()))` with care that it matches
-`can_manage_entity` exactly (company admins: every entity).
+policies — plus the policy form. Admin reads were done next (entry below).
+
+### 2026-11-06 — Admin page speed-up (owner: "do the admin page speed-up too")
+
+Migration `20261106083347_admin_policies_initplan` (live). New
+`managed_entity_ids()` (an entity admin's active clients, same profile /
+revocation / admin-session checks; `{}` for anyone else) and
+`managed_employee_ids()` (their employees, or all for a company admin);
+`can_manage_entity` rebuilt on them. All 44 public policies that called
+`can_manage_entity(x)` / `can_manage_employee(x)` / a bare
+`is_company_admin()` got the mechanical equivalent evaluated once per
+statement (generator in the session scratchpad, from the replica's
+pg_policies). Admin reads, 56k time entries: 4.6 s → 16 ms (company admin),
+4.5 s → 18 ms (entity admin); one client-month 93–107 ms → ~1 ms. Proof of
+same answers: suite 24 (new can_manage_entity vs the old body for every
+caller × client incl. null/unknown; managed lists for deactivated, revoked,
+archived-client cases; call counts; writes), mutation runs (dropping the
+active-client filter, or one policy back to per-row) fail it, and a
+before/after snapshot of what 41 users see in 43 RLS tables matched (0
+differences). Storage `output reports` policies still call
+`can_manage_output_report(name)` per object (path-dependent; small).
+Found on the way: live's `can_manage_employee` body has CRLF line ends
+(same logic, hashes differ unless `\r` is stripped).
 
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: `20261106083347_admin_policies_initplan` is live** (MCP,
+before its PR merged: policies and helpers only, no front-end change).
+Checked before: policies hash = replica (`4448b3a5…`), helper bodies equal
+(CR-stripped). After: all 70 public policies (`bd0792e2…`) and the seven
+helpers (bodies, grants) hash the same on live and the replica; no policy
+calls `can_manage_*` per row. Security advisors: two new lint-0029 lines
+(`managed_entity_ids`, `managed_employee_ids`, accepted class);
+performance unchanged.
 
 **2026-11-06: `20261106082055_employee_policies_initplan` is live** (MCP,
 applied before its PR merged: policies and one helper only, no front-end
@@ -1259,7 +1286,7 @@ mattered: RLS mistakes are silent — a policy that is too open never errors.
 
 ### RLS helpers run per row unless wrapped — and OR'd policies run for everyone (2026-11-06)
 
-> In a policy, call a row-independent helper as `(select public.f())` (evaluated once per statement) and put the admin branch behind `(select public.caller_is_admin()) AND …` on tables employees read. Suite 23.11 checks both.
+> In a policy, never call a caller check per row: use `(select public.f())` for row-independent helpers, `x = ANY ((select public.managed_entity_ids())::uuid[])` for "may manage this client" and `x IN (select public.managed_employee_ids())` (hashed) for "may manage this employee". Suites 23.11 and 24 check the form and count calls.
 
 Why: permissive policies are combined with OR, so every caller pays every
 policy's per-row cost — an employee's query ran `can_manage_entity` on each
@@ -1271,7 +1298,12 @@ admin profile); keep `caller_is_admin` no stricter than that. AND
 short-circuits left to right inside one policy expression (the call counts
 confirm it: no `can_manage_entity` call for an employee). Measure with `explain analyze` as the role, or
 count calls with `pg_stat_get_xact_function_calls` under
-`set local track_functions = 'all'`.
+`set local track_functions = 'all'` — against a baseline taken in the same
+transaction: pending stats keep an earlier transaction's calls for up to a
+second. Gotcha: `x = ANY ((select f()))` parses as ANY(subquery) and fails
+(uuid = uuid[]); cast the array, `ANY ((select f())::uuid[])`, to keep it an
+initPlan. Admins: 4.6 s → 16 ms for 56k rows once the client list was
+computed once per statement.
 
 ### Employee sessions: Auth's start, the app's activity, no bypass for API tokens (design decision, 2026-11-06)
 
