@@ -5,10 +5,10 @@
 --    (20261106080630_employee_session_timeout) each call reads profiles,
 --    auth.sessions and employee_session_activity. Wrapped as (select ...),
 --    Postgres evaluates the helper once per statement (an initPlan): the
---    answer depends only on the caller's token and session, never on the row.
+--    answer depends only on the caller (token and session), never on the row.
 --
--- 2. Permissive policies are OR'd, so an employee's query also ran the admin
---    policy's can_manage_entity(entity_id) / can_manage_employee(employee_id)
+-- 2. Permissive policies are combined with OR, so a query by an employee also
+--    ran the admin policy can_manage_entity(entity_id) / can_manage_employee(employee_id)
 --    on every row (each a profiles + session lookup) only to get false. Those
 --    branches are now guarded by (select public.caller_is_admin()) first, once
 --    per statement, and AND stops at false. The guard changes no answer:
@@ -17,10 +17,10 @@
 --    caller_is_admin checks (and nothing more, so it can never be false where
 --    they are true). is_company_admin() takes no row value: wrapped as well.
 --
--- Every other part of each USING and WITH CHECK is the policy's current
+-- Every other part of each USING and WITH CHECK is the current
 -- expression (pg_get_expr, as live and the replica hold it). ALTER POLICY, no
 -- DROP. Measured on the replica (56,002 time entries, an employee with 1,400):
--- a count of the employee's own entries took 12.6 s before.
+-- the employee counting their own entries, about 12 s before and 9 ms after.
 
 create or replace function public.caller_is_admin()
 returns boolean language sql stable security definer set search_path = public as $$
@@ -104,7 +104,7 @@ alter policy "time_entries: read own" on public.time_entries
   using ((employee_id = (select public.current_employee_id())));
 
 -- 2. the admin policies on the tables employees read (cmd ALL: they apply to
--- an employee's reads and requests too)
+-- the reads and requests of employees too)
 
 alter policy "advance_repayments: admins manage" on public.advance_repayments
   using (((select public.caller_is_admin()) AND can_manage_entity(entity_id)))
