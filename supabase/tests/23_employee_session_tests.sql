@@ -192,4 +192,43 @@ select pg_temp.check((select entity_id = '10000000-0000-0000-0000-0000000023a0' 
 select pg_temp.check((select entity_id is null from audit_logs
   where actor_id = :ue and action = 'report' order by id desc limit 1), 'other activity of an ended session is not');
 
+\echo '--- 23.11 an employee''s read: the employee helper once per statement, no admin check per row'
+insert into time_entries (employee_id, work_date, clock_in, clock_out, status, source)
+select e, d::date, d + interval '1 hour', d + interval '9 hours', 'closed', 'admin'
+from unnest(array['20000000-0000-0000-0000-0000000023a1', '20000000-0000-0000-0000-0000000023a2']::uuid[]) e,
+     generate_series('2026-03-02'::timestamptz, '2026-03-21', interval '1 day') d;
+insert into holidays (entity_id, holiday_date, name, kind)
+values ('10000000-0000-0000-0000-0000000023a0', '2026-03-10', 'Founding day', 'special_non_working');
+begin;
+set local track_functions = 'all';
+set local role authenticated;
+select pg_temp.token(:ue, '50000000-0000-0000-0000-0000000023f1');
+select pg_temp.check((select count(*) from time_entries where work_date between '2026-03-02' and '2026-03-21') = 20, 'own 20 of the 40 entries');
+select pg_temp.check(pg_stat_get_xact_function_calls('public.current_employee_id()'::regprocedure) = 1, 'current_employee_id() once, not per row');
+select pg_temp.check((select count(*) from entities) = 1 and (select count(*) from holidays where entity_id is not null) = 1
+  and (select count(*) from leave_types where entity_id is not null) > 0, 'own client, its holiday and leave types');
+select pg_temp.check(pg_stat_get_xact_function_calls('public.current_employee_entity_id()'::regprocedure) = 3, 'current_employee_entity_id() once per statement');
+select pg_temp.check(coalesce(pg_stat_get_xact_function_calls('public.can_manage_entity(uuid)'::regprocedure), 0) = 0
+  and coalesce(pg_stat_get_xact_function_calls('public.can_manage_employee(uuid)'::regprocedure), 0) = 0, 'no admin check per row');
+rollback;
+-- the company admin still reads and manages them all
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :owner, true);
+select pg_temp.check((select count(*) from time_entries where work_date between '2026-03-02' and '2026-03-21') = 40, 'admin reads all 40');
+update time_entries set admin_notes = 'checked' where work_date = '2026-03-02';
+select pg_temp.check((select count(*) from time_entries where admin_notes = 'checked') = 2, 'admin updates both employees''');
+rollback;
+-- the policies keep the form: the helpers wrapped, the admin branches guarded
+select pg_temp.check((select count(*) from pg_policies where coalesce(qual, '') || coalesce(with_check, '') ~ 'current_employee_') = 23,
+  'the 23 employee policies');
+select pg_temp.check((select bool_and(
+    regexp_count(coalesce(qual, '') || ' ' || coalesce(with_check, ''), '(current_employee_(entity_)?id|is_company_admin)\(\)')
+  = regexp_count(coalesce(qual, '') || ' ' || coalesce(with_check, ''), 'SELECT (current_employee_(entity_)?id|is_company_admin)\(\)')
+  and (coalesce(qual, '') || coalesce(with_check, '') !~ 'can_manage_' or coalesce(qual, '') ~ 'SELECT caller_is_admin\(\)'))
+  from pg_policies p where cmd in ('ALL', 'SELECT') and exists (select 1 from pg_policies e where e.tablename = p.tablename
+    and coalesce(e.qual, '') || coalesce(e.with_check, '') ~ 'current_employee_')),
+  'on the tables employees read: no helper per row, every admin branch behind caller_is_admin()');
+select pg_temp.check((select count(*) from pg_policies where qual ~ 'SELECT caller_is_admin\(\)') = 19, '16 admin policies and 3 mixed read policies guarded');
+
 \echo 'PASSED 23'
