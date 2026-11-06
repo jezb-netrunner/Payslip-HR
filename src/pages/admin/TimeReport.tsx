@@ -50,7 +50,6 @@ import {
   type ReportLeave,
   type ReportTotals,
 } from '../../lib/timeReport'
-import { buildDtrDoc, buildTimeSummaryDoc, timeReportFileName } from '../../pdf/timeReportPdf'
 import type { PayFrequency } from '../../payroll/types'
 import { useReportStamp } from '../../lib/useReportStamp'
 
@@ -803,6 +802,7 @@ function ExportModal({
     if (busy) return
     setDone(0)
     try {
+      const { buildDtrDoc, buildTimeSummaryDoc, timeReportFileName } = await import('../../pdf/timeReportPdf')
       const stem = timeReportFileName(
         content === 'dtr' ? 'dtr' : 'time_summary',
         entity.code,

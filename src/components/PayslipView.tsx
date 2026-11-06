@@ -2,12 +2,13 @@ import { Download } from 'lucide-react'
 import type { Entity, Payslip, PayrollRun } from '../lib/db'
 import { fmtDate, fmtPeriod, money } from '../lib/format'
 import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
-import { generatePayslipPdf } from '../pdf/payslipPdf'
 import { Avatar, Badge, Button } from './ui'
 import { employerFor, roundingLines } from '../lib/payslip'
 import { tinLine } from '../lib/reportStamp'
 import { useReportStamp } from '../lib/useReportStamp'
 import { logActivity } from '../lib/activity'
+import { errorMessage } from '../lib/errors'
+import { useToast } from './toast'
 
 export type PayslipCompany = Pick<
   Entity,
@@ -49,14 +50,21 @@ export default function PayslipView({
   const snap = slip.employee_snapshot as Record<string, string>
   const employer = employerFor(slip, company)
   const stamp = useReportStamp(company)
-  const downloadPdf = () => {
-    generatePayslipPdf(slip, run, company, { stamp: stamp('Payslip') })
-    void logActivity('export', company.id, {
-      report: 'Payslip',
-      control_no: slip.control_no ?? null,
-      employee_no: snap.employee_no ?? null,
-      period_end: run.period_end,
-    })
+  const toast = useToast()
+  const downloadPdf = async () => {
+    try {
+      // the PDF library loads on first download, not with the page
+      const { generatePayslipPdf } = await import('../pdf/payslipPdf')
+      generatePayslipPdf(slip, run, company, { stamp: stamp('Payslip') })
+      void logActivity('export', company.id, {
+        report: 'Payslip',
+        control_no: slip.control_no ?? null,
+        employee_no: snap.employee_no ?? null,
+        period_end: run.period_end,
+      })
+    } catch (err) {
+      toast('error', errorMessage(err, 'Could not prepare the payslip'))
+    }
   }
   const employerTotal =
     Number(slip.sss_er) + Number(slip.sss_mpf_er) + Number(slip.sss_ec_er) +

@@ -46,7 +46,7 @@ import {
 import { fetchAll } from '../../lib/fetchAll'
 import { useToast } from '../../components/toast'
 import { downloadBlob, downloadCsv, getEmployees } from '../../lib/api'
-import { buildPayslipsDoc, buildPayslipsZip, type PayslipPdfOptions } from '../../pdf/payslipPdf'
+import type { PayslipPdfOptions } from '../../pdf/payslipPdf'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
 import type { Employee, Payslip, PayrollAdjustment, PayrollRun, PayrollVoid, PayrollVoidSummary } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
@@ -1331,6 +1331,7 @@ function PayslipExportModal({
     try {
       // stamped when the file is made, not when the dialog opened
       const opts = { stamp: stamp(title), voided }
+      const { buildPayslipsDoc, buildPayslipsZip } = await import('../../pdf/payslipPdf')
       if (format === 'pdf') {
         const doc = await buildPayslipsDoc(chosen, run, company, setDone, opts)
         downloadBlob(`${fileBase}.pdf`, doc.output('blob'))

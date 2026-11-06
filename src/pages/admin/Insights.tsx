@@ -12,6 +12,7 @@ import { Button, Card, Field, Input, LoadFailed, Select, Spinner, StatCard, Stat
 import { downloadCsv } from '../../lib/api'
 import type { Entity } from '../../lib/db'
 import { errorMessage } from '../../lib/errors'
+import { useToast } from '../../components/toast'
 import {
   advancesReport,
   attendanceReport,
@@ -47,7 +48,6 @@ import {
 import { fetchAdvances, fetchAttendance, fetchLeave, fetchPeople, fetchSlipFacts } from '../../lib/insightsData'
 import type { LeaveType } from '../../lib/db'
 import { addMonths, todayManila } from '../../lib/manila'
-import { generateInsightsPdf } from '../../pdf/insightsPdf'
 import { useReportStamp } from '../../lib/useReportStamp'
 import { logActivity } from '../../lib/activity'
 
@@ -158,6 +158,7 @@ export default function Insights({ entity }: { entity: Entity }) {
   const dataKey = `${entity.id}|${kind}|${kind === 'headcount' ? '' : `${range.from}|${range.to}`}`
   const [data, setData] = useState<Data | null>(null)
   const [error, setError] = useState('')
+  const toast = useToast()
   const seq = useRef(0)
 
   const load = useCallback(async () => {
@@ -314,9 +315,15 @@ export default function Insights({ entity }: { entity: Entity }) {
             <Button variant="secondary" disabled={!built} onClick={() => built && downloadCsv(`${slug}_${entity.code}_${range.from}_${range.to}.csv`, reportCsv(def.title, period, built), stamp(`${def.title}, ${period}`))}>
               <Download className="size-4" /> CSV
             </Button>
-            <Button variant="secondary" disabled={!built} onClick={() => {
+            <Button variant="secondary" disabled={!built} onClick={async () => {
                 if (!built) return
-                generateInsightsPdf(company, def.title, period, built, stamp(`${def.title}, ${period}`))
+                try {
+                  const { generateInsightsPdf } = await import('../../pdf/insightsPdf')
+                  generateInsightsPdf(company, def.title, period, built, stamp(`${def.title}, ${period}`))
+                } catch (err) {
+                  toast('error', errorMessage(err, 'Could not prepare the PDF'))
+                  return
+                }
                 void logActivity('export', entity.id, { report: `${def.title}, ${period}`, format: 'pdf' })
               }}>
               <FileDown className="size-4" /> PDF
