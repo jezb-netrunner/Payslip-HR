@@ -19,6 +19,7 @@ import { useEntity } from '../../lib/entity'
 import { fmtDate, fmtDateTime, fmtHours, fullName, plural } from '../../lib/format'
 import { addDays, eachDate, hhmmToMinutes, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
+import { fetchAll } from '../../lib/fetchAll'
 import { errorMessage } from '../../lib/errors'
 import { FREQUENCY_LABELS } from '../../lib/labels'
 import { lockedKeys } from '../../lib/locks'
@@ -533,21 +534,22 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
     setLoadError('')
     setRows([])
     try {
-      const [emps, { data: ent, error: entErr }, locked, hols, leaves, schedules] = await Promise.all([
+      const [emps, ent, locked, hols, leaves, schedules] = await Promise.all([
         getEmployees(entity.id),
-        supabase.from('time_entries').select('*').eq('entity_id', entity.id).eq('work_date', date),
+        fetchAll<TimeEntry>((from, to) =>
+          supabase.from('time_entries').select('*').eq('entity_id', entity.id).eq('work_date', date).order('id').range(from, to),
+        ),
         lockedKeys(entity.id, date, date),
         getHolidaysBetween(entity.id, date, date),
         leaveMarks(entity.id, date, date),
         fetchScheduleRows({ entityId: entity.id }, date, date),
       ])
-      if (entErr) throw entErr
       if (my !== seq.current) return
       const active = emps.filter((e) => e.hire_date <= date && isActiveOn(e, date))
       setRows(
         buildRows(
           active.map((employee) => ({ employee, date })),
-          (ent ?? []) as TimeEntry[],
+          ent,
           locked,
           hols,
           leaves,
