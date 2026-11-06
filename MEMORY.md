@@ -756,26 +756,66 @@ existed). Did, each verified:
 - Owner to do (dashboard, not SQL): Auth → leaked password protection (the
   edge functions already screen admin passwords against Pwned Passwords).
 
-### 2026-11-06 — Security review (owner: "how secure is it, how would I improve it?"; no code change)
+### 2026-11-06 — Security review, then hardening (owner: "how secure is it?", then "fix, clean up, and implement everything you can"; branch `claude/quirky-pascal-ceio6w`)
 
-Checked: replica suites all pass; the four `document.write` print views
-escape every value; no secrets in git history. Live (aggregates only): 1
-auth user (the owner, TOTP verified, guard-admitted), 0 employee logins, 0
-stray sign-ups, RLS on every public table, no public bucket,
-`punch-selfies` empty; advisors = the accepted list. Found, not fixed (the
-owner's call): Supabase org on the **Free plan** (no automatic backups,
-paused after 7 idle days); repo **public** and `main` **unprotected**
-(pushes deploy straight to the live site); AI sessions hold full SQL on
-production through the Supabase MCP (Supabase advises read-only and
-project-scoped); employee codes recoverable offline from a stale session
-(lesson *Never store a value derived from a credential…*); no CSP (Pages
-can't send headers; a meta CSP can); `npm audit`: 5 advisories, the
-critical DOMPurify one only on jsPDF's unused `html()` path, the rest
-dev-server only; no breach-response or DPA paperwork in the repo.
+Review — checked: replica suites, the four `document.write` print views
+(all escape), no secrets in git history. Live (aggregates only): 1 auth user
+(the owner, TOTP verified, guard-admitted), 0 employee logins, 0 stray
+sign-ups, RLS on every public table, no public bucket, `punch-selfies`
+empty; advisors = the accepted list. Found: Supabase org on the **Free
+plan** (no automatic backups, paused after 7 idle days); repo **public**,
+`main` **unprotected** (pushes deploy straight to the live site); AI sessions
+hold full SQL on production through the Supabase MCP; employee codes
+recoverable offline from a stale session; no CSP; 5 npm advisories.
+
+Done (repo only — **not deployed**, see *Current deployed state*):
+- Employee sign-in through `auth-guard` with keyed address and password and
+  a per-client failure budget (lesson *Employee logins: code → keyed
+  address*); migration `20261106130000_employee_sign_in_guard`
+  (`employee_sign_in_failures`, `employee_sign_in_check`); `admin-users`
+  sets codes in the new form; the browser no longer derives anything.
+- `auth-guard`: answers only `APP_ORIGINS` (default the Pages origin and
+  localhost; scripts send no Origin and are unaffected), and a thrown error
+  answers `server_error` (details in the function log).
+- Same migration: `anon` loses every table and sequence privilege, and the
+  default privileges for later tables, sequences and functions. Suite 10's
+  "anon sees nothing" now expects "permission denied".
+- CSP meta tag injected right after the charset in production builds
+  (`vite.config.ts`); the Supabase URL comes from one place
+  (`__SUPABASE_URL__`, define). Figtree bundled (`@fontsource-variable/
+  figtree`) instead of Google Fonts. Checked with Playwright on `vite
+  preview`: no violations on the sign-in page, the employee sign-in posts
+  only the code, a `document.write` print window inherits the policy and
+  keeps its inline styles, every PDF chunk loads; no `eval`/`new Function`
+  in any bundle.
+- Dependencies: vite 8.3.5, vitest 4.1.12, dompurify 3.4.17, source-map-js
+  1.2.2: `npm audit` clean. npm 10.9 crashed in arborist's `#loadPeerSet`
+  (`Cannot read properties of null (reading 'edgesOut')`) on any install
+  touching vite/vitest; `npx npm@11.6.2 install …` worked, and npm 10's
+  `npm ci` reads its lockfile fine. Dependabot (weekly, 7-day cooldown);
+  workflow actions pinned to commit SHAs.
+- Tests: suite 25 (the budget, anon privileges); `fingerprint.sql` also
+  hashes table grants; edge-function unit tests (`*.unit.test.ts`, the real
+  handler with a faked network) now run in `npm test` (483 tests); suite 19's
+  UTC-date flake fixed. `docs/SECURITY.md` (data inventory, owner checklist,
+  breach runbook incl. the 72-hour NPC rule); README *Backups*.
 
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: the repo is ahead of live (branch
+`claude/quirky-pascal-ceio6w`, not merged).** Not applied/deployed:
+migration `20261106130000_employee_sign_in_guard`, `auth-guard` with
+`employee_sign_in` and `APP_ORIGINS`, `admin-users` with keyed codes, the
+CSP front end. They go together: migration → deploy both functions → merge
+to `main` (the old front end signs employees in straight at Auth, which the
+new functions' accounts don't answer; live has 0 employee logins, so nothing
+breaks in between and no code needs setting again). After the apply,
+`fingerprint.sql` (now with `table_grants`) must match the replica. Owner
+items outstanding: Pro or a backup routine, branch protection on `main`,
+MCP read-only, delete the empty `punch-selfies` / `employee-photos` buckets
+(`docs/SECURITY.md` → *Only the owner can do these*).
 
 **2026-11-06, release 1.0.0: live = repo.** Last migration
 `20261106090036 foreign_key_indexes`. `supabase/tests/fingerprint.sql` on
@@ -1207,7 +1247,10 @@ February, which PostgREST rejects (that bug existed in MyAttendance). ND
 window 22:00–06:00 overlaps are computed per Manila date; ND minutes are
 capped at net worked minutes so unpaid breaks don't earn ND. Why it
 mattered: an admin filing from a non-PH browser would silently write shifted
-timestamps — the classic way payroll hours drift by a day.
+timestamps — the classic way payroll hours drift by a day. Tests too: a SQL
+check of "can't be in the future" with `current_date + 1` (the UTC date)
+failed every day from 16:00 UTC, when Manila is already on that date (suite
+19, fixed 2026-11-06 with `(now() at time zone 'Asia/Manila')::date + 1`).
 
 ### Run Supabase security advisors after every DDL change
 
@@ -1222,24 +1265,31 @@ and will WARN — leave them, as will the RLS helpers under lint 0029
 ("Signed-in users can execute SECURITY DEFINER function": they only report
 the caller's own access); `revoke_user_sessions` is service-role only.
 
-### Employee logins: code → synthetic email, provisioned by the admin-users edge function
+### Employee logins: code → keyed address, signed in by auth-guard (revised 2026-11-06)
 
-> Employees sign in with one admin-set code `<CLIENT>-<PART>`; Supabase Auth needs an email, so the code maps to `emp-<sha256("payslip-hr/employee-login/v1:"+code)[:32]>@jezb-netrunner.github.io` and the code is the password — the derivation exists twice (browser + edge function) and must stay byte-identical.
+> Employees sign in with one admin-set code `<CLIENT>-<PART>`; Supabase Auth needs an email, so the code maps to `emp2-<HMAC(pepper, "payslip-hr/employee-login-email/v2:"+code)[:32 hex]>@jezb-netrunner.github.io` with password `e1.`+base64url(HMAC(pepper, "payslip-hr/employee-login-password/v2:"+code)), pepper = `ADMIN_PASSWORD_PEPPER`. Only `auth-guard` (`employee_sign_in`) and `admin-users` (`set_employee_code`) derive them, KEEP IN SYNC (`employee_sign_in.unit.test.ts` compares the two).
 
-Vector: `ACME-7Q4KX9TB` → `emp-bce06882b7902c9f3fdc424817f6a827@jezb-netrunner.github.io`
-(pinned in `src/lib/loginCode.test.ts`). The address must be on a real-looking
-domain the project owns: Supabase Auth rejects example/test domains. Only a
-hint (last characters) is stored; changing or disabling a code revokes the
-user's sessions (`revoke_user_sessions`, service-role only). The client
-prefix stops code guessing from reaching other clients. `admin-users` v3
-actions: `set_employee_code`, `set_employee_login_active` (company admins or
-entity admins of that employee's client), `create_admin`, `update_admin`
-(company admins only; another company admin is never manageable). The
-client must send the **user's access token** as the bearer
-(`callAdminUsers`). The very first account ever created becomes
-`company_admin` via `handle_new_user` — disable public sign-ups right after.
-Why it mattered: employees have no email to give, and the alternatives
-(service key in the browser, self-signup) were unacceptable.
+The browser posts `{action:'employee_sign_in', code}`; the guard calls
+`employee_sign_in_check` (service role) under the client's row lock: an
+address no employee login of that client has counts a failure; the 50th in
+15 minutes answers `throttled` (with `retry_at`) for the rest of the window
+and writes one `employee_sign_in_throttled` audit row. Only then a password
+grant at Auth, so a wrong code never drains Auth's per-IP `/token` bucket
+(1,800/h, burst 30), which every request from the functions shares: payday
+bursts of correct sign-ins can still hit it (`rate_limited`; Supabase's
+IP-address forwarding with a secret key would lift it). The address must be
+on a real-looking domain the project owns (Supabase rejects example/test
+domains). Only a hint (last characters) is stored; changing or disabling a
+code revokes the user's sessions (`revoke_user_sessions`, service-role
+only). The client must send the **user's access token** as the bearer to
+`admin-users` (`callAdminUsers`). The very first account ever created
+becomes `company_admin` via `handle_new_user` — disable public sign-ups
+right after. Why it mattered: employees have no email to give; until
+2026-11-06 the browser derived the address as an unsalted SHA-256 of the code
+(`emp-…`), and the address sits in every access token and stored session, so
+a stale session on a shared PC gave the 39-bit code away to an offline
+search in under a minute on one GPU. Codes set under the old scheme stop
+working and must be set again (live had none).
 
 ### How statutory figures were verified (process lesson)
 
@@ -1550,17 +1600,7 @@ first") and every constraint-specific message was invisible.
 
 ### Never store a value derived from a credential where admins can read it
 
-> Employee profiles keep `email = null`: the auth email is an unsalted SHA-256 of the login code, and with the 3-character hint an entity admin recovered a code in seconds; the derived address now lives only in `auth.users` (service role) — **and, still open (found 2026-11-06), in every employee access token's `email` claim and the browser's stored session (`sb-<ref>-auth-token`, localStorage)**.
-
-Open risk: whoever reads a stale employee session (shared office PC, tab
-closed without signing out) can brute-force the code offline: 31^8 ≈
-8.5×10^11 SHA-256s, under a minute on one gaming GPU, giving a permanent
-login that the 12 h / 32 min session rules don't stop. Fix direction: sign
-employees in through an edge function that derives the address as an HMAC
-under an edge-function secret (as `ADMIN_PASSWORD_PEPPER` keys admin
-passwords), migrating legacy addresses at sign-in. Live had 0 employee
-logins on 2026-11-06, so changing the derivation before go-live costs
-nothing; afterwards every code must be re-issued or migrated.
+> Employee profiles keep `email = null`: the auth email is an unsalted SHA-256 of the login code, and with the 3-character hint an entity admin recovered a code in seconds; the derived address then lived only in `auth.users` (service role) — and, found 2026-11-06, in every employee access token's `email` claim and the browser's stored session, so the address itself had to stop revealing the code: it is now an HMAC under a server secret (lesson *Employee logins: code → keyed address*).
 
 Replacing a code also stamps `profiles.sessions_revoked_at`;
 `current_employee_id()` rejects access tokens whose `iat` is older, so the
