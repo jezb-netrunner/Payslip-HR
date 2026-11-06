@@ -533,9 +533,32 @@ comment and two stale comments), the schema hash check against the replica
 (lesson below), advisors (nothing new beyond the intentional list), PR #9
 merged.
 
+### 2026-11-06 — Live data reset, DEMO test client (branch `claude/elegant-volta-i69sor`)
+
+**Asked:** wipe the clients and employees on live, then create a test client
+to test the whole app and its workflow.
+
+**Did:** `supabase/seed/reset_client.sql` (one client by code, everything
+under it, its employees' Auth users) and `demo_client.sql` + `README.md`
+(10 employees covering every pay type and the request queues; details and a
+walkthrough in the README). Rehearsed both on the local replica (reset on
+the suites' fixtures: zero orphans), ran all October payrolls of the seeded
+data through `computeRun`/`finalize` in the repo's flow harness (a
+throwaway test, not committed), then ran both on live: KM5VALLEY gone,
+DEMO's row counts and time-entry hash equal to the rehearsal. No DDL, so no
+advisors run. Not done: employee logins and client admins (app only).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: live data is the DEMO test client only** (owner's request).
+Client KM5VALLEY, its 2 employees, the employee's login, its finalized run
+and its 48 audit rows were deleted (`reset_client.sql`); kept: the owner's
+account, global tables (5 statutory versions, 40 national holidays, 9
+leave templates) and 39 global audit rows. Then `demo_client.sql`: client
+DEMO with 10 employees, 262 time entries, 1 consultant, no payroll runs and
+no logins yet. Rebuild it any time with the two scripts.
 
 **2026-11-04: the CAS controls, two-step sign-in and timeouts are live**
 (owner's approval): edge-function secret `ADMIN_PASSWORD_PEPPER` (set by the
@@ -634,8 +657,8 @@ Supabase project `ruuhpghcgccvezkjhisy` (ap-southeast-1, PG 17.6), as of 2026-10
   indexes, 46 policies, 36 functions, 61 triggers — before the 15th
   migration's extra column). Data: owner = `company_admin`, 5 statutory
   versions, 9 global leave templates, 21 national 2026 holidays; RLS on
-  every table. Owner's test data since 2026-10-23: 1 client, 1 employee
-  (hired 2026-10-23, has a login code), 1 finalized semi-monthly run.
+  every table. (The owner's test data of 2026-10-23 was deleted on
+  2026-11-06, see above.)
 - (superseded 2026-11-04 by v7, above) Edge function **`admin-users` v5** live (verify_jwt on), deployed
   2026-10-20; deployed source = repo copy (writes carry `x-actor-id`; weak
   login codes refused, incl. all-letter codes and the employee's names).
@@ -1038,6 +1061,9 @@ WHERE: an error message `'…can''t be edited; delete it and…'` and a comment
 (2026-10-23). Find the culprit with `execute_sql` probes wrapped in
 `begin; … rollback;` (a flagged probe times out, nothing applies), then
 reword the text — that's a false positive, not a destructive statement.
+DELETE and UPDATE *with* a WHERE pass: on 2026-11-06 `execute_sql` ran
+`reset_client.sql` (40 DELETEs, `set local session_replication_role =
+replica`, a delete from `auth.users`) in one call without a prompt.
 Non-destructive migrations (CREATE OR REPLACE FUNCTION, CREATE TRIGGER,
 ADD COLUMN, REVOKE) do apply through `apply_migration` — MCP records them
 under the apply timestamp, so rename the repo file to that version.
@@ -1802,3 +1828,13 @@ comparing. Edge-function secrets: Supabase can pause the MCP secret tool;
 the owner then sets the value in the dashboard (Edge Functions → Secrets),
 and the functions refuse to set or check admin passwords without it.
 
+
+### Wiping test data: replica mode turns off the guards and the FK cascades (confirmed approach, 2026-11-06)
+
+> Posted payslips, runs and the audit trail refuse deletes by design, so `reset_client.sql` deletes inside `set local session_replication_role = replica` (works on Supabase's `postgres` role). That also skips every ON DELETE CASCADE (they are triggers too): every table is listed child-first, then `origin` is restored for the `auth.users` delete so its own cascades run.
+
+Why it mattered: relying on cascades in replica mode would leave orphans
+silently. Check after any change to the schema: run the script on the
+suites' fixture DB (`phr_test`) and count rows whose `entity_id` /
+`employee_id` no longer exist (expect zero). Never use it on real client
+data: it bypasses the void-and-reissue rule the CAS controls promise.
