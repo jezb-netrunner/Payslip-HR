@@ -103,6 +103,12 @@ describe('opening balances as a payslip of the year', () => {
     expect(s.allMwe).toBe(true)
   })
 
+  it("taxes a minimum wage earner's hazard pay unless the assignment is certified", () => {
+    const o = { ...blankOpening('e1', 2026, '2026-09-30'), minimum_wage_earner: true, basic_salary: 180000, hazard_pay: 6000 }
+    expect(summarizeYear([openingFact(o)], BIR_ANNUAL_2023)).toMatchObject({ mweHazard: 0, taxableHazard: 6000 })
+    expect(summarizeYear([openingFact(o, { hazardCertified: true })], BIR_ANNUAL_2023)).toMatchObject({ mweHazard: 6000, taxableHazard: 0 })
+  })
+
   it('applies to pay released after its last pay date, and finds payslips it already covers', () => {
     expect(openingAppliesTo(janSep, '2026-10-05')).toBe(true)
     expect(openingAppliesTo(janSep, '2026-09-30')).toBe(false)

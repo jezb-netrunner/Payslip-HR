@@ -64,12 +64,27 @@ export function templateRows(): string[][] {
   return [IMPORT_COLUMNS.map((c) => c.key)]
 }
 
-/** RFC 4180 CSV: quoted fields, doubled quotes, line breaks inside quotes, a BOM, CRLF. */
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = []
+/**
+ * A CSV file's text. Excel's "CSV (Comma delimited)" is Windows-1252, not
+ * UTF-8: a name like Peña would come through garbled. Valid UTF-8 (with or
+ * without a BOM) is read as UTF-8, anything else as Windows-1252.
+ */
+export function decodeCsv(bytes: ArrayBuffer | Uint8Array): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes)
+  }
+}
+
+/** RFC 4180 CSV with each row's first line in the file (a quoted cell may span lines). */
+export function parseCsvRows(text: string): { cells: string[]; line: number }[] {
+  const rows: { cells: string[]; line: number }[] = []
   let row: string[] = []
   let cell = ''
   let quoted = false
+  let line = 1
+  let rowLine = 1
   const src = text.replace(/^﻿/, '')
   for (let i = 0; i < src.length; i++) {
     const ch = src[i]
@@ -79,7 +94,10 @@ export function parseCsv(text: string): string[][] {
           cell += '"'
           i++
         } else quoted = false
-      } else cell += ch
+      } else {
+        if (ch === '\n') line++
+        cell += ch
+      }
       continue
     }
     if (ch === '"' && cell === '') quoted = true
@@ -89,16 +107,23 @@ export function parseCsv(text: string): string[][] {
     } else if (ch === '\n' || ch === '\r') {
       if (ch === '\r' && src[i + 1] === '\n') i++
       row.push(cell)
-      rows.push(row)
+      rows.push({ cells: row, line: rowLine })
       row = []
       cell = ''
+      line++
+      rowLine = line
     } else cell += ch
   }
   if (cell !== '' || row.length > 0) {
     row.push(cell)
-    rows.push(row)
+    rows.push({ cells: row, line: rowLine })
   }
   return rows
+}
+
+/** RFC 4180 CSV: quoted fields, doubled quotes, line breaks inside quotes, a BOM, CRLF. */
+export function parseCsv(text: string): string[][] {
+  return parseCsvRows(text).map((r) => r.cells)
 }
 
 /** A header as typed ("Employee No", "employee_no*") → its column key. */
@@ -138,6 +163,10 @@ export function parseAmount(raw: string): number | null {
 }
 
 const TIN = /^[0-9]{3}-?[0-9]{3}-?[0-9]{3}(-?[0-9]{3,5})?$/
+/** Probation is at most six months (Labor Code Art. 296). */
+const PROBATION_DAYS = 180
+const daysBetween = (from: string, to: string) => (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+const centavos = (v: number) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6
 const GENDERS = ['Female', 'Male', 'Prefer not to say']
 const CIVIL = ['Single', 'Married', 'Widowed', 'Separated']
 
@@ -175,8 +204,10 @@ export function checkImport(
     existingEmails: Iterable<string>
     today: string
   },
+  /** Each row's line in the file (parseCsvRows); default: its position. */
+  lines?: number[],
 ): ImportCheck {
-  const nonEmpty = table.map((cells, i) => ({ cells, line: i + 1 })).filter((r) => r.cells.some((c) => c.trim() !== ''))
+  const nonEmpty = table.map((cells, i) => ({ cells, line: lines?.[i] ?? i + 1 })).filter((r) => r.cells.some((c) => c.trim() !== ''))
   const empty: ImportCheck = { rows: [], missingColumns: [], unknownColumns: [], fileError: '' }
   if (nonEmpty.length === 0) return { ...empty, fileError: 'The file is empty.' }
   const header = nonEmpty[0].cells.map(headerKey)
@@ -236,6 +267,9 @@ export function checkImport(
     if (birth && hire && birth >= hire) errors.push('birth_date is on or after hire_date')
     if (regularized && hire && regularized < hire) errors.push('regularization_date is before hire_date')
 
+    if (!get('employment_status') && hire && daysBetween(hire, ctx.today) > PROBATION_DAYS) {
+      warnings.push('employment_status blank: added as probationary, though hired more than 6 months ago')
+    }
     const status: EmploymentStatus | null = get('employment_status')
       ? pick(get('employment_status'), EMPLOYMENT_STATUS_LABELS, { learner: 'apprentice', project: 'project_based' })
       : 'probationary'
@@ -250,6 +284,7 @@ export function checkImport(
     if (!get('rate')) errors.push('rate is required')
     else if (rate === null) errors.push(`rate "${get('rate')}" is not an amount`)
     else if (rate > 10_000_000) errors.push(`rate ${rate} is too large`)
+    else if (!centavos(rate)) errors.push(`rate ${get('rate')} has more than two decimals`)
 
     const frequency: PayFrequency | null = get('pay_frequency')
       ? pick(get('pay_frequency'), FREQUENCY_LABELS, { semimonthly: 'semi_monthly', bi_monthly: 'semi_monthly', twice_a_month: 'semi_monthly' })
@@ -268,8 +303,8 @@ export function checkImport(
     let daysPerYear: number | null = null
     if (get('days_per_year')) {
       daysPerYear = parseAmount(get('days_per_year'))
-      if (daysPerYear === null || daysPerYear <= 0 || daysPerYear > 366) {
-        errors.push(`days_per_year "${get('days_per_year')}" must be a number from 1 to 366`)
+      if (daysPerYear === null || daysPerYear <= 0 || daysPerYear > 366 || !centavos(daysPerYear)) {
+        errors.push(`days_per_year "${get('days_per_year')}" must be a number from 1 to 366, at most two decimals`)
         daysPerYear = null
       }
     }
@@ -288,6 +323,12 @@ export function checkImport(
     if (get('gender') && !gender) errors.push(`gender "${get('gender')}" is not ${GENDERS.join(', ')}`)
     const civil = get('civil_status') ? CIVIL.find((c) => norm(c) === norm(get('civil_status'))) : null
     if (get('civil_status') && !civil) errors.push(`civil_status "${get('civil_status')}" is not ${CIVIL.join(', ')}`)
+    // Excel shows a long number as 1.20251E+11 and saves it that way
+    for (const k of ['sss_no', 'philhealth_no', 'pagibig_no', 'bank_account_no', 'phone', 'emergency_contact_phone', 'zip_code']) {
+      if (/^\d+(\.\d+)?e\+?\d+$/i.test(get(k))) {
+        errors.push(`${k} "${get(k)}" was turned into scientific notation by Excel: format the column as Text and type the number again`)
+      }
+    }
     const zip = get('zip_code')
     if (zip && !/^\d{4}$/.test(zip)) warnings.push(`zip_code "${zip}" is not 4 digits`)
 

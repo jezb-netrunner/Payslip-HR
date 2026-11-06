@@ -264,6 +264,10 @@ function outputPaid(slips: Pick<Payslip, 'earnings'>[]): { all: number; basic: n
   }
 }
 
+/** Longer than any wait between two paydays: pay between the opening balances and the app is missing. */
+const OPENING_GAP_DAYS = 45
+const daysBetween = (from: string, to: string) => (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+
 /** Days before the period read for the workday before an early regular holiday. */
 const HOLIDAY_LOOKBACK_DAYS = 10
 /** Days before the period read for a worker paid by results: the last 7 working days before an early regular holiday. */
@@ -799,30 +803,48 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     // payroll periods of last year paid this tax year (Dec 16–31 released in January)
     const lagged = new Set(taxBefore.filter((p) => p.run_type === 'regular' && (p.period_end ?? '') < yearStart).map((p) => p.period_end)).size
     // The app holds this employer's pay for the year from the employee's
-    // first payroll here (or this one). Pay released before that, with no
-    // opening balances, is unknown: averaging the known pay over periods it
-    // doesn't cover would withhold next to nothing, so the cumulative average
-    // counts periods from the first payroll in the app (plus a previous
-    // employer's, whose 2316 is known), and the year-level figures warn.
-    const appFrom = [run.period_start, ...taxBefore.filter((p) => p.run_type !== 'thirteenth_month' && !!p.period_start).map((p) => p.period_start as string)].sort()[0]
-    const missingBefore = !isThirteenth && !opening && clamp(emp.hire_date) < clamp(appFrom) ? clamp(appFrom) : null
-    const priorPeriods =
-      missingBefore && earlierEmployerFrom
-        ? periodsThisYear(frequency, clamp(earlierEmployerFrom), clamp(taxYearRow?.prev_employment_to ?? earlierEmployerFrom))
-        : 0
+    // first payroll here (this one, unless a finalized one came first; a 13th
+    // month run covers the whole year, so only the finalized ones count).
+    // Pay released before that, with no opening balances, is unknown:
+    // averaging the known pay over periods it doesn't cover would withhold
+    // next to nothing, so the cumulative average counts periods from the
+    // first payroll in the app (plus a previous employer's, whose 2316 is
+    // known), and the year-level figures warn. The periods are counted from
+    // that payroll's END, so a cutoff like the 26th to the 10th is one
+    // period, not the two calendar halves it touches.
+    const firstHere = [
+      ...(isThirteenth ? [] : [{ start: run.period_start, end: run.period_end, pay: run.pay_date }]),
+      ...taxBefore
+        .filter((p) => p.run_type !== 'thirteenth_month' && !!p.period_start && !!p.period_end)
+        .map((p) => ({ start: p.period_start as string, end: p.period_end as string, pay: p.pay_date ?? '' })),
+    ].sort((a, b) => a.start.localeCompare(b.start))[0]
+    const missingBefore = !opening && firstHere && clamp(emp.hire_date) < clamp(firstHere.start) ? clamp(firstHere.start) : null
+    const fromApp = firstHere ? periodsThisYear(frequency, clamp(firstHere.end), clamp(periodTo)) : null
+    const fromJanuary = periodsThisYear(frequency, clamp(firstEmployment > yearStart ? firstEmployment : yearStart), clamp(periodTo))
+    // a previous employer's span, its end defaulting to the eve of the hire here
+    const priorFrom = earlierEmployerFrom ? clamp(earlierEmployerFrom) : null
+    const priorTo = clamp(taxYearRow?.prev_employment_to ?? addDays(emp.hire_date, -1))
+    const priorPeriods = priorFrom && priorTo >= priorFrom ? periodsThisYear(frequency, priorFrom, priorTo) : 0
+    const periodsSoFar = opening
+      ? // the old payroll's own count when entered, else the calendar from January
+        opening.periods_paid !== null && opening.periods_paid !== undefined
+        ? Number(opening.periods_paid) + (fromApp ?? 1)
+        : fromJanuary
+      : earlierEmployerFrom
+        ? missingBefore
+          ? priorPeriods + (fromApp ?? 1)
+          : fromJanuary
+        : (fromApp ?? fromJanuary)
     const taxYearToDate: TaxYearToDate = {
       taxableBefore: round2(
         taxBefore.reduce((s, p) => s + Number(p.taxable_income ?? 0), 0) +
           prior.taxableBasic + prior.taxable13thOtherBenefits + prior.taxableOther +
-          (opening ? openingTaxable(opening, tables.bir_annual, prior) : 0),
+          (opening ? openingTaxable(opening, tables.bir_annual, prior, { hazardCertified: !!emp.hazard_certification_ref }) : 0),
       ),
       withheldBefore: round2(
         taxBefore.reduce((s, p) => s + Number(p.withholding_tax), 0) + prior.taxWithheld + Number(opening?.tax_withheld ?? 0),
       ),
-      periods:
-        lagged +
-        priorPeriods +
-        periodsThisYear(frequency, missingBefore ?? clamp(firstEmployment > yearStart ? firstEmployment : yearStart), clamp(periodTo)),
+      periods: lagged + periodsSoFar,
       cumulative: !!taxYearRow?.has_previous_employer || taxBefore.some((p) => whtMethodOf(p) === 'cumulative_average'),
     }
 
@@ -913,7 +935,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         annualizes(emp) || (isThirteenth && taxYearAnnualized)
           ? {
               payMonth: `${run.pay_date.slice(0, 7)}-01`,
-              ytd: [...(opening ? [openingFact(opening)] : []), ...empTax.map(toAnnualFact)],
+              ytd: [...(opening ? [openingFact(opening, { hazardCertified: !!emp.hazard_certification_ref })] : []), ...empTax.map(toAnnualFact)],
               prior,
               peraCredit,
             }
@@ -946,7 +968,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         Number(payrollYearOpening?.thirteenth_basis ?? 0),
       ytdThirteenthPaid:
         empYear.filter((p) => p.run_type === 'thirteenth_month').reduce((s, p) => s + Number(p.gross_pay), 0) +
-        Number(payrollYearOpening?.thirteenth_month ?? 0),
+        Number(payrollYearOpening?.thirteenth_installments ?? 0),
       ytdOtherBenefits: linesSum('other_benefits') + Number(payrollYearOpening?.other_benefits ?? 0),
       priorThirteenthOtherBenefitsExempt: prior.thirteenthOtherBenefitsExempt,
       taxYearBenefitsPaid: isThirteenth ? taxYearBenefits : undefined,
@@ -960,9 +982,18 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : undefined,
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
+    // a final pay released this year for someone who left last year has no
+    // year here to complete, and takes no contributions
+    const noYearHere = extrasOnly(emp, run) || (!!emp.separation_date && emp.separation_date < yearStart)
     if (openingRow) {
       const twice = overlapWarning(openingRow, openingOverlaps(openingRow, empTax.map((p) => p.pay_date)))
       if (twice) slip.trace.warnings.push(twice)
+      // pay released between the old payroll's last payday and the app's first
+      if (opening && firstHere && firstHere.pay && daysBetween(opening.paid_through, firstHere.pay) > OPENING_GAP_DAYS) {
+        slip.trace.warnings.push(
+          `Opening balances cover pay through ${fmtDate(opening.paid_through)}, but the first payroll in the app was paid on ${fmtDate(firstHere.pay)}: pay released in between is in neither. Move the "paid through" date and add that pay to the opening balances.`,
+        )
+      }
       if (!opening) {
         slip.trace.warnings.push(
           `This payroll is paid on ${run.pay_date}, on or before the opening balances' "paid through" date (${openingRow.paid_through}): pay released by then belongs to the old payroll, so the opening balances are left out here. Check the pay date or the opening balances.`,
@@ -975,7 +1006,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       slip.trace.tax?.method === 'annualized' ||
       slip.trace.tax?.method === 'cumulative_average' ||
       slip.earnings.some((l) => isBenefit(l.bir ?? ''))
-    if (missingBefore && yearLevel) {
+    if (missingBefore && !openingRow && yearLevel && !noYearHere) {
       slip.trace.warnings.push(
         `${emp.first_name} was employed before ${fmtDate(missingBefore)}, the first payroll in the app for ${taxYear}, and no opening balances are entered: the year's tax${slip.trace.tax?.method === 'annualized' ? '' : ' to date'} and the ₱90,000 exemption count pay from then on only. If this employer paid ${emp.first_name} earlier in ${taxYear}, enter that pay on the employee's BIR tab (Before going live on the app) and recompute.`,
       )
@@ -985,6 +1016,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     const monthOpensHere = !isThirteenth && !empMonth.some((p) => p.run_type !== 'thirteenth_month')
     if (
       monthOpensHere &&
+      !noYearHere &&
       run.period_index > 1 &&
       emp.hire_date < run.period_start &&
       !taxBefore.some((p) => p.run_type !== 'thirteenth_month')
@@ -1014,13 +1046,18 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       const yearEnd = `${payrollYear}-12-31`
       const until = emp.separation_date && emp.separation_date < yearEnd ? emp.separation_date : yearEnd
       // basic pay this employer paid before the app, not entered
-      const firstHere = empYear
+      const firstPaid = empYear
         .filter((p) => p.run_type !== 'thirteenth_month' && !!p.period_start)
         .reduce((m, p) => ((p.period_start as string) < m ? (p.period_start as string) : m), '9999-12-31')
       const employedFrom = emp.hire_date > `${payrollYear}-01-01` ? emp.hire_date : `${payrollYear}-01-01`
-      if (!payrollYearOpening && firstHere !== '9999-12-31' && employedFrom < firstHere) {
+      if (!payrollYearOpeningRow && firstPaid !== '9999-12-31' && employedFrom < firstPaid) {
         slip.trace.warnings.push(
-          `Basic pay counted from ${fmtDate(firstHere)}, the first payroll in the app: ${emp.first_name} was employed from ${fmtDate(employedFrom)}. If this employer paid ${emp.first_name} before then in ${payrollYear}, enter it on the employee's BIR tab (Before going live on the app, basic salary earned for the 13th month) and recompute.`,
+          `Basic pay counted from ${fmtDate(firstPaid)}, the first payroll in the app: ${emp.first_name} was employed from ${fmtDate(employedFrom)}. If this employer paid ${emp.first_name} before then in ${payrollYear}, enter it on the employee's BIR tab (Before going live on the app, basic salary earned for the 13th month) and recompute.`,
+        )
+      }
+      if (payrollYearOpening && Number(payrollYearOpening.basic_salary) > 0 && Number(payrollYearOpening.thirteenth_basis) === 0) {
+        slip.trace.warnings.push(
+          `The opening balances for ${payrollYear} have a basic salary but no "basic salary earned, for the 13th month": basic pay before going live is left out of this 13th month. Enter it on the employee's BIR tab and recompute.`,
         )
       }
       if (counted && counted < until) {

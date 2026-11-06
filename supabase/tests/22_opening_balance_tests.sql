@@ -70,6 +70,13 @@ select pg_temp.expect_error($$update employee_opening_balances set tax_withheld 
 select pg_temp.expect_error($$update employee_opening_balances set other_benefits = -0.01 where employee_id = '20000000-0000-0000-0000-0000000022a1'$$,
   '%other_benefits_check%');
 update employee_opening_balances set overtime_pay = 4000, thirteenth_month = 12500 where employee_id = '20000000-0000-0000-0000-0000000022a1';
+-- this year's 13th month paid in advance is part of the 13th month entered
+select pg_temp.expect_error($$update employee_opening_balances set thirteenth_installments = 12500.01 where employee_id = '20000000-0000-0000-0000-0000000022a1'$$,
+  '%employee_opening_balances_installments_within%');
+select pg_temp.expect_error($$update employee_opening_balances set periods_paid = 61 where employee_id = '20000000-0000-0000-0000-0000000022a1'$$,
+  '%periods_paid_check%');
+update employee_opening_balances set thirteenth_installments = 12500, periods_paid = 19 where employee_id = '20000000-0000-0000-0000-0000000022a1';
+update employee_opening_balances set periods_paid = null where employee_id = '20000000-0000-0000-0000-0000000022a1';
 commit;
 
 \echo '--- 22.2 another client''s admin: nothing to see, nothing to write'
@@ -120,7 +127,7 @@ update employee_opening_balances set tax_withheld = 9350 where employee_id = '20
 commit;
 select pg_temp.check((select totals = '{}'::jsonb from payroll_runs where id = '30000000-0000-0000-0000-0000000022a1'), 'the draft computes again');
 select pg_temp.check((select count(*) from audit_logs where table_name = 'employee_opening_balances'
-  and entity_id = '10000000-0000-0000-0000-0000000022a0') = 3, 'insert and both updates audited under the client');
+  and entity_id = '10000000-0000-0000-0000-0000000022a0') = 5, 'insert and the updates audited under the client');
 select pg_temp.check((select actor_id from audit_logs where table_name = 'employee_opening_balances' order by id desc limit 1) = :oa, 'actor recorded');
 -- an update that changes nothing but the timestamp leaves the draft alone
 update payroll_runs set totals = '{"gross": 12500}' where id = '30000000-0000-0000-0000-0000000022a1';

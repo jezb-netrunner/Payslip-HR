@@ -39,7 +39,7 @@ import { onPendingChanged } from '../lib/pending'
 import { supabase } from '../lib/supabase'
 import ChangePassword from './ChangePassword'
 import { TwoStepSettings } from './TwoStep'
-import { IDLE_MINUTES, sessionOf, useSessionWatch, type SessionEnd } from '../lib/useSessionWatch'
+import { IDLE_MINUTES, SESSION_END_NOTICE, SESSION_END_REASON, sessionOf, useSessionWatch, type SessionEnd } from '../lib/useSessionWatch'
 import { setSignInNotice } from '../lib/authGuard'
 import { Avatar, Button, Logo, Modal } from './ui'
 
@@ -277,16 +277,6 @@ function EntitySwitcher({ variant }: { variant: 'bar' | 'drawer' }) {
   )
 }
 
-const SESSION_END_NOTICE: Record<SessionEnd, string> = {
-  ended: 'Your session ended: this account signed in on another device or browser, or its sign-in was reset. Sign in again.',
-  idle: `You were signed out after ${IDLE_MINUTES} minutes without activity. Sign in again.`,
-  expired: 'Admin sessions last at most 12 hours. Sign in again.',
-}
-const SESSION_END_REASON: Record<SessionEnd, string> = {
-  ended: 'session ended elsewhere',
-  idle: 'signed out after inactivity',
-  expired: 'session reached 12 hours',
-}
 
 function fmtCountdown(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`

@@ -12,7 +12,7 @@ import { Badge, Button, Modal, TableShell, Td, Th } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { downloadCsv, getEmployees } from '../../lib/api'
 import type { Entity } from '../../lib/db'
-import { checkImport, IMPORT_COLUMNS, IMPORT_MAX_ROWS, parseCsv, templateRows, type ImportCheck, type ImportRow } from '../../lib/employeeImport'
+import { checkImport, decodeCsv, IMPORT_COLUMNS, IMPORT_MAX_ROWS, parseCsvRows, templateRows, type ImportCheck, type ImportRow } from '../../lib/employeeImport'
 import { errorMessage } from '../../lib/errors'
 import { SEPARATION_REASON_LABELS } from '../../lib/labels'
 import { todayManila } from '../../lib/manila'
@@ -56,19 +56,26 @@ export function EmployeeImportModal({ open, entity, onClose, onImported }: { ope
       }
       // the client's employees now, not as the list last loaded
       const existing = await getEmployees(entity.id)
+      const parsed = parseCsvRows(decodeCsv(await file.arrayBuffer()))
       setChecked(
-        checkImport(parseCsv(await file.text()), {
-          entity,
-          existingNumbers: existing.map((e) => e.employee_no),
-          existingEmails: existing.map((e) => e.email ?? '').filter(Boolean),
-          today: todayManila(),
-        }),
+        checkImport(
+          parsed.map((r) => r.cells),
+          {
+            entity,
+            existingNumbers: existing.map((e) => e.employee_no),
+            existingEmails: existing.map((e) => e.email ?? '').filter(Boolean),
+            today: todayManila(),
+          },
+          parsed.map((r) => r.line),
+        ),
       )
     } catch (err) {
       setChecked(null)
       toast('error', errorMessage(err, 'Could not read the file'))
     } finally {
       setReading(false)
+      // the same file can be chosen again after fixing it
+      if (fileInput.current) fileInput.current.value = ''
     }
   }
 

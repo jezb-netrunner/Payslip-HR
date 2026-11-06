@@ -97,7 +97,7 @@ export function buildAlphalist(params: {
     const own = payslips.filter((p) => p.employee_id === e.id).map((p) => p.fact)
     const opening = openings.find((o) => o.employee_id === e.id && o.year === year)
     // an employee who left before go-live is still on this employer's alphalist
-    const facts = opening ? [openingFact(opening), ...own] : own
+    const facts = opening ? [openingFact(opening, { hazardCertified: !!e.hazard_certification_ref }), ...own] : own
     if (facts.length === 0) continue
     const ty = taxYears.find((t) => t.employee_id === e.id && t.year === year)
     const prior = priorFromTaxYear(ty)
@@ -135,6 +135,9 @@ export function buildAlphalist(params: {
     const employedFrom = e.hire_date > jan1 ? e.hire_date : jan1
     if (!opening && !separatedBefore && firstPay && daysBetween(employedFrom, firstPay) > MISSING_PAY_DAYS) {
       issues.push(`No pay in the app before ${firstPay} (employed from ${employedFrom}): enter opening balances if this employer paid earlier in ${year}`)
+    }
+    if (opening && firstPay && daysBetween(opening.paid_through, firstPay) > MISSING_PAY_DAYS) {
+      issues.push(`Opening balances end ${opening.paid_through} but the first payroll in the app was paid ${firstPay}: pay in between is missing`)
     }
     const twice = openingOverlaps(opening, own.map((f) => f.payDate))
     if (opening && twice.length > 0) {

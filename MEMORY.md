@@ -628,9 +628,42 @@ below); the watcher touches and checks for employees too. Tests 440 → 455,
 SQL suite 23. Then two independent reviews (DB/security, engine/UI), the DB
 walkthrough re-run on a fresh replay and a re-crawl of every screen.
 
+**Review round, found and fixed** (each engine fix with a flow test that
+fails on the old code; tests 455 → 469, suites 22–23 extended):
+cumulative-average periods counted calendar halves from the first app
+payroll's START (a 26th–10th cutoff counted 2, withholding 31% too little) —
+now from its END; a previous employer without an end date counted 1 period
+(₱40,099 withheld on ₱20,000) — now to the eve of the hire; the opening's
+13th month (the 2316 total, which can be last year's paid in January) was
+subtracted from this year's 13th month (paid ₱0) — new
+`thirteenth_installments`; the old payroll's own period count wasn't known
+(a December period paid in January) — new `periods_paid` (migration
+`20261106074338_opening_balance_periods`, live); missing warnings (13th
+month basis left 0, a gap between the opening and the first app payroll),
+false or doubled ones (next-year final pays, an opening that doesn't
+apply); an MWE's hazard pay in the opening exempt without certification;
+the card writing back stale state after a save; the import reading Excel's
+Windows-1252 CSV as UTF-8 (Peña garbled), the same file not re-selectable,
+Excel scientific notation and >2 decimals accepted, a blank status making
+long-time staff probationary silently, line numbers off after multi-line
+cells. DB side: an employee reopening an ended session got "No access yet"
+(the watcher lives in the Shell) — the profile load now touches and signs
+out with the reason; `reset_client.sql` orphaned activity rows; an ended
+session's sign-out was filed under no client (`log_activity` fallback); the
+touch now deletes an idle/expired Auth session so its refresh token stops.
+Deferred: wrapping `current_employee_id()` as `(select …)` in the employee
+policies (about 4× per-row cost for employees, small at this scale; ALTER
+POLICY, no DROP needed).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: `20261106074338_opening_balance_periods` is live** (MCP, two
+columns on the empty `employee_opening_balances`); the table hashes the same
+on live and the replica (31 constraints); advisors unchanged. Checked on
+live before the timeout migration: `postgres` can select and delete
+`auth.sessions` (columns id, user_id, created_at present).
 
 **2026-11-06: `20261106120000_employee_session_timeout` is NOT live.**
 Apply it only after (or with) the front end of this branch: the deployed
@@ -638,7 +671,9 @@ app never touches employee sessions, so with the migration alone every
 employee would lose data access 32 minutes after signing in. The branch's
 front end works with or without it (a missing `touch_employee_session` is
 ignored). At the apply, employee sessions older than 32 minutes end once
-(sign in again), like the admins' at the CAS go-live.
+(sign in again), like the admins' at the CAS go-live. Expect two new
+intentional advisor lines then: WARN `touch_employee_session` (definer,
+authenticated) and INFO `employee_session_activity` (RLS, no policy).
 
 **2026-11-06: `employee_opening_balances` is live** (migration applied
 through MCP as `20261106060259 opening_balances`, repo file renamed). The
@@ -1189,11 +1224,22 @@ signed-out session reads nothing at once (PostgREST used to accept its JWT
 until expiry). Every PostgREST request as `authenticated` carries a `role`
 claim, so the escape hatch can't be reached through the API — unlike the
 admin rule's null `admin_session_id`, which was a per-account state.
+Consequences found by the review: the employee's own `employees` row is
+hidden once the session ends, so `auth.tsx` touches when it comes back
+empty and signs out with the reason (else "No access yet"); the touch
+deletes an idle/expired session at Auth (its refresh token stops);
+`log_activity` files an ended session's sign-out under the employee's
+client; Studio's "impersonate user" (role, no session id) now shows an
+employee nothing.
 
 ### The year to date is only what the app holds: count periods from there (correction, 2026-11-06)
 
 > The cumulative average divides the year's taxable pay by its payroll periods. Without opening balances the app knows pay only from the employee's first payroll in it, so periods count from that payroll (plus a previous employer's span); with opening balances, from 1 January or the hire date.
 
+Count from the first app payroll's END, not its start: `periodsThisYear`
+counts calendar halves/months, so a 26th–10th period touches two halves.
+With opening balances, `periods_paid` (the old payroll's own count) beats
+the calendar from January when entered.
 Why it mattered: counting from January (or a July hire date) while holding
 only October's pay averaged it down to the zero bracket: the DEMO's Liza
 (₱4,820 a week) and a ₱60,000 earner with a commission were withheld ₱0.

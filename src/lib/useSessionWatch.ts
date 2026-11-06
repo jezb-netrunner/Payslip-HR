@@ -10,6 +10,18 @@ const ACTIVITY_KEY = 'payslip-hr:last-activity'
 /** Why a session ended: replaced or revoked, idle, or past its 12 hours. */
 export type SessionEnd = 'ended' | 'idle' | 'expired'
 
+/** What the sign-in page says after the app ended a session, and the reason the audit trail records. */
+export const SESSION_END_NOTICE: Record<SessionEnd, string> = {
+  ended: 'Your session ended: this account signed in on another device or browser, or its sign-in was reset. Sign in again.',
+  idle: `You were signed out after ${IDLE_MINUTES} minutes without activity. Sign in again.`,
+  expired: 'A session lasts at most 12 hours. Sign in again.',
+}
+export const SESSION_END_REASON: Record<SessionEnd, string> = {
+  ended: 'session ended elsewhere',
+  idle: 'signed out after inactivity',
+  expired: 'session reached 12 hours',
+}
+
 /**
  * The last activity in any of the app's tabs on this session (one busy tab
  * keeps the others signed in). Only this device's clock is compared with

@@ -92,6 +92,7 @@ select pg_temp.check((select touch_employee_session()->>'state') = 'idle', 'touc
 select pg_temp.check((select count(*) = 0 from employees), 'still no access');
 commit;
 select pg_temp.check((select count(*) = 0 from employee_session_activity where session_id = '50000000-0000-0000-0000-0000000023f2'), 'no activity row was made for it');
+select pg_temp.check((select count(*) = 0 from auth.sessions where id = '50000000-0000-0000-0000-0000000023f2'), 'the touch ended it at Auth too (its refresh token stops)');
 
 \echo '--- 23.4 an active session: the touch keeps it going'
 begin;
@@ -116,7 +117,10 @@ set local role authenticated;
 select pg_temp.token(:ue, '50000000-0000-0000-0000-0000000023f4');
 select pg_temp.check((select count(*) = 0 from employees), 'expired: no access');
 select pg_temp.check((select my_session_state()->>'state') = 'expired', 'state expired');
-rollback;
+select pg_temp.check((select touch_employee_session()->>'state') = 'expired', 'touch answers expired');
+commit;
+select pg_temp.check((select count(*) = 0 from auth.sessions where id = '50000000-0000-0000-0000-0000000023f4'), 'expired session ended at Auth');
+select pg_temp.check((select count(*) = 0 from employee_session_activity where session_id = '50000000-0000-0000-0000-0000000023f4'), 'and its activity row gone');
 
 \echo '--- 23.6 signed out (the Auth session is gone): ended at once'
 delete from auth.sessions where id = '50000000-0000-0000-0000-0000000023f3';
@@ -152,5 +156,40 @@ select pg_temp.token(:ue, '50000000-0000-0000-0000-0000000023f1');
 select touch_employee_session();
 commit;
 select pg_temp.check((select count(*) = 0 from employee_session_activity where session_id = '50000000-0000-0000-0000-0000000023f8'), 'old row removed');
+
+\echo '--- 23.9 client-scoped reads and filing follow the session too'
+insert into announcements (entity_id, title, body) values ('10000000-0000-0000-0000-0000000023a0', 'Payday moved', 'to Friday');
+select id as lwop from leave_types where entity_id = '10000000-0000-0000-0000-0000000023a0' and code = 'LWOP' \gset
+begin;
+set local role authenticated;
+select pg_temp.token(:ue, '50000000-0000-0000-0000-0000000023f1');
+select pg_temp.check((select count(*) = 1 from announcements), 'active: sees the client''s announcement');
+select pg_temp.check((select count(*) = 1 from entities), 'active: sees the client');
+insert into leave_requests (employee_id, leave_type_id, start_date, end_date, days)
+values ('20000000-0000-0000-0000-0000000023a1', :'lwop', '2026-12-01', '2026-12-01', 1);
+select pg_temp.check((select count(*) = 1 from leave_requests), 'active: filed a leave');
+rollback;
+begin;
+set local role authenticated;
+select pg_temp.token(:ue, '50000000-0000-0000-0000-0000000023f3');
+select pg_temp.check((select count(*) = 0 from announcements), 'ended: no announcements');
+select pg_temp.check((select count(*) = 0 from entities), 'ended: no client');
+select pg_temp.check((select count(*) = 0 from leave_types where entity_id is not null), 'ended: no client leave types');
+select pg_temp.expect_error(format('insert into leave_requests (employee_id, leave_type_id, start_date, end_date, days) values (%L, %L, %L, %L, 1)',
+  '20000000-0000-0000-0000-0000000023a1', :'lwop', '2026-12-01', '2026-12-01'), '%row-level security%');
+select pg_temp.expect_error($$insert into time_correction_requests (employee_id, work_date, requested_clock_in, requested_clock_out, reason) values ('20000000-0000-0000-0000-0000000023a1', '2026-11-02', now(), now(), 'x')$$, '%row-level security%');
+rollback;
+
+\echo '--- 23.10 the sign-out of an ended session is still filed under the client'
+begin;
+set local role authenticated;
+select pg_temp.token(:ue, '50000000-0000-0000-0000-0000000023f3');
+select log_activity('sign_out', null, '{"reason":"session reached 12 hours"}');
+select log_activity('report', null, '{}');
+commit;
+select pg_temp.check((select entity_id = '10000000-0000-0000-0000-0000000023a0' from audit_logs
+  where actor_id = :ue and action = 'sign_out' order by id desc limit 1), 'sign-out filed under the client');
+select pg_temp.check((select entity_id is null from audit_logs
+  where actor_id = :ue and action = 'report' order by id desc limit 1), 'other activity of an ended session is not');
 
 \echo 'PASSED 23'

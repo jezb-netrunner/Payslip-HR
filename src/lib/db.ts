@@ -698,6 +698,10 @@ export interface EmployeeOpeningBalance {
   tax_withheld: number
   /** basic salary earned in the calendar year, for the 13th month (PD 851) */
   thirteenth_basis: number
+  /** of thirteenth_month: this year's 13th month paid in advance (installments) */
+  thirteenth_installments: number
+  /** payroll periods the old payroll paid in the tax year; null = counted from 1 January */
+  periods_paid: number | null
   notes: string
 }
 

@@ -11,8 +11,8 @@
 -- sign-in itself until the first report). A request without a role claim is
 -- no API token: a direct database session (SQL editor, migrations, tests).
 --
--- Additive: a new table and functions, the two employee RLS helpers and
--- my_session_state re-created with the session rule.
+-- Additive: a new table and functions, the two employee RLS helpers,
+-- my_session_state and log_activity re-created.
 
 create table public.employee_session_activity (
   session_id uuid primary key,
@@ -127,14 +127,16 @@ revoke execute on function public.my_session_state() from public, anon;
 grant execute on function public.my_session_state() to authenticated;
 
 -- The app reports activity in an employee's session (at most about once a
--- minute). Only a session still within its limits is extended: an idle or
--- expired one stays ended. Old rows of the caller go. Answers the state.
+-- minute). Only a session still within its limits is extended. One the
+-- database already ended (idle or past 12 hours) is deleted at Auth, so its
+-- refresh token stops too. Old rows of the caller go. Answers the state.
 create or replace function public.touch_employee_session()
 returns jsonb
 language plpgsql security definer set search_path = public
 as $$
 declare
   v_sid uuid := nullif(auth.jwt()->>'session_id', '')::uuid;
+  v_state jsonb;
 begin
   if v_sid is not null and public.current_employee_id() is not null then
     insert into employee_session_activity (session_id, user_id, seen_at)
@@ -144,8 +146,62 @@ begin
     delete from employee_session_activity
      where user_id = auth.uid() and seen_at < now() - interval '13 hours';
   end if;
-  return public.my_session_state();
+  v_state := public.my_session_state();
+  if v_sid is not null and v_state->>'state' in ('idle', 'expired')
+     and exists (select 1 from profiles where id = auth.uid() and role = 'employee') then
+    delete from auth.sessions where id = v_sid and user_id = auth.uid();
+    delete from employee_session_activity where session_id = v_sid and user_id = auth.uid();
+  end if;
+  return v_state;
 end
 $$;
 revoke execute on function public.touch_employee_session() from public, anon;
 grant execute on function public.touch_employee_session() to authenticated;
+
+-- An employee's sign-out is filed under their client even when the database
+-- already ended the session (the app reports it as it signs out). Otherwise
+-- as in 20261104072713_cas_controls (the definition there, unchanged).
+CREATE OR REPLACE FUNCTION public.log_activity(p_action text, p_entity uuid, p_detail jsonb DEFAULT '{}'::jsonb)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_email text;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in first.';
+  end if;
+  if p_action not in ('sign_in', 'sign_out', 'report', 'print', 'export') then
+    raise exception 'Unknown activity.';
+  end if;
+  if p_entity is not null and not (public.can_manage_entity(p_entity) or coalesce(public.current_employee_entity_id() = p_entity, false)) then
+    raise exception 'Client not found.';
+  end if;
+  if jsonb_typeof(coalesce(p_detail, '{}'::jsonb)) <> 'object' or length(coalesce(p_detail, '{}'::jsonb)::text) > 2000 then
+    raise exception 'The activity detail must be a short object.';
+  end if;
+  -- the app reports these: at most 120 in ten minutes per user
+  if (select count(*) from audit_logs
+       where actor_id = auth.uid() and table_name = 'activity' and created_at > now() - interval '10 minutes') >= 120 then
+    raise exception 'Too many activity entries: try again in a few minutes.';
+  end if;
+  select coalesce(p.email, nullif(p.full_name, ''), nullif(btrim(e.first_name || ' ' || e.last_name), '')) into v_email
+    from profiles p left join employees e on e.id = p.employee_id
+    where p.id = auth.uid();
+  insert into audit_logs (actor_id, actor_email, action, table_name, record_id, entity_id, new_data)
+  -- an employee's sign-in and sign-out are filed under their own client.
+  -- Reported by the app, and marked so: the keys only the sign-in guard
+  -- writes (the caller's address and browser) can't be supplied here
+  values (auth.uid(), v_email, p_action, 'activity', null,
+          coalesce(p_entity, public.current_employee_entity_id(),
+                   -- the sign-out of a session the database already ended
+                   case when p_action = 'sign_out' then (
+                     select e.entity_id from profiles p join employees e on e.id = p.employee_id
+                     where p.id = auth.uid() and p.role = 'employee') end),
+          (coalesce(p_detail, '{}'::jsonb) - 'ip' - 'user_agent' - 'via' - 'source') || jsonb_build_object('source', 'app'));
+end
+$function$;
+revoke execute on function public.log_activity(text, uuid, jsonb) from public, anon;
+grant execute on function public.log_activity(text, uuid, jsonb) to authenticated;

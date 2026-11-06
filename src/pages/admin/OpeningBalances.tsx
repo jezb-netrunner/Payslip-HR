@@ -18,7 +18,7 @@ import type { BirAnnualData } from '../../payroll/types'
 
 type AmountKey = (typeof OPENING_AMOUNT_KEYS)[number]
 /** The form: amounts as typed (strings), the rest as stored. */
-type Form = { paid_through: string; minimum_wage_earner: boolean; notes: string } & Record<AmountKey, string>
+type Form = { paid_through: string; minimum_wage_earner: boolean; notes: string; periods_paid: string } & Record<AmountKey, string>
 
 const GROUPS: { group: OpeningGroup; title: string; hint: string }[] = [
   { group: 'regular', title: 'Regular pay', hint: 'Gross, before contributions and tax (2316 items 39–44).' },
@@ -28,13 +28,24 @@ const GROUPS: { group: OpeningGroup; title: string; hint: string }[] = [
 
 function toForm(o: EmployeeOpeningBalance): Form {
   const amounts = Object.fromEntries(OPENING_AMOUNT_KEYS.map((k) => [k, String(Number(o[k] ?? 0))])) as Record<AmountKey, string>
-  return { paid_through: o.paid_through, minimum_wage_earner: !!o.minimum_wage_earner, notes: o.notes ?? '', ...amounts }
+  return {
+    paid_through: o.paid_through,
+    minimum_wage_earner: !!o.minimum_wage_earner,
+    notes: o.notes ?? '',
+    periods_paid: o.periods_paid === null || o.periods_paid === undefined ? '' : String(o.periods_paid),
+    ...amounts,
+  }
 }
 
 function fromForm(employeeId: string, year: number, f: Form): EmployeeOpeningBalance {
   const o = blankOpening(employeeId, year, f.paid_through)
   for (const k of OPENING_AMOUNT_KEYS) o[k] = Number(f[k] || 0)
-  return { ...o, minimum_wage_earner: f.minimum_wage_earner, notes: f.notes }
+  return {
+    ...o,
+    minimum_wage_earner: f.minimum_wage_earner,
+    notes: f.notes,
+    periods_paid: f.periods_paid.trim() === '' ? null : Number(f.periods_paid),
+  }
 }
 
 /** What is wrong with the form, or ''. */
@@ -46,6 +57,11 @@ function formProblem(f: Form, year: number): string {
     if (!Number.isFinite(v) || v < 0) return 'Amounts must be zero or more.'
     if (Math.abs(v * 100 - Math.round(v * 100)) > 1e-6) return 'Amounts take at most two decimals.'
   }
+  if (Number(f.thirteenth_installments || 0) > Number(f.thirteenth_month || 0)) {
+    return `This year's 13th month paid in advance can't be more than the 13th month pay entered above.`
+  }
+  if (f.periods_paid.trim() !== '' && !/^\d{1,2}$/.test(f.periods_paid.trim())) return 'Payroll periods paid: a whole number from 0 to 60, or blank.'
+  if (Number(f.periods_paid || 0) > 60) return 'Payroll periods paid: a whole number from 0 to 60, or blank.'
   return ''
 }
 
@@ -137,7 +153,10 @@ export function OpeningBalancesCard({ employee, year }: { employee: Employee; ye
     )
   }
   const form = loaded.form
-  const set = (k: keyof Form, v: string | boolean) => form && setLoaded({ ...loaded, form: { ...form, [k]: v } })
+  // functional updates: a save or removal that finishes later (or after the
+  // year changed) never writes back the form as it was when clicked
+  const set = (k: keyof Form, v: string | boolean) =>
+    setLoaded((cur) => (cur && cur.form ? { ...cur, form: { ...cur.form, [k]: v } } : cur))
 
   async function save() {
     if (!loaded || !loaded.form || loaded.year !== year) return
@@ -154,13 +173,15 @@ export function OpeningBalancesCard({ employee, year }: { employee: Employee; ye
         year: loaded.year,
         paid_through: o.paid_through,
         minimum_wage_earner: o.minimum_wage_earner,
+        periods_paid: o.periods_paid,
         notes: o.notes,
       }
       for (const k of OPENING_AMOUNT_KEYS) payload[k] = o[k]
       const { error } = await supabase.from('employee_opening_balances').upsert(payload, { onConflict: 'employee_id,year' })
       if (error) throw error
-      setLoaded({ ...loaded, exists: true })
-      toast('success', `Opening balances for ${loaded.year} saved. Recompute open drafts for this employee.`)
+      const savedYear = loaded.year
+      setLoaded((cur) => (cur && cur.year === savedYear ? { ...cur, exists: true } : cur))
+      toast('success', `Opening balances for ${savedYear} saved. Recompute open drafts for this employee.`)
     } catch (err) {
       toast('error', errorMessage(err, 'Failed'))
     } finally {
@@ -171,7 +192,7 @@ export function OpeningBalancesCard({ employee, year }: { employee: Employee; ye
   async function remove() {
     if (!loaded) return
     if (!loaded.exists) {
-      setLoaded({ ...loaded, form: null })
+      setLoaded((cur) => (cur ? { ...cur, form: null } : cur))
       return
     }
     if (!confirm(`Remove the ${loaded.year} opening balances? Annualization and the alphalist then count only payrolls in the app.`)) return
@@ -179,8 +200,9 @@ export function OpeningBalancesCard({ employee, year }: { employee: Employee; ye
     try {
       const { error } = await supabase.from('employee_opening_balances').delete().eq('employee_id', employee.id).eq('year', loaded.year)
       if (error) throw error
-      setLoaded({ year: loaded.year, exists: false, form: null })
-      toast('success', `Opening balances for ${loaded.year} removed.`)
+      const removedYear = loaded.year
+      setLoaded((cur) => (cur && cur.year === removedYear ? { year: removedYear, exists: false, form: null } : cur))
+      toast('success', `Opening balances for ${removedYear} removed.`)
     } catch (err) {
       toast('error', errorMessage(err, 'Failed'))
     } finally {
@@ -215,7 +237,7 @@ export function OpeningBalancesCard({ employee, year }: { employee: Employee; ye
 
   const problem = formProblem(form, year)
   let summary: AnnualSummary | null = null
-  if (annual && !problem) summary = summarizeYear([openingFact(fromForm(employee.id, year, form))], annual)
+  if (annual && !problem) summary = summarizeYear([openingFact(fromForm(employee.id, year, form), { hazardCertified: !!employee.hazard_certification_ref })], annual)
   const hiredAfter = !!form.paid_through && employee.hire_date > form.paid_through
   const amount = (k: AmountKey, label: string, hint?: string) => (
     <Field key={k} label={label} hint={hint}>
@@ -277,7 +299,24 @@ export function OpeningBalancesCard({ employee, year }: { employee: Employee; ye
               </Button>
             </div>
           </Field>
+          {amount(
+            'thirteenth_installments',
+            `Of the 13th month above: ${year}'s paid in advance`,
+            "A mid-year half, say: this year's 13th month run deducts it. Leave 0 for last year's 13th month paid in January.",
+          )}
+          <Field
+            label={`Payroll periods the old payroll paid in ${year}`}
+            hint="Count a December period paid in January. Blank = counted from 1 January (or the hire date)."
+          >
+            <Input type="number" inputMode="numeric" step="1" min="0" max="60" value={form.periods_paid} onChange={(e) => set('periods_paid', e.target.value)} />
+          </Field>
         </div>
+        {Number(form.basic_salary || 0) > 0 && Number(form.thirteenth_basis || 0) === 0 && (
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            No basic salary earned is entered for the 13th month: the 13th month will count only the pay in the app. Use
+            "= Basic" if the basic salary above is all earned basic pay.
+          </p>
+        )}
       </div>
       <Field label="Notes" className="mt-4">
         <Textarea rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Source, e.g. the old payroll register Jan–Sep" />

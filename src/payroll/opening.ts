@@ -50,17 +50,27 @@ export const OPENING_AMOUNT_KEYS: AmountKey[] = [
   'contributions',
   'tax_withheld',
   'thirteenth_basis',
+  'thirteenth_installments',
 ]
 
 const num = (v: unknown) => Number(v ?? 0) || 0
 
-/** The opening balance as one payslip of the year, dated its last pay date. */
-export function openingFact(o: EmployeeOpeningBalance): AnnualPayslipFact {
+/**
+ * The opening balance as one payslip of the year, dated its last pay date.
+ * A minimum wage earner's hazard pay is exempt only with the hazardous-
+ * assignment certification, as on the app's own payslips.
+ */
+export function openingFact(o: EmployeeOpeningBalance, opts: { hazardCertified?: boolean } = {}): AnnualPayslipFact {
+  const isMwe = !!o.minimum_wage_earner
   return {
     payMonth: `${o.paid_through.slice(0, 7)}-01`,
     payDate: o.paid_through,
-    isMwe: !!o.minimum_wage_earner,
-    earnings: OPENING_EARNINGS.map((f) => ({ amount: num(o[f.key]), bir: f.bir })).filter((l) => l.amount !== 0),
+    isMwe,
+    earnings: OPENING_EARNINGS.map((f) => ({
+      amount: num(o[f.key]),
+      bir: f.bir,
+      ...(isMwe && f.bir === 'hazard' && !opts.hazardCertified ? { taxable: true } : {}),
+    })).filter((l) => l.amount !== 0),
     // union dues are entered with the contributions
     contributionsEe: num(o.contributions),
     unionDues: 0,
@@ -73,8 +83,13 @@ export function openingFact(o: EmployeeOpeningBalance): AnnualPayslipFact {
  * average method's year to date): its pay less the exempt part, with the
  * exemption left after a previous employer's.
  */
-export function openingTaxable(o: EmployeeOpeningBalance, annual: BirAnnualData, prior: PriorEmployerInput = NO_PRIOR_EMPLOYER): number {
-  return summarizeYear([openingFact(o)], annual, prior).totalTaxablePresent
+export function openingTaxable(
+  o: EmployeeOpeningBalance,
+  annual: BirAnnualData,
+  prior: PriorEmployerInput = NO_PRIOR_EMPLOYER,
+  opts: { hazardCertified?: boolean } = {},
+): number {
+  return summarizeYear([openingFact(o, opts)], annual, prior).totalTaxablePresent
 }
 
 /** 13th month pay and other benefits the opening balance paid (they share the ₱90,000 exemption). */
@@ -113,6 +128,7 @@ export function blankOpening(employeeId: string, year: number, paidThrough: stri
     year,
     paid_through: paidThrough,
     minimum_wage_earner: false,
+    periods_paid: null,
     notes: '',
     ...amounts,
   }

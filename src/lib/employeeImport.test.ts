@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkImport, headerKey, IMPORT_COLUMNS, parseAmount, parseCsv, parseDate, templateRows } from './employeeImport'
+import { checkImport, decodeCsv, headerKey, IMPORT_COLUMNS, parseAmount, parseCsv, parseCsvRows, parseDate, templateRows } from './employeeImport'
 import { toCsv } from './csv'
 
 const entity = { id: 'ent', default_pay_frequency: 'semi_monthly', minimum_wage_daily: 755, working_days_divisor: 261 } as const
@@ -29,6 +29,16 @@ describe('CSV parsing', () => {
     expect(['25,000.00', '₱755', 'PHP 1,234.5', '0'].map(parseAmount)).toEqual([25000, 755, 1234.5, 0])
     expect(['-5', '1.2.3', 'abc', '1e5'].map(parseAmount)).toEqual([null, null, null, null])
   })
+  it('reads Excel\'s Windows-1252 CSV as well as UTF-8', () => {
+    const w1252 = new Uint8Array([0x50, 0x65, 0xf1, 0x61, 0x2c, 0x4e, 0xfa, 0xf1, 0x65, 0x7a]) // "Peña,Núñez"
+    expect(decodeCsv(w1252)).toBe('Peña,Núñez')
+    // UTF-8 from Google Sheets or "CSV UTF-8", its BOM dropped
+    expect(decodeCsv(new TextEncoder().encode('\ufeffPeña,Núñez'))).toBe('Peña,Núñez')
+    expect(parseCsv(decodeCsv(new TextEncoder().encode('\ufeffPeña,Núñez')))).toEqual([['Peña', 'Núñez']])
+  })
+  it('gives each row its first line in the file', () => {
+    expect(parseCsvRows('h1,h2\n"two\nlines",x\ny,z').map((r) => r.line)).toEqual([1, 2, 4])
+  })
   it('the template is the header row of every column', () => {
     expect(templateRows()).toEqual([IMPORT_COLUMNS.map((c) => c.key)])
   })
@@ -36,11 +46,11 @@ describe('CSV parsing', () => {
 
 describe('checking an import', () => {
   it('builds the employee from a minimal row with the defaults', () => {
-    const r = check(`${HEAD}\nEMP-100,Santos,Maria,2026-03-01,monthly,"25,000"`)
+    const r = check(`${HEAD}\nEMP-100,Santos,Maria,2026-09-01,monthly,"25,000"`)
     expect(r.fileError).toBe('')
     expect(r.rows[0]).toMatchObject({ line: 2, employeeNo: 'EMP-100', name: 'Maria Santos', errors: [], warnings: [] })
     expect(r.rows[0].record!.employee).toMatchObject({
-      entity_id: 'ent', employee_no: 'EMP-100', first_name: 'Maria', last_name: 'Santos', hire_date: '2026-03-01',
+      entity_id: 'ent', employee_no: 'EMP-100', first_name: 'Maria', last_name: 'Santos', hire_date: '2026-09-01',
       employment_status: 'probationary', pay_type: 'monthly', monthly_rate: 25000, daily_rate: 0,
       pay_frequency: 'semi_monthly', payment_method: 'cash', is_minimum_wage_earner: false, nationality: 'Filipino',
       separation_date: null, separation_reason: null,
@@ -104,7 +114,7 @@ describe('checking an import', () => {
   })
 
   it('warns like the Add employee form about the minimum wage, without blocking', () => {
-    const r = check(`${HEAD},minimum_wage_earner\nE1,A,B,2026-01-05,daily,700,no\nE2,C,D,2026-01-05,daily,755,no\nE3,E,F,2026-01-05,monthly,16421.25,yes\nE4,G,H,2027-01-05,daily,900,`)
+    const r = check(`${HEAD},minimum_wage_earner,employment_status\nE1,A,B,2026-01-05,daily,700,no,regular\nE2,C,D,2026-01-05,daily,755,no,regular\nE3,E,F,2026-01-05,monthly,16421.25,yes,regular\nE4,G,H,2027-01-05,daily,900,,regular`)
     expect(r.rows.map((x) => x.warnings)).toEqual([
       ["below the client's minimum wage of ₱755/day"],
       ['at the minimum wage but not marked minimum_wage_earner'],
@@ -112,6 +122,29 @@ describe('checking an import', () => {
       ['starts in the future (2027-01-05)'],
     ])
     expect(r.rows.every((x) => x.record)).toBe(true)
+  })
+
+  it('refuses numbers Excel turned into scientific notation and amounts past centavos', () => {
+    const r = check(`${HEAD},philhealth_no,phone,days_per_year\nE1,A,B,2026-09-01,daily,755.505,1.20251E+11,9.17123E+9,313.333`)
+    expect(r.rows[0].errors).toEqual([
+      'rate 755.505 has more than two decimals',
+      'days_per_year "313.333" must be a number from 1 to 366, at most two decimals',
+      'philhealth_no "1.20251E+11" was turned into scientific notation by Excel: format the column as Text and type the number again',
+      'phone "9.17123E+9" was turned into scientific notation by Excel: format the column as Text and type the number again',
+    ])
+  })
+
+  it('warns when a blank status makes a long-time employee probationary', () => {
+    const r = check(`${HEAD}\nE1,A,B,2024-02-01,monthly,30000\nE2,C,D,2026-09-01,monthly,30000`)
+    expect(r.rows.map((x) => x.warnings)).toEqual([['employment_status blank: added as probationary, though hired more than 6 months ago'], []])
+    expect(r.rows[0].record!.employee.employment_status).toBe('probationary')
+  })
+
+  it('reports the real line of a row after a cell spanning lines', () => {
+    const rows = parseCsvRows(`${HEAD},address\nE1,A,B,2026-09-01,daily,800,"Unit 5\nMakati"\nE1,C,D,2026-09-01,daily,800,x`)
+    const r = checkImport(rows.map((x) => x.cells), ctx as never, rows.map((x) => x.line))
+    expect(r.rows.map((x) => x.line)).toEqual([2, 4])
+    expect(r.rows[1].errors).toEqual(['employee no. E1 is also on line 2'])
   })
 
   it('refuses a file without the required columns, and lists unknown ones', () => {
