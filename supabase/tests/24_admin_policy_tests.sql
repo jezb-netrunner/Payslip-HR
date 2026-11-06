@@ -16,6 +16,21 @@ begin
 end $$;
 grant execute on function pg_temp.check(boolean, text) to authenticated, anon, service_role;
 
+create or replace function pg_temp.expect_error(p_sql text, p_like text default '%') returns void
+language plpgsql as $$
+begin
+  begin
+    execute p_sql;
+  exception when others then
+    if sqlerrm not like p_like then
+      raise exception 'expected error like % but got: %', p_like, sqlerrm;
+    end if;
+    return;
+  end;
+  raise exception 'expected an error but statement succeeded: %', p_sql;
+end $$;
+grant execute on function pg_temp.expect_error(text, text) to authenticated, anon, service_role;
+
 -- calls of a function so far in this backend (pending statistics can include an
 -- earlier transaction's for up to a second, so tests compare against a baseline)
 create or replace function pg_temp.calls(p_fn regprocedure) returns bigint
@@ -40,6 +55,20 @@ language sql stable as $$
       )
   )
 $$;
+
+-- can_manage_output_report as it was before 20261106140000
+create or replace function pg_temp.old_can_manage_output_report(p_name text) returns boolean
+language plpgsql stable as $$
+declare
+  v_parts text[] := storage.foldername(p_name);
+  v_uuid constant text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+begin
+  if coalesce(array_length(v_parts, 1), 0) < 2 or v_parts[1] !~ v_uuid or v_parts[2] !~ v_uuid then
+    return false;
+  end if;
+  return exists (select 1 from public.employees e where e.id = v_parts[2]::uuid and e.entity_id = v_parts[1]::uuid)
+    and pg_temp.old_can_manage_entity((select entity_id from public.employees where id = v_parts[2]::uuid));
+end $$;
 
 -- fixture: clients P1, P2 (deactivated later) and P3; admin AA of P1 and P2,
 -- AB of P3, AD of P1 (deactivated), AR of P1 (sessions revoked); an employee
@@ -186,12 +215,81 @@ update time_entries set admin_notes = 'seen' where work_date = '2026-04-01';
 rollback;
 select pg_temp.check((select count(*) from time_entries where admin_notes = 'seen') = 0, 'rolled back');
 
-\echo '--- 24.5 no public policy checks the caller per row any more'
-select pg_temp.check((select count(*) from pg_policies where schemaname = 'public'
-  and coalesce(qual, '') || ' ' || coalesce(with_check, '') ~ 'can_manage_(entity|employee)\(') = 0, 'no can_manage_* in a policy');
+\echo '--- 24.5 no policy checks the caller per row any more'
+select pg_temp.check((select count(*) from pg_policies
+  where coalesce(qual, '') || ' ' || coalesce(with_check, '') ~ 'can_manage_') = 0, 'no can_manage_* in a policy, tables or storage');
 select pg_temp.check((select bool_and(
     regexp_count(coalesce(qual, '') || ' ' || coalesce(with_check, ''), '(is_company_admin|managed_entity_ids|managed_employee_ids|caller_is_admin)\(\)')
   = regexp_count(coalesce(qual, '') || ' ' || coalesce(with_check, ''), 'SELECT (is_company_admin|managed_entity_ids|managed_employee_ids|caller_is_admin)\(\)'))
   from pg_policies where schemaname = 'public'), 'the caller helpers are always wrapped in a select');
+
+\echo '--- 24.6 output reports: the same answers as before, for every caller and path'
+begin;
+create temp table probe_names (n text);
+insert into probe_names
+select format(f, e.entity_id, e.id, o.entity_id)
+from employees e
+cross join lateral (select id as entity_id from entities where id <> e.entity_id limit 1) o
+cross join unnest(array['%1$s/%2$s/report.pdf', '%3$s/%2$s/report.pdf', '%1$s/%2$s', '%1$s/%2$s/sub/report.pdf',
+                        '/%1$s/%2$s/report.pdf', '%1$s/%2$s/', '%1$s/%2$s.pdf']) f;
+insert into probe_names select upper(n) from probe_names where n like '%/report.pdf' limit 5;
+insert into probe_names values (null), (''), ('x'), ('a/b/c'), ('10000000-0000-0000-0000-0000000024a1/not-a-uuid/x.pdf');
+-- every path stored as a report: the policy itself answers, per caller
+insert into storage.objects (bucket_id, name) select 'output-reports', n from probe_names where n is not null;
+grant select on probe_names to authenticated;
+create temp table report_mismatches (caller uuid, n text);
+grant all on report_mismatches to authenticated;
+do $$
+declare c uuid; begin
+  for c in select id from public.profiles union all select null loop
+    perform pg_temp.as_caller(c);
+    -- what the old check allows, then what the policy lets the caller see
+    create temp table allowed on commit drop as
+      select p.n from probe_names p where p.n is not null and pg_temp.old_can_manage_output_report(p.n);
+    grant select on allowed to authenticated;
+    perform set_config('role', 'authenticated', true);
+    insert into report_mismatches
+    select c, coalesce(v.name, a.n) from
+      (select name from storage.objects where bucket_id = 'output-reports' and name in (select n from probe_names)) v
+      full join allowed a on a.n = v.name
+    where v.name is null or a.n is null;
+    perform set_config('role', 'postgres', true);
+    drop table allowed;
+  end loop;
+end $$;
+select pg_temp.check((select count(*) from probe_names) > 100, 'probed many paths');
+select pg_temp.check((select count(*) from report_mismatches) = 0,
+  'no differences: ' || coalesce((select string_agg(coalesce(caller::text, 'nobody') || ' ' || coalesce(n, 'null'), ', ') from (select * from report_mismatches limit 5) m), ''));
+-- and the answers are not all false: AA sees P1's reports, not P3's
+select pg_temp.as_caller(:aa);
+set local role authenticated;
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'output-reports' and name like '10000000-0000-0000-0000-0000000024a1/20000000-0000-0000-0000-0000000024e1/%') = 3
+  and (select count(*) from storage.objects where bucket_id = 'output-reports' and name like '10000000-0000-0000-0000-0000000024a3/%') = 0, 'AA: the 3 valid paths of P1''s employee (file, sub-folder, trailing slash), none of P3''s');
+set local role postgres;
+-- the three policies ask the same
+select pg_temp.check((select count(distinct coalesce(qual, with_check)) from pg_policies where schemaname = 'storage' and policyname like 'output reports:%') = 1, 'read, remove and upload alike');
+rollback;
+
+\echo '--- 24.7 listing output reports: the keys once per statement'
+insert into storage.objects (bucket_id, name)
+select 'output-reports', format('%s/%s/report-%s.pdf', e.entity_id, e.id, g)
+from employees e cross join generate_series(1, 20) g
+where e.id in ('20000000-0000-0000-0000-0000000024e1', '20000000-0000-0000-0000-0000000024e3');
+begin;
+set local track_functions = 'all';
+set local role authenticated;
+select pg_temp.as_caller(:aa);
+select pg_temp.calls('public.managed_output_report_keys()') as mk0, pg_temp.calls('public.can_manage_output_report(text)') as co0,
+  pg_temp.calls('public.can_manage_employee(uuid)') as cp0 \gset
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'output-reports') = 20, 'AA lists P1''s 20 reports, not P3''s');
+select pg_temp.check(pg_temp.calls('public.managed_output_report_keys()') - :mk0 = 1
+  and pg_temp.calls('public.can_manage_output_report(text)') = :co0
+  and pg_temp.calls('public.can_manage_employee(uuid)') = :cp0, 'the keys once, no per-object check');
+delete from storage.objects where bucket_id = 'output-reports' and name like '10000000-0000-0000-0000-0000000024a1/%report-1.pdf';
+insert into storage.objects (bucket_id, name) values ('output-reports', '10000000-0000-0000-0000-0000000024a1/20000000-0000-0000-0000-0000000024e1/new.pdf');
+select pg_temp.expect_error($$insert into storage.objects (bucket_id, name) values ('output-reports', '10000000-0000-0000-0000-0000000024a3/20000000-0000-0000-0000-0000000024e3/new.pdf')$$, '%row-level security%');
+select pg_temp.check((select count(*) from storage.objects where bucket_id = 'output-reports') = 20, 'AA removed one and uploaded one');
+rollback;
+delete from storage.objects where bucket_id = 'output-reports' and name like '%/report-%.pdf';
 
 \echo 'PASSED 24'
