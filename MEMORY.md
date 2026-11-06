@@ -697,14 +697,40 @@ caller × client incl. null/unknown; managed lists for deactivated, revoked,
 archived-client cases; call counts; writes), mutation runs (dropping the
 active-client filter, or one policy back to per-row) fail it, and a
 before/after snapshot of what 41 users see in 43 RLS tables matched (0
-differences). Storage `output reports` policies still call
-`can_manage_output_report(name)` per object (path-dependent; small).
+differences). Storage `output reports` policies were done next (entry below).
 Found on the way: live's `can_manage_employee` body has CRLF line ends
 (same logic, hashes differ unless `\r` is stripped).
+
+### 2026-11-06 — Output report speed-up (owner: "do the output report speed-up too")
+
+Migration `20261106084422_output_report_policies` (live). The three
+`output reports:` storage policies now ask `name LIKE '%/%/%' AND
+split_part(name,'/',1)||'/'||split_part(name,'/',2) IN (select
+managed_output_report_keys())` (client/employee text keys of the managed
+employees, hashed) instead of `can_manage_output_report(name)` per object
+(kept unchanged, unused by policies). No uuid validation needed: a key can
+only match canonical uuids, and `LIKE '%/%/%'` is exactly "foldername has two
+segments". Listing 5,000 reports: 1.6–3.3 s → 4–8 ms. Tried first: a parser
+function calling `storage.foldername` (115 ms: plpgsql + a `SET` function per
+row) and an anchored uuid regex (165 ms) — both slower than plain
+`split_part`. Suite 24.6 stores every probe path (valid, wrong client, upper
+case, no file name, sub-folder, leading/trailing slash, junk) and compares
+what each of ~45 callers sees through RLS with the old function; mutation
+runs (no LIKE, per-object policy, a parser not using foldername) fail it.
+The stub's `storage.foldername` now matches Supabase's (drops the file name;
+the old stub kept it, which made a path with no file name look valid).
 
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: `20261106084422_output_report_policies` is live** (MCP, before
+its PR merged; storage policies and one helper, no front-end change). Live's
+three storage policies were the originals before; after, storage policies,
+public policies (`bd0792e2…`, unchanged) and `managed_output_report_keys`
+(body, grants) hash the same on live and the replica. Advisors: one new
+lint-0029 line (accepted class), performance unchanged. No report files on
+live yet.
 
 **2026-11-06: `20261106083347_admin_policies_initplan` is live** (MCP,
 before its PR merged: policies and helpers only, no front-end change).
@@ -1303,7 +1329,9 @@ transaction: pending stats keep an earlier transaction's calls for up to a
 second. Gotcha: `x = ANY ((select f()))` parses as ANY(subquery) and fails
 (uuid = uuid[]); cast the array, `ANY ((select f())::uuid[])`, to keep it an
 initPlan. Admins: 4.6 s → 16 ms for 56k rows once the client list was
-computed once per statement.
+computed once per statement. What stays per row should be plain built-ins:
+a SQL function with `SET search_path` or a plpgsql call costs ~20 µs a row
+(storage paths: `split_part` 4 ms vs a parser function 115 ms per 5,000).
 
 ### Employee sessions: Auth's start, the app's activity, no bypass for API tokens (design decision, 2026-11-06)
 

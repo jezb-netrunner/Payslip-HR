@@ -56,8 +56,14 @@ create table storage.objects (
   created_at timestamptz default now()
 );
 alter table storage.objects enable row level security;
-create or replace function storage.foldername(name text) returns text[] language sql immutable as $$
-  select string_to_array(name, '/')
+-- as Supabase defines it: every path segment but the last (the file name)
+create or replace function storage.foldername(name text) returns text[] language plpgsql immutable as $$
+declare
+  _parts text[];
+begin
+  select string_to_array(name, '/') into _parts;
+  return _parts[1 : array_length(_parts, 1) - 1];
+end
 $$;
 grant usage on schema storage to anon, authenticated, service_role;
 grant all on storage.objects to anon, authenticated, service_role;
