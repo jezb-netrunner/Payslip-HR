@@ -52,3 +52,9 @@ work:
   clients' data.
 - Money is `numeric` in the DB and rounded with `round2` at line-item level;
   PhilHealth splits give the odd centavo to the employer.
+- RLS policies never call a caller check per row: wrap row-independent
+  helpers as `(select …)` and test "may manage" against
+  `managed_entity_ids()` / `managed_employee_ids()` (README → *Access
+  rules*; suites 23–24 enforce it).
+- A read that can return more than 1,000 rows (one row per employee, a
+  client's month) goes through `fetchAll`; PostgREST silently caps the rest.

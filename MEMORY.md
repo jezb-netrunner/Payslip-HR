@@ -720,9 +720,55 @@ runs (no LIKE, per-object policy, a parser not using foldername) fail it.
 The stub's `storage.foldername` now matches Supabase's (drops the file name;
 the old stub kept it, which made a path with no file name look valid).
 
+### 2026-11-06 — Release 1.0.0 pass (owner: "optimize everything and finalize it … for the final release version")
+
+Version stays **1.0.0** (`package.json`; printed on every BIR report, so a
+bump is something the client declares — this is the first release, no tag
+existed). Did, each verified:
+- **Bundle**: one 2.1 MB chunk (618 kB gz) → pages lazy (`lazyPage`,
+  `src/lib/lazyPage.ts`) inside the shell's `Suspense` + new `PageBoundary`
+  (the app had no error boundary); first load 537 kB (157 kB gz). jsPDF is
+  imported on click at all five PDF sites (the employee dashboard/payslips
+  pulled ~450 kB of it for the payslip card). A failed chunk import (stale
+  tab after a deploy) reloads once per tab (sessionStorage flag; no loop
+  when storage is blocked). UI harness: crawl of every route × 3 roles × 2
+  widths clean (the one "error-text" is the absences count in rose), 12/12
+  flows incl. both payslip PDF downloads.
+- **Row cap**: `fetchTaxYears`, `fetchOpeningBalances` (annualization,
+  alphalist, 2316), `lockedKeys` and the daily timesheet read returned at
+  most 1,000 rows — a client past 1,000 employees would silently lose
+  previous-employer / opening figures. Now `fetchAll`. The flow tests' fake
+  now caps at `MAX_ROWS = 1000` like PostgREST; `rowCap.test.ts` (1,001
+  employees) fails on the old reads; all 475 tests pass under the cap.
+- **Indexes**: migration `20261106090036_foreign_key_indexes` (live) — the
+  8 FKs advisor lint 0001 listed (`employee_tax_years (entity_id, year)`
+  doubles as the annualization filter). Advisor now: no unindexed FK.
+- **Not changed, on purpose**: ~30 `set-state-in-effect` lint warnings
+  (loading flags set at the start of a fetch effect: one extra render, no
+  bug; rewriting 30 working effects before a release is risk without user
+  benefit); "unused index" INFO (live has almost no traffic); "multiple
+  permissive policies" WARN (employee + admin policies by design; their
+  per-row cost is gone); per-row loops in final-pay checks, leave
+  entitlements, timesheet saves and the import (small or order-dependent).
+- Docs: README *Access rules* / *Live against the repo*, CLAUDE.md ground
+  rules (no per-row caller checks; `fetchAll` past 1,000 rows);
+  `fingerprint.sql` now also hashes the storage policies.
+- Owner to do (dashboard, not SQL): Auth → leaked password protection (the
+  edge functions already screen admin passwords against Pwned Passwords).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06, release 1.0.0: live = repo.** Last migration
+`20261106090036 foreign_key_indexes`. `supabase/tests/fingerprint.sql` on
+live and on the replica: tables 43 `38a771fc`, columns 617 `7daa314c`,
+constraints 339 `76b6f6ad`, indexes 125 `a1cd7d37`, policies 70 `5d84aa29`,
+functions 91 `eae1a70d`, fn_grants `939f40ab`, triggers 124 `1726a39f`,
+storage_policies 3 `e7dbd16f` — all equal. Security advisors: the accepted
+lint-0029 list (22) + RLS-no-policy INFO on the 4 system tables + leaked
+password protection (dashboard setting). Performance: unused-index INFO and
+multiple-permissive WARN only.
 
 **2026-11-06: `20261106084422_output_report_policies` is live** (MCP, before
 its PR merged; storage policies and one helper, no front-end change). Live's
@@ -1332,6 +1378,16 @@ initPlan. Admins: 4.6 s → 16 ms for 56k rows once the client list was
 computed once per statement. What stays per row should be plain built-ins:
 a SQL function with `SET search_path` or a plpgsql call costs ~20 µs a row
 (storage paths: `split_part` 4 ms vs a parser function 115 ms per 5,000).
+
+### PostgREST caps every response at 1,000 rows — and the fake must too (correction, 2026-11-06)
+
+> Any read that can pass 1,000 rows (one row per employee, a client's month of anything) goes through `fetchAll` with a stable `order`; `src/payroll/flows/fakeSupabase.ts` caps responses at `MAX_ROWS` so tests see the truncation.
+
+Why: the cap is silent — no error, just fewer rows — and four reads
+(previous employers, opening balances, paid-day locks, a day's timesheet)
+would have dropped employees past 1,000 from the annualization, alphalist
+and 2316. The in-memory fake returned everything, so no test could catch
+it; with the cap a 1,001-employee test fails on the old reads.
 
 ### Employee sessions: Auth's start, the app's activity, no bypass for API tokens (design decision, 2026-11-06)
 

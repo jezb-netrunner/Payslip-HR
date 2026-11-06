@@ -341,7 +341,8 @@ See `docs/BIR_ANNEX_B.md` for these controls item by item against BIR RMO
   Postgres 17, RLS, triggers, RPCs, `admin-users` edge function for login
   codes and admin accounts, `auth-guard` edge function for admin sign-in
 - **Frontend**: Vite + React 19 + TypeScript + Tailwind CSS v4, React Router,
-  Recharts, jsPDF, Lucide icons
+  Recharts, jsPDF, Lucide icons; each page is its own chunk and jsPDF loads
+  when a PDF is made, so the first load is the shell and the sign-in only
 - **Tests**: Vitest — payroll engine, frequencies, annualization, alphalist,
   cash rounding, login codes, CSV safety, and end-to-end `computeRun` flows
   against an in-memory Supabase (`src/payroll/flows/`); SQL suites for RLS,
@@ -412,6 +413,22 @@ single-company schema, so an older front end stops working once they are
 applied, and this front end needs them. Apply the migrations, deploy the edge
 function, then merge to `main`. See `MEMORY.md` → *Current deployed state* for
 what is live.
+
+**Access rules.** RLS protects every table and the `output-reports` bucket.
+No policy checks the caller once per row: who the caller is (their employee
+record, or the clients and employees an admin manages) is worked out once
+per query, `(select public.current_employee_id())`,
+`(select public.managed_entity_ids())::uuid[]`,
+`IN (select public.managed_employee_ids())`, so a page costs the same at a
+hundred rows or a hundred thousand. Keep new policies in that form; suites
+23 and 24 check it and count the calls. Reads that can return more than
+1,000 rows (PostgREST's cap) page through `fetchAll` (`src/lib/fetchAll.ts`).
+
+**Live against the repo.** `supabase/tests/fingerprint.sql` hashes the
+public schema (tables, columns, constraints, indexes, policies, functions,
+grants, triggers) and the storage policies. Run it on the live project and
+on the replica `supabase/tests/run.sh` builds: equal hashes mean live runs
+exactly the tested schema.
 
 ## Repository map
 
