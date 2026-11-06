@@ -17,7 +17,7 @@ import { remittances1601C, type RemittanceMonth } from '../../payroll/remittance
 import { FILING_LABELS, filingCalendar, type DueDate, type DueDateOverride } from '../../payroll/dueDates'
 import { ewtYearCalendar, type EwtDue, type EwtDueOverride } from '../../payroll/ewtDueDates'
 import { round2 } from '../../payroll/types'
-import { fetchFinalizedPayslipsForTaxYear, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
+import { fetchFinalizedPayslipsForTaxYear, fetchOpeningBalances, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
 import { errorMessage } from '../../lib/errors'
 import Insights from './Insights'
 import { useReportStamp } from '../../lib/useReportStamp'
@@ -133,11 +133,13 @@ function useAlphalist(entity: Entity, year: number) {
     let cancelled = false
     ;(async () => {
       try {
-        const [employees, payslips, taxYears, tables, mweRates] = await Promise.all([
+        const [employees, payslips, taxYears, openings, tables, mweRates] = await Promise.all([
           getEmployees(entity.id),
           // tax year = compensation PAID in the year (pay date)
           fetchFinalizedPayslipsForTaxYear(entity.id, year),
           fetchTaxYears(entity.id, year),
+          // this employer's pay before going live on the app
+          fetchOpeningBalances(entity.id, year),
           getStatutoryTables(`${year}-12-31`),
           // the rate on each minimum wage earner's payslips, latest last
           fetchAll<{ employee_id: string; pay_type: string; daily_rate: string; monthly_rate: string }>((from, to) =>
@@ -174,6 +176,7 @@ function useAlphalist(entity: Entity, year: number) {
             employees,
             payslips: payslips.map((p) => ({ employee_id: p.employee_id, fact: toAnnualFact(p) })),
             taxYears,
+            openings,
             annual: tables.bir_annual,
             yearEndRates,
           }),
@@ -600,7 +603,9 @@ function Summary1604C({ entity, year }: { entity: Entity; year: number }) {
         <p className="mt-3 text-[11px] text-slate-400">
           "Withheld per payroll" is the month's tax to remit: finalized payslips by the month they were paid (pay date), less the
           year-end refunds paid that month — a refund larger than the month's tax carries to the following months. Record each
-          monthly 1601-C payment under 1601-C remittances. Amber = payroll and remittance differ.
+          monthly 1601-C payment under 1601-C remittances. Amber = payroll and remittance differ. Months paid before the
+          client went live on the app show no payroll figure (opening balances are yearly totals): record the old
+          payroll's 1601-C payments for them; the alphalist below includes the opening balances.
         </p>
       </Card>
 

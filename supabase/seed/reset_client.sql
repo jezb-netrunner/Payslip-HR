@@ -44,6 +44,7 @@ delete from public.career_events where employee_id in (select id from _reset_emp
 delete from public.employee_schedules where entity_id in (select id from _reset_entity);
 delete from public.schedule_overrides where entity_id in (select id from _reset_entity);
 delete from public.employee_tax_years where entity_id in (select id from _reset_entity);
+delete from public.employee_opening_balances where entity_id in (select id from _reset_entity);
 delete from public.profiles where id in (select id from _reset_login);
 update public.profiles set employee_id = null where employee_id in (select id from _reset_emp);
 delete from public.employees where entity_id in (select id from _reset_entity);

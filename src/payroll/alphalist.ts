@@ -7,9 +7,10 @@
 // file. Basis: NIRC Sec. 83; RR 2-98 Sec. 2.83.1 as amended by RR 11-2018;
 // RR 16-2021 Sec. 2; RMC 160-2022; RMC 29-2024.
 
-import type { Employee, EmployeeTaxYear, Entity } from '../lib/db'
+import type { Employee, EmployeeOpeningBalance, EmployeeTaxYear, Entity } from '../lib/db'
 import { EMPLOYMENT_STATUS_BIR, SEPARATION_REASON_BIR } from '../lib/labels'
 import { NO_PRIOR_EMPLOYER, summarizeYear, type AnnualPayslipFact, type AnnualSummary, type PriorEmployerInput } from './annual'
+import { openingFact, openingOverlaps } from './opening'
 import { round2, type BirAnnualData } from './types'
 
 export function priorFromTaxYear(t: EmployeeTaxYear | undefined): PriorEmployerInput {
@@ -73,6 +74,8 @@ export function buildAlphalist(params: {
   employees: Employee[]
   payslips: { employee_id: string; fact: AnnualPayslipFact }[]
   taxYears: EmployeeTaxYear[]
+  /** This employer's pay before the client went live on the app: one more payslip of the year. */
+  openings?: EmployeeOpeningBalance[]
   annual: BirAnnualData
   /**
    * Schedule 2's statutory minimum wage: the rate actually paid at year end
@@ -81,13 +84,16 @@ export function buildAlphalist(params: {
    */
   yearEndRates?: Map<string, YearEndRate>
 }): AlphalistRow[] {
-  const { year, entity, employees, payslips, taxYears, annual, yearEndRates } = params
+  const { year, entity, employees, payslips, taxYears, openings = [], annual, yearEndRates } = params
   const jan1 = `${year}-01-01`
   const dec31 = `${year}-12-31`
   const rows: AlphalistRow[] = []
 
   for (const e of employees) {
-    const facts = payslips.filter((p) => p.employee_id === e.id).map((p) => p.fact)
+    const own = payslips.filter((p) => p.employee_id === e.id).map((p) => p.fact)
+    const opening = openings.find((o) => o.employee_id === e.id && o.year === year)
+    // an employee who left before go-live is still on this employer's alphalist
+    const facts = opening ? [openingFact(opening), ...own] : own
     if (facts.length === 0) continue
     const ty = taxYears.find((t) => t.employee_id === e.id && t.year === year)
     const prior = priorFromTaxYear(ty)
@@ -118,6 +124,10 @@ export function buildAlphalist(params: {
     if (ty?.has_previous_employer && !ty.prev_employer_tin) issues.push('Previous employer TIN missing')
     if (ty?.has_previous_employer && (!ty.prev_employment_from || !ty.prev_employment_to)) {
       issues.push('Previous employment period missing')
+    }
+    const twice = openingOverlaps(opening, own.map((f) => f.payDate))
+    if (opening && twice.length > 0) {
+      issues.push(`Opening balances (paid through ${opening.paid_through}) overlap payrolls paid on ${twice.join(', ')}: counted twice`)
     }
     if (separatedBefore) {
       issues.push(`Separated ${e.separation_date}, paid in ${year}: check the employment dates the BIR module accepts`)

@@ -65,7 +65,13 @@ Liza's correction changes her 19–25 Oct week):
 | Weekly, Liza | 4,820.00 · 4,715.42 · 4,471.67 · 3,719.57 · 4,587.89 |
 | Weekly, Ramon | 2,303.72 · 3,256.59 · 3,333.43 · 4,071.81 · 4,098.78 |
 
-Known artifact: payroll history starts in October, so any annualization
-(Grace's separation in 16–31 Oct, December's year-end run) sees October
-onward only. Grace's 16–31 Oct payslip refunds her 1–15 Oct withholding
-(₱281.47): correct for the data in the system.
+Payroll history starts in October, so without opening balances any
+annualization (Grace's separation in 16–31 Oct, December's year-end run)
+sees October onward only: Grace's 16–31 Oct payslip refunds just her 1–15
+Oct withholding (₱281.47). To model the client's January–September payroll,
+enter each employee's **opening balances** (employee → BIR tab → *Before
+going live on the app*, last pay date 5 Oct 2026 for the 16–30 Sep payroll)
+before computing October; annualization, the 13th month and the alphalist
+then count the whole year. Grace at ₱25,000 a month leaving in October is
+still under the ₱250,000 zero bracket for the year, so her separation still
+refunds, but all of the year's withholding, not just 1–15 October's.

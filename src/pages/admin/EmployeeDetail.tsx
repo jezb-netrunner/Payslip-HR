@@ -94,6 +94,7 @@ import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, O
 import type { PayRateReason } from '../../payroll/payRates'
 import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
 import { philhealthNgProblem } from '../../payroll/philhealth'
+import { OpeningBalancesCard } from './OpeningBalances'
 import { errorMessage } from '../../lib/errors'
 
 const eventLabels: Record<string, string> = {
@@ -1747,6 +1748,7 @@ function BirTab({ employee }: { employee: Employee }) {
           </p>
         </div>
       </Card>
+      <OpeningBalancesCard employee={employee} year={year} />
     </div>
   )
 }

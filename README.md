@@ -197,8 +197,9 @@ The app captures everything the annual information return needs:
 - Employee: TIN, name, birth date, nationality, address + ZIP, employment
   status (regular / casual / contractual / probationary / seasonal…),
   inclusive dates of employment, reason of separation, previous employer
-  (TIN, name, compensation and tax withheld), PERA tax credit, substituted
-  filing
+  (TIN, name, compensation and tax withheld), this employer's opening
+  balances from before the client went live on the app (counted as its own
+  pay), PERA tax credit, substituted filing
 - Every earning carries its BIR classification (basic, holiday, overtime,
   night differential, hazard, 13th month & other benefits, de minimis,
   representation, transportation, COLA, housing, commission, profit

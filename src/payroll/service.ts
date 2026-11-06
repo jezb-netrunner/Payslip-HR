@@ -11,6 +11,7 @@ import { supabase } from '../lib/supabase'
 import type {
   Employee,
   EmployeeAllowance,
+  EmployeeOpeningBalance,
   EmployeeOutput,
   EmployeeTaxYear,
   Entity,
@@ -22,6 +23,7 @@ import type {
 } from '../lib/db'
 import type { AnnualPayslipFact } from './annual'
 import { priorFromTaxYear } from './alphalist'
+import { openingAppliesTo, openingBenefits, openingFact, openingOverlaps, openingTaxable, overlapWarning } from './opening'
 import { computeAttendance } from './attendance'
 import { computePayslip, MATERNITY_LEAVE_CODE, sssCompensation, type ContributionSet, type DeMinimisUsed, type MaternityContext, type MaternityMonth } from './engine'
 import { periodsThisYear, type TaxYearToDate } from './withholding'
@@ -213,6 +215,17 @@ export async function fetchTaxYears(entityId: string, year: number): Promise<Emp
     .eq('year', year)
   if (error) throw error
   return (data ?? []) as EmployeeTaxYear[]
+}
+
+/** Opening balances of one client's tax year: this employer's pay before going live on the app. */
+export async function fetchOpeningBalances(entityId: string, year: number): Promise<EmployeeOpeningBalance[]> {
+  const { data, error } = await supabase
+    .from('employee_opening_balances')
+    .select('*')
+    .eq('entity_id', entityId)
+    .eq('year', year)
+  if (error) throw error
+  return (data ?? []) as EmployeeOpeningBalance[]
 }
 
 /** Employees a run covers: right client, frequency, employment overlapping the period. */
@@ -549,10 +562,17 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   // every payroll reads the tax year: the cumulative average method of
   // withholding builds on the year's taxable pay and tax withheld
   const needsTaxYear = employees.length > 0
-  const [yearSlips, taxSlips, taxYears, monthSlips] = await Promise.all([
+  const [yearSlips, taxSlips, taxYears, openings, payrollYearOpenings, monthSlips] = await Promise.all([
     isThirteenth ? fetchFinalizedPayslipsForYear(entity.id, payrollYear) : Promise.resolve([] as YearPayslip[]),
     needsTaxYear ? fetchFinalizedPayslipsForTaxYear(entity.id, taxYear) : Promise.resolve([] as YearPayslip[]),
     needsTaxYear ? fetchTaxYears(entity.id, taxYear) : Promise.resolve([] as EmployeeTaxYear[]),
+    // this employer's pay before the client went live on the app
+    needsTaxYear ? fetchOpeningBalances(entity.id, taxYear) : Promise.resolve([] as EmployeeOpeningBalance[]),
+    // a 13th month counts the basic salary earned in the payroll year, which
+    // differs from the tax year when it is paid in January
+    needsTaxYear && isThirteenth && payrollYear !== taxYear
+      ? fetchOpeningBalances(entity.id, payrollYear)
+      : Promise.resolve(null),
     // contributions already deducted this payroll month, and the SSS
     // compensation already paid (a 13th month pay counts in its month)
     fetchAll<MonthSlip>((from, to) =>
@@ -743,6 +763,13 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     const taxYearRow = taxYears.find((t) => t.employee_id === emp.id)
     const prior = priorFromTaxYear(taxYearRow)
     const peraCredit = Number(taxYearRow?.pera_tax_credit ?? 0)
+    // This employer's pay before the client went live on the app: earlier
+    // in the year for a payroll paid after it. The 13th month reads the
+    // payroll year's (basic salary earned, installments paid).
+    const openingRow = openings.find((o) => o.employee_id === emp.id)
+    const opening = openingAppliesTo(openingRow, run.pay_date) ? openingRow : undefined
+    const payrollYearOpeningRow = (payrollYearOpenings ?? openings).find((o) => o.employee_id === emp.id)
+    const payrollYearOpening = openingAppliesTo(payrollYearOpeningRow, run.pay_date) ? payrollYearOpeningRow : undefined
     const linesSum = (bucket: BirBucket) =>
       empYear.reduce(
         (s, p) => s + p.earnings.filter((l) => l.bir === bucket).reduce((a, l) => a + Number(l.amount), 0),
@@ -752,10 +779,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     // reissued ignores what later payrolls paid and withheld
     const taxBefore = empTax.filter((p) => (p.pay_date ?? '') <= run.pay_date)
     // 13th month pay and other benefits already paid in the tax year
-    const taxYearBenefits = taxBefore.reduce(
-      (s, p) => s + p.earnings.filter((l) => isBenefit(l.bir ?? '')).reduce((a, l) => a + Number(l.amount), 0),
-      0,
-    )
+    const taxYearBenefits =
+      taxBefore.reduce(
+        (s, p) => s + p.earnings.filter((l) => isBenefit(l.bir ?? '')).reduce((a, l) => a + Number(l.amount), 0),
+        0,
+      ) + (opening ? openingBenefits(opening) : 0)
 
     // The tax year so far for the cumulative average method (RR 2-98 Sec.
     // 2.79(B)(5)(a)): taxable pay and tax withheld from 1 January, an
@@ -772,9 +800,12 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
     const taxYearToDate: TaxYearToDate = {
       taxableBefore: round2(
         taxBefore.reduce((s, p) => s + Number(p.taxable_income ?? 0), 0) +
-          prior.taxableBasic + prior.taxable13thOtherBenefits + prior.taxableOther,
+          prior.taxableBasic + prior.taxable13thOtherBenefits + prior.taxableOther +
+          (opening ? openingTaxable(opening, tables.bir_annual, prior) : 0),
       ),
-      withheldBefore: round2(taxBefore.reduce((s, p) => s + Number(p.withholding_tax), 0) + prior.taxWithheld),
+      withheldBefore: round2(
+        taxBefore.reduce((s, p) => s + Number(p.withholding_tax), 0) + prior.taxWithheld + Number(opening?.tax_withheld ?? 0),
+      ),
       periods: lagged + periodsThisYear(frequency, clamp(firstEmployment > yearStart ? firstEmployment : yearStart), clamp(periodTo)),
       cumulative: !!taxYearRow?.has_previous_employer || taxBefore.some((p) => whtMethodOf(p) === 'cumulative_average'),
     }
@@ -866,7 +897,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         annualizes(emp) || (isThirteenth && taxYearAnnualized)
           ? {
               payMonth: `${run.pay_date.slice(0, 7)}-01`,
-              ytd: empTax.map(toAnnualFact),
+              ytd: [...(opening ? [openingFact(opening)] : []), ...empTax.map(toAnnualFact)],
               prior,
               peraCredit,
             }
@@ -894,13 +925,13 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
           ),
         opens: !isThirteenth && !empMonth.some((p) => p.run_type !== 'thirteenth_month'),
       },
-      ytdBasicPay: empYear
-        .filter((p) => p.run_type !== 'thirteenth_month')
-        .reduce((s, p) => s + Number(p.basic_pay), 0),
-      ytdThirteenthPaid: empYear
-        .filter((p) => p.run_type === 'thirteenth_month')
-        .reduce((s, p) => s + Number(p.gross_pay), 0),
-      ytdOtherBenefits: linesSum('other_benefits'),
+      ytdBasicPay:
+        empYear.filter((p) => p.run_type !== 'thirteenth_month').reduce((s, p) => s + Number(p.basic_pay), 0) +
+        Number(payrollYearOpening?.thirteenth_basis ?? 0),
+      ytdThirteenthPaid:
+        empYear.filter((p) => p.run_type === 'thirteenth_month').reduce((s, p) => s + Number(p.gross_pay), 0) +
+        Number(payrollYearOpening?.thirteenth_month ?? 0),
+      ytdOtherBenefits: linesSum('other_benefits') + Number(payrollYearOpening?.other_benefits ?? 0),
       priorThirteenthOtherBenefitsExempt: prior.thirteenthOtherBenefitsExempt,
       taxYearBenefitsPaid: isThirteenth ? taxYearBenefits : undefined,
       benefitsExemptLeft: isThirteenth
@@ -913,6 +944,20 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         : undefined,
     })
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
+    if (openingRow) {
+      const twice = overlapWarning(openingRow, openingOverlaps(openingRow, empTax.map((p) => p.pay_date)))
+      if (twice) slip.trace.warnings.push(twice)
+      if (!opening) {
+        slip.trace.warnings.push(
+          `This payroll is paid on ${run.pay_date}, on or before the opening balances' "paid through" date (${openingRow.paid_through}): pay released by then belongs to the old payroll, so the opening balances are left out here. Check the pay date or the opening balances.`,
+        )
+      }
+    }
+    if (opening && (slip.trace.tax?.method === 'annualized' || slip.trace.tax?.method === 'cumulative_average' || isThirteenth)) {
+      slip.trace.notes.push(
+        `Includes this employer's pay before going live on the app (opening balances through ${fmtDate(opening.paid_through)}): ₱${Number(opening.tax_withheld).toLocaleString('en-US', { minimumFractionDigits: 2 })} tax withheld then.`,
+      )
+    }
     // an output's report is the record of what was accepted
     const unreported = outputsHere.filter((o) => !o.report_path).length
     if (unreported > 0) {

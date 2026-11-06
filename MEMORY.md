@@ -548,9 +548,45 @@ throwaway test, not committed), then ran both on live: KM5VALLEY gone,
 DEMO's row counts and time-entry hash equal to the rehearsal. No DDL, so no
 advisors run. Not done: employee logins and client admins (app only).
 
+### 2026-11-06 — Opening balances for a mid-year go-live (branch `claude/zealous-archimedes-w8ec9y`)
+
+**Asked:** a client going live mid-year (the DEMO client, October) paid
+January–September elsewhere; annualization saw October onward only
+(Grace Torres's separation refunded her 1–15 Oct tax), and the ₱90,000
+exemption, 13th month, alphalist and 2316 were understated.
+`employee_tax_years` can't hold it (previous-employer semantics).
+
+**Did:** table `employee_opening_balances` (migration
+`20261106060259_opening_balances`, live — see deployed state): per employee
+and tax year, the old payroll's totals by 2316 column, contributions, tax
+withheld, 13th month basis, `paid_through`. `src/payroll/opening.ts` turns
+a row into one payslip fact (lesson below); `computeRun` adds it to
+annualization, the cumulative average year to date, the exemption left and
+the 13th month basis/installments, and warns when a payroll in the app is
+paid on or before `paid_through` (counted twice) or the run itself is;
+`buildAlphalist` adds it (an employee who left before go-live is listed;
+overlap is an issue). UI: employee BIR tab → *Before going live on the app*
+(`src/pages/admin/OpeningBalances.tsx`, live preview of gross / exempt /
+taxable). `reset_client.sql` deletes the new table. Docs: user guide,
+README, seed README. Tests 421 → 433 (`opening.test.ts`, flow
+`openingBalances.test.ts`: a control employee paid all year in the app vs
+one with opening balances — same separation tax, 13th month, cumulative
+average and alphalist), SQL suite 22. Card checked in a scratch Vite
+harness with Playwright at 1280 and 390 px (lesson *Browser walkthroughs*).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: `employee_opening_balances` is live** (migration applied
+through MCP as `20261106060259 opening_balances`, repo file renamed). The
+table's columns, 28 constraints, policy, triggers, index, grants and RLS
+flag hash the same on live and the replica. Security advisors unchanged;
+performance adds only the INFO "unused index" on the new table. No data in
+it. The front end that uses it is on branch
+`claude/zealous-archimedes-w8ec9y`, not merged: `main`'s front end never
+reads the table, but the branch's `computeRun` and alphalist do, so merge
+only with the table live (it is).
 
 **2026-11-06: live data is the DEMO test client only** (owner's request).
 Client KM5VALLEY, its 2 employees, the employee's login, its finalized run
@@ -1080,6 +1116,40 @@ inside a transaction. Differences from Supabase (PG17, real GoTrue/storage)
 remain, so the security advisors still run after the live apply. Why it
 mattered: RLS mistakes are silent — a policy that is too open never errors.
 
+### Opening balances are this employer's pay: one more payslip of the year (design decision, 2026-11-06)
+
+> `employee_opening_balances` (a new table, not columns on `employee_tax_years`) holds the old payroll's January-to-go-live totals by BIR 2316 column. `openingFact()` turns a row into one `AnnualPayslipFact` dated `paid_through`, so `summarizeYear` (annualization, the ₱90,000 cap, MWE exemptions, contribution carve, Jan–Nov vs December) treats it exactly like the payslips it replaces.
+
+Why a new table: `employee_tax_years` means a *previous employer* (its own
+2316 section, `has_previous_employer` gates it, forces the cumulative
+average method, breaks substituted filing); opening balances are the
+present employer's own columns and "withheld as adjusted". Amounts are
+gross as the register shows them (contributions carved out of basic like
+the app's payslips; 13th month and bonuses before the cap, the year applies
+it), so the admin types register totals, not 2316 figures. The row counts
+only for a payroll paid after `paid_through` (pay date rules the tax year);
+a payroll in the app paid by then is flagged as counted twice. Left out on
+purpose: monthly 1601-C figures (the old payroll remitted them), de minimis
+ceilings per benefit (only a total is kept), SSS/PhilHealth month
+completion for a go-live mid-month, and the sticky cumulative-average flag
+(the old payroll's method is unknown). The 13th month reads the payroll
+year's row (`thirteenth_basis`, `thirteenth_month`), which differs from
+the tax year only for a 13th month paid in January.
+
+### A mid-year separation usually refunds, even with the whole year in (correction, 2026-11-06)
+
+> Per-period tables assume a full year's pay, so annualizing ten months almost always gives back tax. The DEMO's Grace (₱25,000 a month, leaving 31 Oct: ₱229,250 taxable) owes nothing for the year: with her January–September entered the separation still refunds — all the year's tax, not just 1–15 October's.
+
+The ask framed the fix as "no spurious refund"; the honest test is the
+same answer as a control employee paid all year in the app
+(`flows/openingBalances.test.ts`). A refund disappears only where the old
+payroll under-withheld (e.g. it left a bonus's excess over ₱90,000 for
+December, the test's ₱50,000 case). Without opening balances the October
+go-live client under-withholds too: October onward looks like a ₱240,000
+year, so a ₱60,000 earner's cumulative average and December true-up
+withheld ₱0. Also: `round2` can return `-0`, and vitest's `toBe`/`toEqual`
+use `Object.is`, so add `+ 0` before comparing a computed zero.
+
 ### Year-end tax true-up is a flag on the last run, not a separate run
 
 > Annualization (RR 11-2018 / Form 2316) happens inside the last regular payroll of the year or the final-pay run (`payroll_runs.annualize = true`): that run's withholding becomes annual tax due minus tax already withheld, refunds included.
@@ -1182,6 +1252,15 @@ Postgres again as its own user (`pg_ctl -D … -o '-p 54329 -k /tmp' start`).
 Why it mattered: the walkthrough found what unit tests and SQL tests
 couldn't — wrong-date saves, mislabeled controls, phone overflow, a
 double-click that duplicated loans.
+
+For one new component, a scratch Vite harness is enough (2026-11-06, ~10
+minutes): root in the scratchpad with `node_modules` symlinked from the
+repo, a CSS file that `@import`s `src/index.css` plus `@source` on the
+repo's `src`, and `resolve.alias` sending every `../lib/supabase` **and**
+`./supabase` (what `lib/api.ts` imports) to a wrapper of
+`flows/fakeSupabase` (add `upsert` there). Missing the second alias sent
+`getStatutoryTables` to the real project (proxy error) and silently hid the
+component's preview.
 
 Rebuilt 2026-10-24 in ~5 minutes for the Time report QA (no edge function
 needed for pages that don't manage logins): the Postgres data directory
