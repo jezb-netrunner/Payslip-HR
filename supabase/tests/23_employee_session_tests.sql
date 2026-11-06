@@ -27,6 +27,12 @@ begin
 end $$;
 grant execute on function pg_temp.check(boolean, text) to authenticated, anon, service_role;
 
+-- calls of a function so far in this backend (pending statistics can include an
+-- earlier transaction's for up to a second, so tests compare against a baseline)
+create or replace function pg_temp.calls(p_fn regprocedure) returns bigint
+language sql as $$ select coalesce(pg_stat_get_xact_function_calls(p_fn), 0) $$;
+grant execute on function pg_temp.calls(regprocedure) to authenticated;
+
 -- an API token of a session: role, subject and session id
 create or replace function pg_temp.token(p_sub uuid, p_session uuid) returns void
 language sql as $$
@@ -203,13 +209,15 @@ begin;
 set local track_functions = 'all';
 set local role authenticated;
 select pg_temp.token(:ue, '50000000-0000-0000-0000-0000000023f1');
+select pg_temp.calls('public.current_employee_id()') as ce0, pg_temp.calls('public.current_employee_entity_id()') as cn0,
+  pg_temp.calls('public.can_manage_entity(uuid)') as cm0, pg_temp.calls('public.can_manage_employee(uuid)') as cp0 \gset
 select pg_temp.check((select count(*) from time_entries where work_date between '2026-03-02' and '2026-03-21') = 20, 'own 20 of the 40 entries');
-select pg_temp.check(pg_stat_get_xact_function_calls('public.current_employee_id()'::regprocedure) = 1, 'current_employee_id() once, not per row');
+select pg_temp.check(pg_temp.calls('public.current_employee_id()') - :ce0 = 1, 'current_employee_id() once, not per row');
 select pg_temp.check((select count(*) from entities) = 1 and (select count(*) from holidays where entity_id is not null) = 1
   and (select count(*) from leave_types where entity_id is not null) > 0, 'own client, its holiday and leave types');
-select pg_temp.check(pg_stat_get_xact_function_calls('public.current_employee_entity_id()'::regprocedure) = 3, 'current_employee_entity_id() once per statement');
-select pg_temp.check(coalesce(pg_stat_get_xact_function_calls('public.can_manage_entity(uuid)'::regprocedure), 0) = 0
-  and coalesce(pg_stat_get_xact_function_calls('public.can_manage_employee(uuid)'::regprocedure), 0) = 0, 'no admin check per row');
+select pg_temp.check(pg_temp.calls('public.current_employee_entity_id()') - :cn0 = 3, 'current_employee_entity_id() once per statement');
+select pg_temp.check(pg_temp.calls('public.can_manage_entity(uuid)') = :cm0
+  and pg_temp.calls('public.can_manage_employee(uuid)') = :cp0, 'no admin check per row');
 rollback;
 -- the company admin still reads and manages them all
 begin;
