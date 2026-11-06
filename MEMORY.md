@@ -651,9 +651,7 @@ cells. DB side: an employee reopening an ended session got "No access yet"
 out with the reason; `reset_client.sql` orphaned activity rows; an ended
 session's sign-out was filed under no client (`log_activity` fallback); the
 touch now deletes an idle/expired Auth session so its refresh token stops.
-Deferred: wrapping `current_employee_id()` as `(select …)` in the employee
-policies (about 4× per-row cost for employees, small at this scale; ALTER
-POLICY, no DROP needed).
+The deferred employee-policy speed-up was done the same day (entry below).
 
 **Final review before the merge** (owner: "one final bug check, create the PR,
 merge it, then apply the migration") of the review-fix commit found, and
@@ -666,9 +664,37 @@ Access disabled, and a failed sign-out left a spinner; one bad byte sent a
 UTF-8 import to Windows-1252 (now stays UTF-8, row flagged). Lesson again:
 the fixes needed their own review.
 
+### 2026-11-06 — Employee page speed-up (owner: "do the deferred employee page speed-up too")
+
+Migration `20261106082055_employee_policies_initplan` (live). Measuring on
+the replica (56,002 time entries, an employee with 1,400) showed the
+deferred wrap alone was not enough: 12.6 s → 4.3 s, because the OR'd admin
+policy still ran `can_manage_entity(entity_id)` per row (~75 µs each) only
+to get false. So: the 23 employee policies wrap their helper as
+`(select …)`; new `caller_is_admin()` (profile role is company/entity admin,
+nothing else) guards the admin branch of the 16 ALL policies and 3 mixed
+read policies on the tables employees read, `(select caller_is_admin()) AND
+…`; `is_company_admin()` wrapped there too. After: the employee's count 9 ms,
+latest 50 entries 383 → 1 ms. Suite 23.11 counts calls in the transaction
+(`track_functions = 'all'`, `pg_stat_get_xact_function_calls`): one
+`current_employee_id()` per statement, no `can_manage_*` — fails on the old
+policies — plus the policy form. Not done (separate change): admin reads
+still pay `can_manage_entity` per row (56k rows ≈ 4.2 s; real admin pages
+filter by client and period first). Fix would be
+`entity_id = any((select managed_entity_ids()))` with care that it matches
+`can_manage_entity` exactly (company admins: every entity).
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-06: `20261106082055_employee_policies_initplan` is live** (MCP,
+applied before its PR merged: policies and one helper only, no front-end
+change). Checked before: live's 19 guarded admin/mixed policies were the
+originals. After: all 70 public policies and `caller_is_admin` (body and
+grants) hash the same on live and the replica. Security advisors: one new
+lint-0029 line for `caller_is_admin` (accepted class); performance: no
+`auth_rls_initplan`, the rest unchanged.
 
 **2026-11-06: `20261106074338_opening_balance_periods` is live** (MCP, two
 columns on the empty `employee_opening_balances`); the table hashes the same
@@ -1230,6 +1256,22 @@ or it dies with the tool's shell; impersonate users with
 inside a transaction. Differences from Supabase (PG17, real GoTrue/storage)
 remain, so the security advisors still run after the live apply. Why it
 mattered: RLS mistakes are silent — a policy that is too open never errors.
+
+### RLS helpers run per row unless wrapped — and OR'd policies run for everyone (2026-11-06)
+
+> In a policy, call a row-independent helper as `(select public.f())` (evaluated once per statement) and put the admin branch behind `(select public.caller_is_admin()) AND …` on tables employees read. Suite 23.11 checks both.
+
+Why: permissive policies are combined with OR, so every caller pays every
+policy's per-row cost — an employee's query ran `can_manage_entity` on each
+row only to get false, and the employee helpers (each a profiles +
+auth.sessions + activity lookup since the session rule) ran per row too:
+about 12 s for 56k rows on the replica, 9 ms after. The guard is safe only
+because it is implied by what it guards (every admin helper requires an
+admin profile); keep `caller_is_admin` no stricter than that. AND
+short-circuits left to right inside one policy expression (the call counts
+confirm it: no `can_manage_entity` call for an employee). Measure with `explain analyze` as the role, or
+count calls with `pg_stat_get_xact_function_calls` under
+`set local track_functions = 'all'`.
 
 ### Employee sessions: Auth's start, the app's activity, no bypass for API tokens (design decision, 2026-11-06)
 
