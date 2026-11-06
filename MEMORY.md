@@ -756,6 +756,23 @@ existed). Did, each verified:
 - Owner to do (dashboard, not SQL): Auth → leaked password protection (the
   edge functions already screen admin passwords against Pwned Passwords).
 
+### 2026-11-06 — Security review (owner: "how secure is it, how would I improve it?"; no code change)
+
+Checked: replica suites all pass; the four `document.write` print views
+escape every value; no secrets in git history. Live (aggregates only): 1
+auth user (the owner, TOTP verified, guard-admitted), 0 employee logins, 0
+stray sign-ups, RLS on every public table, no public bucket,
+`punch-selfies` empty; advisors = the accepted list. Found, not fixed (the
+owner's call): Supabase org on the **Free plan** (no automatic backups,
+paused after 7 idle days); repo **public** and `main` **unprotected**
+(pushes deploy straight to the live site); AI sessions hold full SQL on
+production through the Supabase MCP (Supabase advises read-only and
+project-scoped); employee codes recoverable offline from a stale session
+(lesson *Never store a value derived from a credential…*); no CSP (Pages
+can't send headers; a meta CSP can); `npm audit`: 5 advisories, the
+critical DOMPurify one only on jsPDF's unused `html()` path, the rest
+dev-server only; no breach-response or DPA paperwork in the repo.
+
 ---
 
 ## Current deployed state (update when it changes)
@@ -1533,7 +1550,17 @@ first") and every constraint-specific message was invisible.
 
 ### Never store a value derived from a credential where admins can read it
 
-> Employee profiles keep `email = null`: the auth email is an unsalted SHA-256 of the login code, and with the 3-character hint an entity admin recovered a code in seconds; the derived address now lives only in `auth.users` (service role).
+> Employee profiles keep `email = null`: the auth email is an unsalted SHA-256 of the login code, and with the 3-character hint an entity admin recovered a code in seconds; the derived address now lives only in `auth.users` (service role) — **and, still open (found 2026-11-06), in every employee access token's `email` claim and the browser's stored session (`sb-<ref>-auth-token`, localStorage)**.
+
+Open risk: whoever reads a stale employee session (shared office PC, tab
+closed without signing out) can brute-force the code offline: 31^8 ≈
+8.5×10^11 SHA-256s, under a minute on one gaming GPU, giving a permanent
+login that the 12 h / 32 min session rules don't stop. Fix direction: sign
+employees in through an edge function that derives the address as an HMAC
+under an edge-function secret (as `ADMIN_PASSWORD_PEPPER` keys admin
+passwords), migrating legacy addresses at sign-in. Live had 0 employee
+logins on 2026-11-06, so changing the derivation before go-live costs
+nothing; afterwards every code must be re-issued or migrated.
 
 Replacing a code also stamps `profiles.sessions_revoked_at`;
 `current_employee_id()` rejects access tokens whose `iat` is older, so the
