@@ -254,4 +254,17 @@ select public.finalize_payroll_run('30000000-0000-0000-0000-0000000026a3');
 select pg_temp.check((select status = 'finalized' from payroll_runs where id = '30000000-0000-0000-0000-0000000026a3'), 'a net pay of zero is posted');
 commit;
 
+\echo '--- 26.10 no negative loan amounts; the anonymous role executes nothing'
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :ia, true);
+select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, authorized_on)
+  values ('20000000-0000-0000-0000-0000000026e1', 'Loan', 'company_loan', -500, '2026-01-01')$$, '%recurring_deductions_amounts_not_negative%');
+select pg_temp.expect_error($$insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, authorized_on)
+  values ('20000000-0000-0000-0000-0000000026e1', 'Loan', 'company_loan', 500, 5000, -1, '2026-01-01')$$, '%recurring_deductions_amounts_not_negative%');
+insert into recurring_deductions (employee_id, label, category, amount_per_period, total_amount, balance, authorized_on)
+  values ('20000000-0000-0000-0000-0000000026e1', 'Loan', 'company_loan', 500, 5000, 5000, '2026-01-01');
+commit;
+select pg_temp.check((select count(*) = 0 from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('anon', p.oid, 'execute')), 'no public function is executable by the anonymous role');
+
 \echo 'PASSED 26'

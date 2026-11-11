@@ -827,7 +827,8 @@ across midnight into a holiday is named in the review.
 (placeholder version, **not applied live**) — an API caller could insert a
 run already "finalized" with any finalizer; actor columns are now the
 database's; optional four-eyes finalize; finalize refuses a negative net
-pay. Run page: *Review before finalizing* (added / dropped / net moved 20% /
+pay; `recurring_deductions` amounts can't be negative; `valid_ewt_data` was
+the one function `anon` could still execute. Run page: *Review before finalizing* (added / dropped / net moved 20% /
 covered without a payslip), who computed and who finalized.
 
 **Security and information:** the app refuses to run framed (clickjacking);
@@ -857,9 +858,14 @@ sends). To apply: `apply_migration` through MCP (no DROP, no semicolon inside
 strings or comments; functions re-created with `CREATE OR REPLACE` from the
 replica's definitions by `gen_internal_controls.py`, which is not in the
 repo), rename the file to the recorded version, compare `fingerprint.sql`
-with the replica (expect columns +5, functions +2, triggers +3), run the
-security advisors (expect no new line: the two new functions are trigger
-functions with EXECUTE revoked). Live is still the state of 2026-11-06 below.
+with the replica — after it, on the replica: tables 44 `de0ce9b5`, columns
+626 `6e3d9200`, constraints 343 `3bb87be3`, indexes 126 `eed92050`, policies
+70 `5d84aa29`, functions 94 `3997b1ba`, fn_grants `aff5c77e`, table_grants
+`6ba8c56b`, triggers 127 `69b0e9e1`, storage_policies 3 `e7dbd16f` — and run
+the security advisors (expect no new line: the two new functions are trigger
+functions with EXECUTE revoked). Checked on live 2026-11-11 (read-only): 4
+`recurring_deductions` rows, none breaks the new not-negative CHECK; no
+payroll runs. Live is still the state of 2026-11-06 below.
 
 **2026-11-06 (23:41–23:46 UTC): the security hardening is live** (owner:
 "yes, deploy it"). Through MCP: migration `20261106234101

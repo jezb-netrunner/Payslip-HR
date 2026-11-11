@@ -12,6 +12,8 @@
 --    switch the rule on or off.
 -- 4. A payroll with a negative net pay is not posted: it would move loan
 --    balances by amounts nobody collected.
+-- 5. Housekeeping: no negative loan amounts, and the last function the
+--    anonymous role could execute is closed.
 -- Nothing destructive and no semicolon inside a string or comment: the
 -- migration applies through the Supabase MCP (see MEMORY.md).
 
@@ -400,3 +402,14 @@ begin
   return new;
 end
 $function$;
+
+-- A loan or deduction never carries a negative installment, balance or total
+-- (the screens refuse them, a direct API call did not).
+alter table public.recurring_deductions
+  add constraint recurring_deductions_amounts_not_negative
+  check (amount_per_period >= 0 and (balance is null or balance >= 0) and (total_amount is null or total_amount >= 0));
+
+-- The EWT table's validator was the one function the anonymous role could
+-- still call (its siblings were closed with their migrations).
+revoke execute on function public.valid_ewt_data(jsonb) from public, anon;
+grant execute on function public.valid_ewt_data(jsonb) to authenticated, service_role;
