@@ -885,6 +885,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
                   d.balance !== null && d.balance !== undefined
                     ? Math.min(setFor(d) ?? Number(d.amount_per_period), Math.max(0, Number(d.balance)))
                     : (setFor(d) ?? Number(d.amount_per_period)),
+                // a tracked balance keeps what this payroll could not take
+                ...(d.balance !== null && d.balance !== undefined ? { balance: Number(d.balance) } : {}),
               })),
               ...empAdjustments
                 .filter((a) => a.kind === 'deduction')

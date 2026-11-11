@@ -1276,18 +1276,54 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const noSssPay = !exactSss && !!mc && !maternityMonth && sssCompensation(earnings, settings) <= 0
   const sssPart = (due: number, already: number | undefined, rate: number) =>
     exactSss ? settle(due, already) : noSssPay ? 0 : share(rate, already)
-  const sssEe = sssPart(sssMonth.ee, mc?.already.sssEe, stat.sss.ee)
-  const sssMpfEe = sssPart(sssMonth.mpfEe, mc?.already.sssMpfEe, stat.sss.mpfEe)
+  let sssEe = sssPart(sssMonth.ee, mc?.already.sssEe, stat.sss.ee)
+  let sssMpfEe = sssPart(sssMonth.mpfEe, mc?.already.sssMpfEe, stat.sss.mpfEe)
   const sssEr = sssPart(sssMonth.er, mc?.already.sssEr, stat.sss.er)
   const sssMpfEr = sssPart(sssMonth.mpfEr, mc?.already.sssMpfEr, stat.sss.mpfEr)
   const sssEcEr = sssPart(sssMonth.ecEr, mc?.already.sssEcEr, stat.sss.ecEr)
   // under the NG share the month owes no employee half: the closing payroll
   // refunds what a payroll deducted before the share was recorded
-  const philhealthEe =
+  let philhealthEe =
     employee.philhealthNg && mc?.closes && !extrasOnly
       ? round2(0 - mc.already.philhealthEe)
       : share(philhealthEeDue, mc?.already.philhealthEe)
-  const pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
+  let pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
+
+  // The employee's shares come out of this payroll's pay and never take more
+  // than it pays (a new hire's first days, a period on leave without pay).
+  // What a short payroll cannot bear waits for a later payroll of the month:
+  // the month's closing payroll deducts what the month still owes. When this
+  // is that payroll, the employer remits the share in full and collects the
+  // rest from the employee ("Employee share to collect", a receivable).
+  // Maternity leave months have their own rule below.
+  let shareToCollect = 0
+  if (!extrasOnly && !maternityMonth) {
+    let roomCents = Math.max(0, Math.round(grossPay * 100))
+    // a refund of an earlier over-deduction adds to what the pay can bear
+    for (const v of [sssEe, sssMpfEe, philhealthEe, pagibigEe]) if (v < 0) roomCents += Math.round(-v * 100)
+    const fit = (amount: number) => {
+      if (amount <= 0) return amount
+      const take = Math.min(Math.round(amount * 100), roomCents)
+      roomCents -= take
+      return take / 100
+    }
+    const fitted = { sssEe: fit(sssEe), sssMpfEe: fit(sssMpfEe), philhealthEe: fit(philhealthEe), pagibigEe: fit(pagibigEe) }
+    const due = (a: number, b: number, c: number, d: number) => Math.max(0, a) + Math.max(0, b) + Math.max(0, c) + Math.max(0, d)
+    const short = round2(
+      due(sssEe, sssMpfEe, philhealthEe, pagibigEe) - due(fitted.sssEe, fitted.sssMpfEe, fitted.philhealthEe, fitted.pagibigEe),
+    )
+    if (short > 0 && mc && !mc.closes) {
+      sssEe = fitted.sssEe
+      sssMpfEe = fitted.sssMpfEe
+      philhealthEe = fitted.philhealthEe
+      pagibigEe = fitted.pagibigEe
+      notes.push(
+        `This payroll pays less than the employee's SSS, PhilHealth and Pag-IBIG shares: ₱${plainAmount(short)} of them waits for a later payroll of the month (its last payroll deducts what the month still owes).`,
+      )
+    } else if (short > 0) {
+      shareToCollect = short
+    }
+  }
   const philhealthEr = share(stat.philhealthEr, mc?.already.philhealthEr)
   const philhealthNg = employee.philhealthNg ? share(stat.philhealthEe, mc?.already.philhealthNg) : 0
   const pagibigEr = share(stat.pagibigEr, mc?.already.pagibigEr)
@@ -1358,6 +1394,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     })
   }
   if (pagibigEe > 0) deductions.push({ code: 'pagibig', label: 'Pag-IBIG Contribution', amount: pagibigEe })
+  if (shareToCollect > 0) {
+    deductions.push({ code: 'ee_collect', label: 'Employee share to collect (advanced by the employer)', amount: -shareToCollect })
+    warnings.push(
+      `Employee share to collect: ₱${plainAmount(shareToCollect)} of the employee's SSS, PhilHealth and Pag-IBIG for the month is more than this payroll pays. The employer remits it with its own share and collects it from the employee (Cash Advances lists it as a receivable).`,
+    )
+  }
 
   // Maternity leave: the employee's shares for the leave months come out of
   // the maternity pay (RA 11210 Sec. 5(c); IRR Rule VI Sec. 5). A leave month
@@ -1509,9 +1551,18 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       taxYear: params.taxYear,
     })
     const { tax, ...how } = r
-    withholdingTax = tax
+    // never more than the pay left after contributions: the cumulative
+    // average method catches up on what earlier payrolls withheld short, and
+    // what a small payroll cannot bear it takes from the next one
+    const bearable = round2(Math.max(0, grossPay - deductions.reduce((t, l) => t + l.amount, 0) - unionDues))
+    withholdingTax = Math.min(tax, bearable)
     taxTrace = { ...taxTrace, ...how }
     notes.push(...withholdingNotes(r, regularTaxable, supplementaryTaxable, params.taxYear, settings.payFrequency, tables))
+    if (withholdingTax < tax) {
+      notes.push(
+        `Withholding tax due ₱${plainAmount(tax)}, but this payroll pays ₱${plainAmount(bearable)} after contributions: ₱${plainAmount(withholdingTax)} is withheld and the rest follows in later payrolls (or the year-end adjustment).`,
+      )
+    }
   }
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
   if (params.annualization) {
@@ -1536,6 +1587,27 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         const d = employee.extraDeductions.find((x) => x.id === l.meta)
         warnings.push(
           `${l.label}: ₱${plainAmount(short)} could not be deducted — the year's tax takes the pay first${d?.balance !== undefined && !d.settlement ? '; it stays in the balance for later payrolls.' : '. Collect it outside payroll.'}`,
+        )
+        l.amount = takeCents / 100
+        otherDeductionsTotal = round2(otherDeductionsTotal - short)
+      }
+    }
+  } else {
+    // Loans and other deductions take what is left of the pay after
+    // contributions and tax, in order, never more: a payroll cannot collect
+    // more than it pays. What does not fit stays in a tracked balance for
+    // later payrolls, and is named for the rest.
+    let leftCents = Math.round((grossPay - deductions.reduce((t, l) => t + l.amount, 0) - unionDues) * 100)
+    for (const l of otherLines) {
+      if (l.code.endsWith(':union_dues')) continue
+      const dueCents = Math.round(l.amount * 100)
+      const takeCents = Math.min(dueCents, Math.max(0, leftCents))
+      leftCents -= takeCents
+      if (takeCents < dueCents) {
+        const short = (dueCents - takeCents) / 100
+        const d = employee.extraDeductions.find((x) => x.id === l.meta)
+        warnings.push(
+          `${l.label}: ₱${plainAmount(short)} could not be deducted — this payroll does not pay enough after contributions and tax${d?.balance !== undefined && !d.settlement ? '; it stays in the balance for later payrolls.' : '. Deduct it from a later payroll or collect it outside payroll.'}`,
         )
         l.amount = takeCents / 100
         otherDeductionsTotal = round2(otherDeductionsTotal - short)

@@ -234,4 +234,24 @@ update payroll_adjustments set amount = 1200, created_by = :ib where id = '50000
 select pg_temp.check((select created_by = :ia::uuid and amount = 1200 from payroll_adjustments where id = '50000000-0000-0000-0000-0000000026d1'), 'an edit keeps the author');
 commit;
 
+\echo '--- 26.9 a payroll with a negative net pay is not posted'
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', :ia, true);
+-- lines that add up to a net pay below zero (a deduction larger than the pay)
+insert into payslips (payroll_run_id, employee_id, gross_pay, total_deductions, net_pay, other_deductions_total, earnings, deductions)
+values ('30000000-0000-0000-0000-0000000026a3', '20000000-0000-0000-0000-0000000026e1', 1000, 1500, -500, 1500,
+        jsonb_build_array(jsonb_build_object('code', 'adjustment', 'label', 'Bonus', 'amount', 1000)),
+        jsonb_build_array(jsonb_build_object('code', 'adj:other', 'label', 'Uniform', 'amount', 1500)));
+select pg_temp.computed('30000000-0000-0000-0000-0000000026a3');
+select pg_temp.expect_error($$select public.finalize_payroll_run('30000000-0000-0000-0000-0000000026a3')$$, '%Net pay is negative for Lito Ramos%');
+-- the deduction brought within the pay: posted
+update payslips set total_deductions = 1000, net_pay = 0, other_deductions_total = 1000,
+       deductions = jsonb_build_array(jsonb_build_object('code', 'adj:other', 'label', 'Uniform', 'amount', 1000))
+  where payroll_run_id = '30000000-0000-0000-0000-0000000026a3';
+select pg_temp.computed('30000000-0000-0000-0000-0000000026a3');
+select public.finalize_payroll_run('30000000-0000-0000-0000-0000000026a3');
+select pg_temp.check((select status = 'finalized' from payroll_runs where id = '30000000-0000-0000-0000-0000000026a3'), 'a net pay of zero is posted');
+commit;
+
 \echo 'PASSED 26'

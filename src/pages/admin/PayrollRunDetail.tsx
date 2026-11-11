@@ -413,6 +413,8 @@ export default function PayrollRunDetail() {
   })
   const selfComputed = fourEyes && isDraft && upToDate && !!run.computed_by && run.computed_by === profile?.id
   const unstamped = fourEyes && isDraft && upToDate && !run.computed_by
+  // a payroll cannot collect more than it pays: finalize refuses a negative net pay
+  const negativeNet = isDraft ? slips.filter((x) => Number(x.net_pay) < 0).map((x) => String((x.employee_snapshot as Record<string, string>).name ?? '')) : []
   const extraEarnings = adjustments.filter((a) => a.kind === 'earning').reduce((sum, a) => sum + Number(a.amount), 0)
   const totalHours = slips.reduce((sum, x) => sum + Number(x.hours_worked), 0)
   const otHours = slips.reduce((sum, x) => sum + Number(x.overtime_hours), 0)
@@ -465,8 +467,17 @@ export default function PayrollRunDetail() {
       return next
     })
   const notices =
-    stale || hasWarnings || selfComputed || unstamped ? (
+    stale || hasWarnings || selfComputed || unstamped || negativeNet.length > 0 ? (
       <>
+        {negativeNet.length > 0 && (
+          <p className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Net pay is negative for {negativeNet.join(', ')}: a payroll cannot collect more than it pays, so this draft
+              cannot be finalized. Reduce or skip a deduction for this payroll, then recompute.
+            </span>
+          </p>
+        )}
         {(selfComputed || unstamped) && (
           <p className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
             <Users className="mt-0.5 size-4 shrink-0" />
@@ -1003,9 +1014,9 @@ export default function PayrollRunDetail() {
               </Button>
               <Button
                 onClick={doFinalize}
-                disabled={busy || computing || !upToDate || selfComputed || unstamped}
+                disabled={busy || computing || !upToDate || selfComputed || unstamped || negativeNet.length > 0}
                 title={selfComputed ? 'Another admin of this client finalizes a draft you computed' : undefined}
-                variant={computed && upToDate && !selfComputed && !unstamped ? 'primary' : 'secondary'}
+                variant={computed && upToDate && !selfComputed && !unstamped && negativeNet.length === 0 ? 'primary' : 'secondary'}
               >
                 <Lock className="size-4" /> Finalize <ArrowRight className="size-4" />
               </Button>

@@ -10,6 +10,8 @@
 -- 3. A client can require a second person to finalize a payroll (four eyes):
 --    whoever computed the draft last cannot finalize it. Only company admins
 --    switch the rule on or off.
+-- 4. A payroll with a negative net pay is not posted: it would move loan
+--    balances by amounts nobody collected.
 -- Nothing destructive and no semicolon inside a string or comment: the
 -- migration applies through the Supabase MCP (see MEMORY.md).
 
@@ -213,6 +215,14 @@ begin
     if v_names is not null then
       raise exception 'Already paid for an overlapping period in another finalized run: %. Recompute the draft (they are left out), then finalize.', v_names;
     end if;
+  end if;
+
+  -- a payroll cannot collect more than it pays (the engine stops deductions at the pay)
+  select string_agg(e.first_name || ' ' || e.last_name, ', ') into v_names
+    from payslips p join employees e on e.id = p.employee_id
+    where p.payroll_run_id = p_run and p.net_pay < 0;
+  if v_names is not null then
+    raise exception 'Net pay is negative for %: a payroll cannot collect more than it pays. Reduce or skip a deduction for this payroll, recompute, then finalize.', v_names;
   end if;
 
   v_problem := public.payroll_run_out_of_balance(p_run);
