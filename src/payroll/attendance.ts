@@ -113,8 +113,14 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
     entriesByDate.set(e.work_date, list)
   }
 
+  /** The whole-day leave covering a date, if any. */
   function leaveFor(date: string): LeaveLite | undefined {
-    return approvedLeaves.find((l) => l.start_date <= date && date <= l.end_date)
+    return approvedLeaves.find((l) => !l.half_day && l.start_date <= date && date <= l.end_date)
+  }
+  /** Half-day leaves on a date (the morning, the afternoon, or both): none beside a whole-day leave. */
+  function halfLeavesFor(date: string): LeaveLite[] {
+    if (leaveFor(date)) return []
+    return approvedLeaves.filter((l) => !!l.half_day && l.start_date <= date && date <= l.end_date).slice(0, 2)
   }
 
   const out: DayComputation[] = []
@@ -237,7 +243,49 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       if (interiorShortfall > 0) undertimeMinutes += interiorShortfall
     }
 
-    const absent = scheduled && !worked && dayType === 'regular' && !leave
+    // Half-day leave (an ordinary scheduled day): each request covers hours
+    // not worked up to half the shift. What it covers is no lateness or
+    // undertime: a morning leave takes the lateness first, an afternoon
+    // leave the undertime. With no time in/out at all, the half that is not
+    // on leave is half a day's absence.
+    const halves = scheduled && dayType === 'regular' ? halfLeavesFor(date) : []
+    let halfLeave: DayComputation['halfLeave']
+    let partialAbsenceMinutes = 0
+    if (halves.length > 0) {
+      const each = expectedMinutes / 2
+      let shortfall = Math.max(0, Math.round(expectedMinutes - payableMinutes))
+      let paidMinutes = 0
+      let unpaidMinutes = 0
+      // a paid half first: the pay the leave grants is kept
+      for (const l of [...halves].sort((a, b) => Number(b.paid) - Number(a.paid))) {
+        const take = Math.min(each, shortfall)
+        if (l.paid) paidMinutes += take
+        else unpaidMinutes += take
+        shortfall -= take
+      }
+      const covered = paidMinutes + unpaidMinutes
+      halfLeave = {
+        paidMinutes: Math.round(paidMinutes),
+        unpaidMinutes: Math.round(unpaidMinutes),
+        typeName: [...new Set(halves.map((l) => l.type_name))].join(' + '),
+      }
+      if (worked) {
+        const morning = halves.some((l) => l.half_day === 'am')
+        const first = morning ? lateMinutes : undertimeMinutes
+        const cut = Math.min(first, covered)
+        if (morning) {
+          lateMinutes = Math.round(lateMinutes - cut)
+          undertimeMinutes = Math.max(0, Math.round(undertimeMinutes - (covered - cut)))
+        } else {
+          undertimeMinutes = Math.round(undertimeMinutes - cut)
+          lateMinutes = Math.max(0, Math.round(lateMinutes - (covered - cut)))
+        }
+      } else {
+        partialAbsenceMinutes = Math.round(shortfall)
+      }
+    }
+
+    const absent = scheduled && !worked && dayType === 'regular' && !leave && halves.length === 0
 
     // Work past midnight into a day of another kind (the eve of a holiday,
     // or a holiday's night shift ending on an ordinary morning). The whole
@@ -283,6 +331,8 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       leaveType: !worked && leave ? leave.type_name : undefined,
       leaveCode: !worked && leave ? leave.type_code : undefined,
       leaveStart: !worked && leave ? leave.start_date : undefined,
+      ...(halfLeave ? { halfLeave } : {}),
+      ...(partialAbsenceMinutes > 0 ? { partialAbsenceMinutes } : {}),
       ...(crossesInto ? { crossesInto } : {}),
     })
   }

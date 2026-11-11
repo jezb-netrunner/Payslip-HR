@@ -105,6 +105,10 @@ sign-ins until the window ends.
 - Leaves: per-client leave types (seeded from statutory templates),
   per-employee credits, approvals that feed payroll, leaves filed by HR for
   an employee, and revoking an approved leave (until its days are paid).
+  A leave for one date can be a **half day** (the morning or the
+  afternoon): it charges half a day, payroll pays the half on leave (no
+  lateness or undertime for it) and the other half from the time in/out on
+  record — with no time in/out at all, that half is an absence
   A leave type can require months of service: **Service Incentive Leave opens
   after 12 months** (Labor Code Art. 95), enforced by the database; credits
   set for a year grant it sooner
@@ -516,8 +520,11 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
 
 - The BIR reports are working data for the BIR Alphalist module and
   eBIRForms; the app does not generate the DAT file or file returns.
-- Leave is filed in whole days: a half-day leave is entered as attendance
-  for the half worked plus an adjustment, or left as undertime.
+- A half-day leave is half the shift's working hours, not a clock window:
+  it covers the hours not worked up to half the shift (the morning or
+  afternoon named decides only whether lateness or undertime is excused
+  first). Leave by the hour is not supported, and maternity leave (calendar
+  days) has no half day.
 - Holiday and special-day premiums follow the day a shift started. A night
   shift that runs into or out of a holiday is flagged in the review with
   the hours involved; a company that counts holiday hours by the calendar

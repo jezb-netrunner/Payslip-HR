@@ -22,6 +22,7 @@ import { supabase } from '../../lib/supabase'
 import { fetchAll } from '../../lib/fetchAll'
 import { errorMessage } from '../../lib/errors'
 import { FREQUENCY_LABELS } from '../../lib/labels'
+import { HALF_DAY_LABELS, type HalfDay } from '../../lib/leave'
 import { lockedKeys } from '../../lib/locks'
 import { notifyPendingChanged, onPendingChanged } from '../../lib/pending'
 import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
@@ -159,6 +160,8 @@ export default function Timesheets() {
 interface LeaveMark {
   name: string
   paid: boolean
+  /** half a day of leave: the other half still takes its time in/out */
+  half?: HalfDay
 }
 
 /** One time in/out pair. A day can hold several (split shift). */
@@ -200,20 +203,31 @@ function spanMinutes(timeIn: string, timeOut: string): number | null {
 
 /** Approved leaves in a date range, by employee|date. */
 async function leaveMarks(entityId: string, start: string, end: string, employeeId?: string): Promise<Map<string, LeaveMark>> {
-  let q = supabase
-    .from('leave_requests')
-    .select('employee_id, start_date, end_date, leave_types(name, paid)')
-    .eq('entity_id', entityId)
-    .eq('status', 'approved')
-    .lte('start_date', end)
-    .gte('end_date', start)
-  if (employeeId) q = q.eq('employee_id', employeeId)
-  const { data, error } = await q
-  if (error) throw error
+  type Loaded = { employee_id: string; start_date: string; end_date: string; half_day: HalfDay | null; leave_types: { name: string; paid: boolean } | null }
+  const data = await fetchAll<Loaded>((f, t) => {
+    let q = supabase
+      .from('leave_requests')
+      .select('employee_id, start_date, end_date, half_day, leave_types(name, paid)')
+      .eq('entity_id', entityId)
+      .eq('status', 'approved')
+      .lte('start_date', end)
+      .gte('end_date', start)
+    if (employeeId) q = q.eq('employee_id', employeeId)
+    return q.order('id').range(f, t)
+  })
   const out = new Map<string, LeaveMark>()
-  for (const l of (data ?? []) as unknown as { employee_id: string; start_date: string; end_date: string; leave_types: { name: string; paid: boolean } | null }[]) {
+  // whole-day leaves first: a half day beside one adds nothing
+  const list = data.slice().sort((a, b) => Number(!!a.half_day) - Number(!!b.half_day))
+  for (const l of list) {
+    const mark: LeaveMark = { name: l.leave_types?.name ?? 'Leave', paid: l.leave_types?.paid ?? false, ...(l.half_day ? { half: l.half_day } : {}) }
     for (const d of eachDate(l.start_date > start ? l.start_date : start, l.end_date < end ? l.end_date : end)) {
-      out.set(rowKey(l.employee_id, d), { name: l.leave_types?.name ?? 'Leave', paid: l.leave_types?.paid ?? false })
+      const k = rowKey(l.employee_id, d)
+      const had = out.get(k)
+      if (!had) out.set(k, mark)
+      // the morning and the afternoon on leave: the whole day
+      else if (had.half && mark.half && had.half !== mark.half) {
+        out.set(k, { name: had.name === mark.name ? had.name : `${had.name} + ${mark.name}`, paid: had.paid && mark.paid })
+      }
     }
   }
   return out
@@ -496,6 +510,7 @@ function DayBadges({ row, showHoliday }: { row: Row; showHoliday: boolean }) {
       {row.leave && (
         <Badge tone="violet">
           {row.leave.name}
+          {row.leave.half ? ` (half day: ${HALF_DAY_LABELS[row.leave.half]})` : ''}
           {row.leave.paid ? '' : ' (unpaid)'}
         </Badge>
       )}

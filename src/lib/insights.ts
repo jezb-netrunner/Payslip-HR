@@ -339,7 +339,8 @@ export function toDayFacts(who: Who, days: unknown): DayFact[] {
       expected,
       worked: n(d.workedMinutes) > 0,
       absent: d.absent === true,
-      onLeave: expected && (d.onPaidLeave === true || d.onUnpaidLeave === true),
+      // a half-day leave with no time for the other half counts as a leave day
+      onLeave: expected && (d.onPaidLeave === true || d.onUnpaidLeave === true || (d.halfLeave != null && !(n(d.workedMinutes) > 0))),
       lateMinutes: n(d.lateMinutes),
       undertimeMinutes: n(d.undertimeMinutes),
     })

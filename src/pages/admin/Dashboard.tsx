@@ -180,6 +180,8 @@ function ClientDashboard({ entity }: { entity: Entity }) {
             .select('employee_id, start_date, end_date')
             .eq('entity_id', entity.id)
             .eq('status', 'approved')
+            // a half-day leave still expects time in/out for the other half
+            .is('half_day', null)
             .lte('start_date', today)
             .gte('end_date', twoWeeksAgo)
             .order('id')

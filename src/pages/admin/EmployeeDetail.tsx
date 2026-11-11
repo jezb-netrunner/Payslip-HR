@@ -89,7 +89,7 @@ import { PayHistoryTab, PayRateModal } from './PayHistoryTab'
 import { currentAndUpcoming, rateText } from '../../lib/payHistory'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
-import { dayTimeline } from '../../lib/timeline'
+import { dayTimeline, halfLeavesOn } from '../../lib/timeline'
 import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, OutputPayClass, PayFrequency, PayItemType } from '../../payroll/types'
 import type { PayRateReason } from '../../payroll/payRates'
 import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
@@ -303,7 +303,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
         .order('clock_in'),
       supabase
         .from('leave_requests')
-        .select('start_date, end_date, leave_types(name)')
+        .select('start_date, end_date, half_day, leave_types(name)')
         .eq('employee_id', employee.id)
         .eq('status', 'approved')
         .lte('start_date', end)
@@ -318,10 +318,11 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
     setEntries((ent.data ?? []) as TimeEntry[])
     setHolidays(hol.data)
     setLeaves(
-      ((lv.data ?? []) as unknown as { start_date: string; end_date: string; leave_types: { name: string } | null }[]).map((l) => ({
+      ((lv.data ?? []) as unknown as { start_date: string; end_date: string; half_day: 'am' | 'pm' | null; leave_types: { name: string } | null }[]).map((l) => ({
         start_date: l.start_date,
         end_date: l.end_date,
         label: l.leave_types?.name ?? 'Leave',
+        ...(l.half_day ? { half: l.half_day } : {}),
       })),
     )
     setLoading(false)
@@ -342,17 +343,17 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
       d,
       entries.filter((e) => e.work_date === d),
       scheduleOf,
-      { graceMinutes, standardHoursPerDay, holidays },
+      { graceMinutes, standardHoursPerDay, holidays, halfLeaves: halfLeavesOn(leaves, d) },
     ),
   )
-  // charged leave days, as leave is counted elsewhere: scheduled workdays, not holidays
-  const leaveDays = new Set(
-    leaves.flatMap((l) =>
-      eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date).filter(
-        (d) => leaveWorkdays(d, d, scheduleOf, holidays) > 0,
-      ),
-    ),
-  ).size
+  // charged leave days, as leave is counted elsewhere: scheduled workdays, not holidays (a half day counts half)
+  const charged = new Map<string, number>()
+  for (const l of leaves) {
+    for (const d of eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date)) {
+      if (leaveWorkdays(d, d, scheduleOf, holidays) > 0) charged.set(d, Math.min(1, (charged.get(d) ?? 0) + (l.half ? 0.5 : 1)))
+    }
+  }
+  const leaveDays = [...charged.values()].reduce((sum, n) => sum + n, 0)
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white">

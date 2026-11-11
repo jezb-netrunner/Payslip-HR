@@ -840,14 +840,53 @@ a scratch browser harness (lesson *Browser walkthroughs*) rendered the run
 page, payslip, settings and employee profile at 1280 and 390 px with no
 page errors or overflow.
 
-**Reported, not built:** half-day leave; holiday hours by calendar day for
-night shifts; two regular holidays on one date; admitting an admin session
-only after the second factor; a per-address employee sign-in budget; 2316 /
-2307 in the official layout; bank and agency upload files.
+**Reported, not built:** holiday hours by calendar day for night shifts; two
+regular holidays on one date; admitting an admin session only after the
+second factor; a per-address employee sign-in budget; 2316 / 2307 in the
+official layout; bank and agency upload files. (Half-day leave was on this
+list: built the same day, next entry.)
+
+### 2026-11-11 — Half-day leave, then PR #27 merged (owner: "build half-day leave then merge PR"; same branch)
+
+A leave for one date can be the morning or the afternoon only (lesson
+*Half-day leave covers hours not worked*). Migration
+`20261111091354_half_day_leave` (live, see *Current deployed state*):
+`leave_requests.half_day` (`am` / `pm`, one date), and `guard_leave_request`
+charges 0.5 day whatever the caller sent, refuses it for maternity leave,
+and refuses changing the half of an approved leave inside a finalized
+payroll. Attendance (`computeAttendance`) takes the hours the leave covers
+out of the lateness and undertime, the engine pays or docks the half
+(`halfLeave`, `partialAbsenceMinutes` on the day) and warns when the other
+half has no time in/out or when the whole shift is on record. Screens: both
+leave forms (the choice shows for one date, never for maternity leave),
+leave lists, Time In / Out badges (Fill leaves the row blank), roster,
+time report (remarks, fractional totals), attendance timeline (no "late"
+for the half on leave), dashboard (still expects time in/out that day),
+backup sheet. Tests 515 → 538 (vitest: `halfDayLeave.test.ts` for the
+engine, `flows/halfDayLeave.test.ts` through `computeRun`, leave / time
+report / timeline cases), SQL suite 27; the scratch harness walked both
+forms, the sheet, roster, report and employee attendance at 1280 and 390 px
+(no page errors, no overflow). The owner asked for PR #27 to be merged in
+the same message: done right after this commit.
 
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-11 (09:13 UTC): `20261111091354 half_day_leave` is live, and PR
+#27 (the audit and half-day leave) is merged** (owner: "build half-day leave
+then merge PR"). The migration went through MCP `apply_migration` before the
+merge — the new front end selects `leave_requests.half_day` — and is
+additive (one nullable column, two CHECKs, `guard_leave_request` re-created
+from the replica's definition); repo file renamed from the `20261111120000`
+placeholder. `fingerprint.sql` on live = replica on all ten lines: tables 44
+`de0ce9b5`, columns 627 `815aff36`, constraints 345 `49e57113`, indexes 126
+`eed92050`, policies 70 `5d84aa29`, functions 94 `253ed9ed`, fn_grants
+`aff5c77e`, table_grants `6ba8c56b`, triggers 127 `69b0e9e1`,
+storage_policies 3 `e7dbd16f`. Security advisors unchanged (the accepted 22
+lint-0029 lines, RLS-no-policy INFO on the 5 service tables, leaked password
+protection). 43 migrations on live = the repo. Edge functions unchanged
+(`auth-guard` v2, `admin-users` v8).
 
 **2026-11-11 (08:39 UTC): `20261111083956 internal_controls` is live**
 (owner, asked in the session: "Apply migration + open PR"). Applied through
@@ -863,10 +902,8 @@ storage_policies 3 `e7dbd16f`. Security advisors unchanged: the accepted 22
 lint-0029 lines, RLS-no-policy INFO on the 5 service tables, leaked password
 protection. Checked before the apply (read-only): 4 `recurring_deductions`
 rows, none breaking the new CHECK; no payroll runs. The front end of branch
-`claude/quirky-bohr-elakrw` is in PR #27, **not merged** (the owner merges): `main`'s
-front end keeps working against the new schema (it creates runs as drafts,
-and the actor columns it sends are overwritten); the second-person setting
-appears once the branch is merged. Live data is still the DEMO client only.
+`claude/quirky-bohr-elakrw` went out with PR #27 (merged the same day, entry
+above). Live data is still the DEMO client only.
 
 **2026-11-06 (23:41–23:46 UTC): the security hardening is live** (owner:
 "yes, deploy it"). Through MCP: migration `20261106234101
@@ -1105,8 +1142,9 @@ Known-open items (deliberate scope cuts, also in README disclaimers): BIR
 DAT file not generated (CSV for the BIR Alphalist module instead); no
 tax-only or reversal adjustment for correcting a paid payroll (see
 *Correcting a payroll after payday*); the SSS maternity benefit and salary
-differential are entered by the admin, not computed; leave is whole days
-(no half-day leave); premiums follow the day a shift started (a night shift
+differential are entered by the admin, not computed; a half-day leave is
+half the shift's hours, not a clock window (no leave by the hour); premiums
+follow the day a shift started (a night shift
 into a holiday is flagged, not split); one holiday per date (no 300% double
 holiday); a monthly rate under divisor 261 is paid an extra day for an
 unworked regular holiday on the rest day (three Saturdays in 2027) — more
@@ -2498,6 +2536,39 @@ holiday hours, build it as a client setting with `parts` per day
 (regular / OT / ND minutes per calendar date, the unpaid break taken from
 the part holding the shift's midpoint) and deduct the hours already paid
 from the unworked-holiday pay of the same date.
+
+### Half-day leave covers hours not worked, up to half the shift (design decision, 2026-11-11)
+
+**A half-day request is not a clock window: it covers the shift's hours not
+worked, up to half the shift, and what is left is lateness or undertime.**
+
+- `computeAttendance` reads `LeaveLite.half_day`. A morning leave excuses
+  the lateness first, an afternoon leave the undertime; two requests (am +
+  pm) make the day. A whole-day leave on the date wins; rest days and
+  holidays take none.
+- Pay: a paid half is inside a monthly rate, and paid at the day's rate for
+  the minutes covered to a daily-paid employee; an unpaid half is leave
+  without pay for that fraction. A day half worked and half on leave counts
+  once for per-day allowances and the minimum-wage check, and the daily-paid
+  line reads "11 day/s worked, 0.5 of them on paid leave" (inside the day,
+  not a day more — "+ 0.5 paid leave" read as eleven and a half days' pay).
+- No time in/out at all: the half not on leave is half a day's absence (not
+  for a fixed salary), with a warning. The whole shift on record: the leave
+  changes nothing, with a warning to cancel it.
+- The database decides the charge: `guard_leave_request` sets `days` to 0.5
+  for a half-day request, whatever the caller sent. One date only (CHECK),
+  none for maternity leave (calendar days), and the half of an approved
+  leave inside a finalized payroll cannot change — it is attendance.
+- Every attendance view passes the half on (`dayTimeline`'s `halfLeaves`,
+  the time report's `ReportLeave.half_day`); the dashboard's missing-time
+  list reads whole-day leaves only (`half_day is null`).
+
+**Why it mattered:** shifts differ (meal breaks, flexible starts, compressed
+weeks), so a clock midpoint would be wrong for some of them, and an employee
+who came in a little early or late around noon would be docked minutes the
+leave was meant to cover. Covering the shortfall pays exactly one day for a
+half worked plus a half on leave, never more than the day. A view that
+ignored the half showed "late" on a morning the employee had on leave.
 
 ### Parallel forks spend the usage limit, not time (process lesson, 2026-11-11)
 

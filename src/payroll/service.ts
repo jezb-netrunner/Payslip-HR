@@ -482,11 +482,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ),
     isThirteenth
       ? Promise.resolve([])
-      : fetchAll<{ employee_id: string; start_date: string; end_date: string; leave_types: { name: string; paid: boolean; code: string } | null }>(
+      : fetchAll<{ employee_id: string; start_date: string; end_date: string; half_day: 'am' | 'pm' | null; leave_types: { name: string; paid: boolean; code: string } | null }>(
           (from, to) =>
             supabase
               .from('leave_requests')
-              .select('employee_id, start_date, end_date, leave_types(name, paid, code)')
+              .select('employee_id, start_date, end_date, half_day, leave_types(name, paid, code)')
               .eq('entity_id', entity.id)
               .eq('status', 'approved')
               .lte('start_date', run.period_end)
@@ -694,6 +694,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       paid: l.leave_types?.paid ?? false,
       type_name: l.leave_types?.name ?? 'Leave',
       type_code: l.leave_types?.code,
+      half_day: l.half_day ?? null,
     }))
 
     const attendanceOf = (periodStart: string, periodEnd: string) =>

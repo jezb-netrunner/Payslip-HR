@@ -27,7 +27,7 @@ import { fmtDate, fmtHours, fmtTime, plural } from '../../lib/format'
 import { endOfMonth, manilaDateStr, manilaHHMM, manilaWallToIso, todayManila } from '../../lib/manila'
 import { getHolidaysBetween } from '../../lib/api'
 import { supabase } from '../../lib/supabase'
-import { dayTimeline } from '../../lib/timeline'
+import { dayTimeline, halfLeavesOn } from '../../lib/timeline'
 import { errorMessage } from '../../lib/errors'
 import { useQuickAction } from '../../lib/quickAction'
 
@@ -81,7 +81,7 @@ export default function MyAttendance() {
         .limit(20),
       supabase
         .from('leave_requests')
-        .select('start_date, end_date, leave_types(name)')
+        .select('start_date, end_date, half_day, leave_types(name)')
         .eq('employee_id', employee.id)
         .eq('status', 'approved')
         .lte('start_date', end)
@@ -98,10 +98,11 @@ export default function MyAttendance() {
     setEntries((ent ?? []) as TimeEntry[])
     setRequests((reqs ?? []) as TimeCorrectionRequest[])
     setLeaves(
-      ((lv ?? []) as unknown as { start_date: string; end_date: string; leave_types: { name: string } | null }[]).map((l) => ({
+      ((lv ?? []) as unknown as { start_date: string; end_date: string; half_day: 'am' | 'pm' | null; leave_types: { name: string } | null }[]).map((l) => ({
         start_date: l.start_date,
         end_date: l.end_date,
         label: l.leave_types?.name ?? 'Leave',
+        ...(l.half_day ? { half: l.half_day } : {}),
       })),
     )
     setLoading(false)
@@ -172,7 +173,7 @@ export default function MyAttendance() {
       d,
       entries.filter((e) => e.work_date === d),
       schedule.resolve ?? employee.work_schedule,
-      { graceMinutes, standardHoursPerDay, holidays },
+      { graceMinutes, standardHoursPerDay, holidays, halfLeaves: halfLeavesOn(leaves, d) },
     ),
   )
   const workedMinutes = dayFacts.reduce((sum, d) => sum + d.workedMinutes, 0)

@@ -7,7 +7,7 @@ import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { getHolidaysBetween } from '../../lib/api'
 import type { Holiday, LeaveRequest, LeaveType } from '../../lib/db'
 import { fmtDate, plural } from '../../lib/format'
-import { countsCalendarDays, eligibleFrom, leaveDays, leaveDaysInYear, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
+import { countsCalendarDays, eligibleFrom, halfDayAllowed, leaveDays, leaveDaysInYear, leaveLength, notYetUsable, requestDays, showsBalance, usableOn, type HalfDay } from '../../lib/leave'
 import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
@@ -27,7 +27,7 @@ export default function MyLeaves() {
 
   useQuickAction('leave', () => setOpen(true), !loading)
   const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ type: '', start: todayManila(), end: todayManila(), reason: '' })
+  const [form, setForm] = useState<{ type: string; start: string; end: string; half: HalfDay | ''; reason: string }>({ type: '', start: todayManila(), end: todayManila(), half: '', reason: '' })
   // workdays follow the schedule for those dates (patterns, roster changes)
   const formSchedule = useEmployeeSchedule(employee, form.start, form.end, { asEmployee: true })
 
@@ -81,7 +81,9 @@ export default function MyLeaves() {
   /** Leave days charged: scheduled workdays that aren't holidays (maternity leave: calendar days). */
   function workdayCount(start: string, end: string): number {
     if (!employee) return 0
-    return leaveDays(types.find((t) => t.id === form.type), start, end, formSchedule.resolve ?? employee.work_schedule, holidays)
+    const type = types.find((t) => t.id === form.type)
+    const whole = leaveDays(type, start, end, formSchedule.resolve ?? employee.work_schedule, holidays)
+    return requestDays(whole, halfDayAllowed(type, start, end) ? form.half : '')
   }
 
   /** Why the picked type can't start on the picked date yet, if it can't. */
@@ -119,13 +121,15 @@ export default function MyLeaves() {
         start_date: form.start,
         end_date: form.end,
         days,
+        // a half day is one date of a leave counted in working days
+        ...(form.half && halfDayAllowed(types.find((t) => t.id === form.type), form.start, form.end) ? { half_day: form.half } : {}),
         reason: form.reason.trim(),
         status: 'pending',
       })
       if (error) throw error
       toast('success', 'Leave request submitted.')
       setOpen(false)
-      setForm({ type: '', start: todayManila(), end: todayManila(), reason: '' })
+      setForm({ type: '', start: todayManila(), end: todayManila(), half: '', reason: '' })
       await load()
     } catch (err) {
       toast('error', errorMessage(err, 'Failed to submit'))
@@ -235,7 +239,7 @@ export default function MyLeaves() {
                 <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-slate-700">
-                      {type?.name ?? 'Leave'} · {plural(Number(r.days), 'day')}
+                      {type?.name ?? 'Leave'} · {leaveLength(r)}
                     </p>
                     <p className="break-words text-xs text-slate-500">
                       {fmtDate(r.start_date)} → {fmtDate(r.end_date)}
@@ -315,6 +319,15 @@ export default function MyLeaves() {
               />
             </Field>
           </div>
+          {halfDayAllowed(picked, form.start, form.end) && (
+            <Field label="How much of the day">
+              <Select value={form.half} onChange={(e) => setForm({ ...form, half: e.target.value as HalfDay | '' })}>
+                <option value="">Whole day</option>
+                <option value="am">Half day: the morning</option>
+                <option value="pm">Half day: the afternoon</option>
+              </Select>
+            </Field>
+          )}
           {problem ? (
             <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
               {problem}
@@ -324,6 +337,9 @@ export default function MyLeaves() {
               {countsCalendarDays(picked) ? 'Calendar days' : 'Working days'} requested: <b>{workdayCount(form.start, form.end)}</b>
               {picked && showsBalance(picked, entitlements[picked.id]) && (
                 <> · {balanceLeft(picked) > 0 ? `${plural(balanceLeft(picked), 'day')} left this year` : 'no days left this year'}</>
+              )}
+              {form.half && halfDayAllowed(picked, form.start, form.end) && (
+                <> · the other half of the day is paid from your recorded time in/out</>
               )}
             </p>
           )}

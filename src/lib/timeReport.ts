@@ -44,6 +44,8 @@ export interface ReportLeave {
   end_date: string
   name: string
   paid: boolean
+  /** half a day of leave on one date: the morning or the afternoon */
+  half_day?: 'am' | 'pm' | null
 }
 
 /** One time in/out pair, as "HH:MM" Manila wall time. */
@@ -74,6 +76,12 @@ export interface ReportDay {
   absent: boolean
   /** approved leave charged on this day: paid leave on workdays, unpaid leave on the days payroll docks it */
   leave?: { name: string; paid: boolean }
+  /**
+   * approved half-day leave on this day, in fractions of the day as payroll
+   * counts them: the paid and unpaid leave, and the part neither worked nor
+   * on leave (an absence)
+   */
+  halfLeave?: { name: string; paidDays: number; unpaidDays: number; absentDays: number }
   /** an entry without a time out: payroll doesn't count it */
   missingTimeOut: boolean
   /** an entry set by an approved correction request */
@@ -198,6 +206,7 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
         end_date: l.end_date,
         paid: l.paid,
         type_name: l.name,
+        half_day: l.half_day ?? null,
       })),
     })
 
@@ -226,11 +235,27 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
           : d.onUnpaidLeave && d.workedMinutes === 0 && unpaidLeaveCharged(d.dayType, employee.pay_type, divisor)
             ? { name: d.leaveType ?? 'Leave', paid: false }
             : undefined
+      // half-day leave: what payroll counts of it, and the half with no time on record
+      const expected = d.expectedMinutes || p.standardHoursPerDay * 60
+      const missed = upcoming || inProgress || employee.fixed_salary ? 0 : (d.partialAbsenceMinutes ?? 0)
+      const halfLeave =
+        d.halfLeave && d.dayType === 'regular'
+          ? {
+              name: d.halfLeave.typeName,
+              paidDays: d.halfLeave.paidMinutes / expected,
+              unpaidDays: d.halfLeave.unpaidMinutes / expected,
+              absentDays: missed / expected,
+            }
+          : undefined
       const holiday = holidayByDate.get(d.date)
       const remarks: string[] = []
       if (holiday) remarks.push(`${HOLIDAY_KIND_LABELS[holiday.kind]}: ${holiday.name}`)
       if (!d.scheduled) remarks.push('Rest day')
       if (leave) remarks.push(leave.paid ? leave.name : `${leave.name} (unpaid)`)
+      if (halfLeave) {
+        remarks.push(`Half-day leave: ${halfLeave.name}${halfLeave.unpaidDays > 0 && halfLeave.paidDays === 0 ? ' (unpaid)' : ''}`)
+        if (halfLeave.absentDays > 0) remarks.push('No time in/out for the other half: absent for it')
+      }
       if (absent) remarks.push(missingTimeOut ? 'Absent: time in without a time out' : 'Absent')
       else if (stillOn) remarks.push('Clocked in, no time out yet')
       else if (missingTimeOut) remarks.push('Entry without a time out (not counted)')
@@ -252,6 +277,7 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
         undertimeMinutes: d.undertimeMinutes,
         absent,
         leave,
+        ...(halfLeave ? { halfLeave } : {}),
         missingTimeOut: missingTimeOut && !stillOn,
         corrected,
         upcoming,
@@ -270,6 +296,11 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
       if (d.absent) totals.absences += 1
       if (d.leave?.paid) totals.paidLeaveDays += 1
       if (d.leave && !d.leave.paid) totals.unpaidLeaveDays += 1
+      if (d.halfLeave) {
+        totals.paidLeaveDays += d.halfLeave.paidDays
+        totals.unpaidLeaveDays += d.halfLeave.unpaidDays
+        totals.absences += d.halfLeave.absentDays
+      }
       totals.workedMinutes += d.workedMinutes
       totals.regularMinutes += d.regularMinutes
       totals.otMinutes += d.otMinutes
@@ -282,6 +313,10 @@ export function buildTimeReport(p: TimeReportParams): EmployeeTimeReport[] {
       if (worked && HOLIDAY_TYPES.has(d.dayType)) totals.holidaysWorked += 1
       if (d.missingTimeOut) totals.missingTimeOut += 1
     }
+    // half days add fractions
+    totals.absences = round2(totals.absences)
+    totals.paidLeaveDays = round2(totals.paidLeaveDays)
+    totals.unpaidLeaveDays = round2(totals.unpaidLeaveDays)
     out.push({ employee, from, to, schedule: scheduleOfDays(days), days, totals })
   }
   return out
@@ -312,6 +347,8 @@ export function sumTotals(reports: EmployeeTimeReport[]): ReportTotals {
   for (const r of reports) {
     for (const k of Object.keys(t) as (keyof ReportTotals)[]) t[k] += r.totals[k]
   }
+  // half days add fractions
+  for (const k of ['absences', 'paidLeaveDays', 'unpaidLeaveDays'] as const) t[k] = round2(t[k])
   return t
 }
 

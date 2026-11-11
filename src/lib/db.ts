@@ -425,6 +425,8 @@ export interface LeaveRequest {
   start_date: string
   end_date: string
   days: number
+  /** half a day of leave on one date (the morning or the afternoon): days is then 0.5 */
+  half_day?: 'am' | 'pm' | null
   reason: string
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
   review_notes: string | null

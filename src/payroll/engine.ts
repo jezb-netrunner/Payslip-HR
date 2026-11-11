@@ -138,7 +138,7 @@ export function unworkedHolidaysPaid(
         paid.set(d.date, ok)
         attended = ok
       }
-    } else if (d.dayType === 'regular') attended = worked || d.onPaidLeave || d.leaveCode === MATERNITY_LEAVE_CODE
+    } else if (d.dayType === 'regular') attended = worked || d.onPaidLeave || (d.halfLeave?.paidMinutes ?? 0) > 0 || d.leaveCode === MATERNITY_LEAVE_CODE
     else if (worked) attended = true
   }
   return paid
@@ -550,6 +550,22 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       `Regular holiday not paid (${unpaidHolidays.map((d) => `${d.holidayName ?? 'holiday'}, ${shortDate(d.date)}`).join('; ')}): no work or paid leave on the workday before it (IRR Book III, Rule IV, Sec. 6; the client's holiday absence rule). If the employee worked that day, enter the time and recompute.`,
     )
   }
+  // Half-day leave beside a half with no time on record, or beside a full
+  // day of time on record: the admin may have missed an entry, or the leave
+  // was not taken after all.
+  const halfDays = days.filter((d) => d.halfLeave && d.dayType === 'regular' && employed(d.date))
+  const halfNoTime = fixed ? [] : halfDays.filter((d) => (d.partialAbsenceMinutes ?? 0) > 0)
+  if (halfNoTime.length > 0) {
+    warnings.push(
+      `Half-day leave on ${halfNoTime.map((d) => shortDate(d.date)).join(', ')} with no time in/out for the other half: that half is charged as an absence. If the employee worked it, enter the time and recompute.`,
+    )
+  }
+  const halfUnused = fixed ? [] : halfDays.filter((d) => d.workedMinutes > 0 && d.halfLeave!.paidMinutes + d.halfLeave!.unpaidMinutes === 0)
+  if (halfUnused.length > 0) {
+    warnings.push(
+      `Half-day leave on ${halfUnused.map((d) => shortDate(d.date)).join(', ')}, but the time on record already covers the whole shift: the leave changed nothing in pay. Cancel the leave if the employee worked the whole day.`,
+    )
+  }
   // Night work across midnight into a day of another kind: the premium
   // (holiday, special day) follows the day the shift started. A company
   // that counts holiday hours by the calendar day adjusts the difference.
@@ -582,6 +598,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // days with overtime or night work (the de minimis overtime meal ceiling)
   let overtimeOrNightDays = 0
   let paidLeaveDays = 0
+  // paid leave on days with no work at all (a day worked for half and on leave for half counts once, as worked)
+  let paidLeaveDaysNotWorked = 0
   let unpaidLeaveDays = 0
   let unworkedRegularHolidays = 0
   let paidUnworkedHolidays = 0
@@ -630,7 +648,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // per rate segment: the days and minutes each rate values
   const seg = segs.map(() => ({
     covered: 0, maternity: 0, absence: 0, unpaidHoliday: 0, outside: 0, late: 0, undertime: 0, extra: 0,
-    dailyBasic: 0, worked: 0, paidLeave: 0, absentDays: 0,
+    dailyBasic: 0, worked: 0, paidLeave: 0, paidLeaveApart: 0, absentDays: 0,
   }))
 
   for (const d of days) {
@@ -668,6 +686,38 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       c.absence += dayShare(d)
       c.absentDays += 1
     }
+    // Half-day leave (attendance already took the hours it covers out of the
+    // lateness and undertime). A paid half is inside a monthly rate, and is
+    // paid at the day's rate to a daily-paid employee. An unpaid half is leave
+    // without pay. With no time in/out at all, the half not on leave is half
+    // a day's absence.
+    const half = d.dayType === 'regular' ? d.halfLeave : undefined
+    if (half) {
+      const expected = d.expectedMinutes || stdMin
+      if (half.unpaidMinutes > 0) {
+        unpaidLeaveDays += half.unpaidMinutes / expected
+        c.absence += half.unpaidMinutes / stdMin
+        c.absentDays += half.unpaidMinutes / expected
+      }
+      if (half.paidMinutes > 0) {
+        paidLeaveDays += half.paidMinutes / expected
+        c.paidLeave += half.paidMinutes / expected
+        if (payType === 'daily') {
+          dailyBasic += daily * (half.paidMinutes / stdMin)
+          c.dailyBasic += daily * (half.paidMinutes / stdMin)
+        }
+        if (!worked && !fixed) {
+          paidLeaveDaysNotWorked += half.paidMinutes / expected
+          c.paidLeaveApart += half.paidMinutes / expected
+        }
+      }
+      const missed = fixed ? 0 : (d.partialAbsenceMinutes ?? 0)
+      if (missed > 0) {
+        absentDays += missed / expected
+        c.absence += missed / stdMin
+        c.absentDays += missed / expected
+      }
+    }
     // Leave flags exist on every covered day. Paid-leave credit applies to
     // ordinary scheduled days. Unpaid leave deducts every day the pay basis
     // would otherwise cover: for monthly-paid, any day the divisor deems
@@ -676,7 +726,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // (no work already means no pay).
     if (d.onPaidLeave && d.dayType === 'regular') {
       paidLeaveDays += 1
+      paidLeaveDaysNotWorked += 1
       c.paidLeave += 1
+      c.paidLeaveApart += 1
     }
     // an unworked regular holiday is paid on the workday-before rule, even
     // inside a leave without pay that starts on it — never before the hire
@@ -893,10 +945,17 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       : k === segs.length - 1
         ? `from ${shortDate(segs[k].from)}`
         : `${shortDate(segs[k].from)}–${shortDate(addDays(segs[k + 1].from, -1))}`
+  // Paid leave beside the days worked. A half day on leave within a day
+  // worked is inside that day, not a day more: "11 day/s worked, 0.5 of them
+  // on paid leave" is eleven days' pay.
+  const paidLeaveText = (all: number, apart: number) => {
+    const within = round2(all - apart)
+    return `${within > 0 ? `, ${within} of them on paid leave` : ''}${round2(apart) > 0 ? ` + ${round2(apart)} paid leave` : ''}`
+  }
   const segmentRate = (k: number) =>
     segs[k].payType === 'monthly'
       ? `${plainAmount(segs[k].monthlyRate)} a month`
-      : `${seg[k].worked} day/s${seg[k].paidLeave ? ` + ${seg[k].paidLeave} paid leave` : ''} at ${plainAmount(segs[k].dailyRate)}`
+      : `${seg[k].worked} day/s${paidLeaveText(seg[k].paidLeave, seg[k].paidLeaveApart)} at ${plainAmount(segs[k].dailyRate)}`
   for (let k = 1; k < segs.length; k++) {
     const was = segs[k - 1]
     const now = segs[k]
@@ -998,7 +1057,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     basicPay = round2(dailyBasic)
     earn(
       'basic',
-      `Basic Pay (${daysWorked} day/s worked${paidLeaveDays ? ` + ${paidLeaveDays} paid leave` : ''})`,
+      `Basic Pay (${daysWorked} day/s worked${paidLeaveText(paidLeaveDays, paidLeaveDaysNotWorked)})`,
       basicPay,
       'basic',
     )
@@ -1021,7 +1080,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     earn('holiday_premium', 'Holiday Rest Day Premium (taxable)', round2(mweHolidayRestPremium), 'premium')
   }
 
-  const paidDays = daysWorked + paidLeaveDays + paidUnworkedHolidays
+  const paidDays = round2(daysWorked + paidLeaveDaysNotWorked + paidUnworkedHolidays)
   for (const a of extrasOnly ? [] : employee.allowances) {
     let amt: number
     let suffix = ''
@@ -1112,7 +1171,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // normal working hours of each day paid (the regional wage order; Labor
     // Code Art. 101)
     const wagePay = round2(earnings.filter((l) => l.bir === 'basic').reduce((s, l) => s + l.amount, 0))
-    const wageDays = daysWorked + paidLeaveDays
+    const wageDays = round2(daysWorked + paidLeaveDaysNotWorked)
     const floorPay = round2(wageFloor * wageDays)
     if (wageDays > 0 && wagePay + 0.005 < floorPay) {
       warnings.push(
@@ -1694,7 +1753,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     nightDiffHours: round2(ndHours),
     lateMinutes: Math.round(lateMin),
     undertimeMinutes: Math.round(undertimeMin),
-    absentDays: absentDays + unpaidLeaveDays,
+    absentDays: round2(absentDays + unpaidLeaveDays),
     earnings,
     deductions,
     basicPay: earnedBasic,
