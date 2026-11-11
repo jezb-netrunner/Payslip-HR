@@ -75,6 +75,8 @@ export interface Entity {
   dole_exemption_valid_until: string | null
   /** no regular holiday pay after unpaid absence on the workday before (default off) */
   holiday_absence_rule: boolean
+  /** four eyes: whoever computed a payroll draft cannot finalize it (company admins switch it) */
+  require_second_approver?: boolean
   /** a retail or service establishment regularly employing less than 10 workers: no holiday pay (Art. 94) */
   holiday_pay_exempt: boolean
   retail_service_establishment: boolean
@@ -474,6 +476,13 @@ export interface PayrollRun {
   created_at: string
   /** PR-000001: given when finalized (a reissued payroll gets a new one) */
   control_no: string | null
+  /** who created the run, completed its last computation and finalized it: recorded by the database */
+  created_by?: string | null
+  computed_by?: string | null
+  computed_by_name?: string | null
+  computed_at?: string | null
+  finalized_by?: string | null
+  finalized_by_name?: string | null
 }
 
 /** A voided version without its payslips (they load when downloaded). */

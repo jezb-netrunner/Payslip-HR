@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Banknote, Building2, Coins, FileText, Hash, Scale, SlidersHorizontal } from 'lucide-react'
+import { Banknote, Building2, Coins, FileText, Hash, Scale, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { Button, Card, Field, Input, NoClient, PageHeader, Select, Textarea, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
@@ -51,6 +51,7 @@ function settingsRangeProblem(s: Entity): string | null {
 
 function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Promise<void> }) {
   const toast = useToast()
+  const { isCompanyAdmin } = useAuth()
   const [s, setS] = useState<Entity>(initial)
   const [busy, setBusy] = useState(false)
   useEffect(() => setS(initial), [initial])
@@ -115,6 +116,10 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           bir_filing_method: s.bir_filing_method,
           efps_group: s.bir_filing_method === 'efps' ? s.efps_group : null,
           pagibig_due_day: s.pagibig_due_day === null || String(s.pagibig_due_day) === '' ? null : Number(s.pagibig_due_day),
+          // only a company admin changes the four-eyes rule (the database refuses anyone else)
+          ...(isCompanyAdmin && initial.require_second_approver !== undefined && !!s.require_second_approver !== !!initial.require_second_approver
+            ? { require_second_approver: !!s.require_second_approver }
+            : {}),
         })
         .eq('id', s.id)
       if (error) throw error
@@ -381,6 +386,28 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
               />
             </div>
           </Card>
+          {initial.require_second_approver !== undefined && (
+            <Card title="Payroll approval" icon={<ShieldCheck />}>
+              <div className="space-y-2">
+                {isCompanyAdmin ? (
+                  <Toggle
+                    checked={!!s.require_second_approver}
+                    onChange={(v) => set('require_second_approver', v)}
+                    label="Require a second person to finalize payroll (four eyes)"
+                  />
+                ) : (
+                  <p className="text-sm text-slate-700">
+                    A second person must finalize payroll: <b>{s.require_second_approver ? 'required' : 'not required'}</b>
+                  </p>
+                )}
+                <p className="text-xs text-slate-500">
+                  When required, the admin who computed a draft cannot finalize it: another admin of this client (or a
+                  company admin) reviews and finalizes it, and the payroll records both. Needs at least two admins who
+                  can open this client. {isCompanyAdmin ? '' : 'Only a company admin can change this.'}
+                </p>
+              </div>
+            </Card>
+          )}
           <Card title="Payslip" icon={<FileText />}>
             <Field label="Footer note">
               <Textarea rows={2} value={s.payslip_footer_note} onChange={(e) => set('payslip_footer_note', e.target.value)} />

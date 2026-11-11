@@ -9,6 +9,7 @@ import {
   Calculator,
   Check,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   Download,
   Eye,
@@ -19,6 +20,7 @@ import {
   Scale,
   SlidersHorizontal,
   Trash2,
+  Users,
 } from 'lucide-react'
 import PayslipView, { runLabel, type PayslipCompany, type PayslipRunInfo } from '../../components/PayslipView'
 import {
@@ -50,6 +52,7 @@ import type { PayslipPdfOptions } from '../../pdf/payslipPdf'
 import { denominationBreakdown, PESO_DENOMINATIONS, sumBreakdowns } from '../../lib/cash'
 import type { Employee, Payslip, PayrollAdjustment, PayrollRun, PayrollVoid, PayrollVoidSummary } from '../../lib/db'
 import { useEntity } from '../../lib/entity'
+import { useAuth } from '../../lib/auth'
 import { useRecordClient } from '../../lib/recordClient'
 import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
 import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS, LIQUIDATABLE_CATEGORIES, PAY_ITEM_TYPE_LABELS, SUPPLEMENTARY_ITEM_TYPES } from '../../lib/labels'
@@ -60,6 +63,7 @@ import { logActivity } from '../../lib/activity'
 import { RunDeductionsCard } from './RunDeductions'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
+import { REVIEW_CHANGE_SHARE, reviewIsClean, reviewRun, type ReviewSlip, type RunReview } from '../../lib/runReview'
 import { round2, type DeMinimisKind, type MaternityBenefit, type PayItemType } from '../../payroll/types'
 import { ALLOWANCE_DE_MINIMIS, DE_MINIMIS_LABELS } from '../../lib/deMinimis'
 
@@ -73,11 +77,110 @@ const EARNING_CATEGORIES = [
   'representation', 'transportation', 'cola', 'housing', 'other_taxable', 'other_non_taxable',
 ] as const
 
+/**
+ * The last finalized regular payroll of the same client and pay frequency
+ * before this run's period, with each payslip's net pay: what a reviewer
+ * compares the draft with. null for other run types or a first payroll.
+ */
+async function previousPayroll(run: PayrollRun): Promise<{ label: string; slips: ReviewSlip[] } | null> {
+  if (run.run_type !== 'regular' || !run.pay_frequency) return null
+  const { data, error } = await supabase
+    .from('payroll_runs')
+    .select('id, run_type, period_start, period_end')
+    .eq('entity_id', run.entity_id)
+    .eq('run_type', 'regular')
+    .eq('pay_frequency', run.pay_frequency)
+    .in('status', ['finalized', 'paid'])
+    .lt('period_end', run.period_start)
+    .order('period_end', { ascending: false })
+    .limit(1)
+  if (error) throw error
+  const prev = (data ?? [])[0] as Pick<PayrollRun, 'id' | 'run_type' | 'period_start' | 'period_end'> | undefined
+  if (!prev) return null
+  const rows = await fetchAll<{ employee_id: string; net_pay: number; name: string | null }>((from, to) =>
+    supabase
+      .from('payslips')
+      .select('employee_id, net_pay, name:employee_snapshot->>name')
+      .eq('payroll_run_id', prev.id)
+      .order('id')
+      .range(from, to),
+  )
+  return {
+    label: runLabel(prev),
+    slips: rows.map((r) => ({ id: r.employee_id, name: r.name ?? 'Unnamed employee', net: Number(r.net_pay) })),
+  }
+}
+
+const REVIEW_NAMES_SHOWN = 8
+function namesText(people: { name: string }[]): string {
+  const shown = people.slice(0, REVIEW_NAMES_SHOWN).map((p) => p.name).join(', ')
+  return people.length > REVIEW_NAMES_SHOWN ? `${shown} and ${people.length - REVIEW_NAMES_SHOWN} more` : shown
+}
+
+/** The reviewer's checklist for a computed payroll: completeness and what moved since the last one. */
+function RunReviewCard({ review, previousLabel, isDraft }: { review: RunReview; previousLabel: string | null; isDraft: boolean }) {
+  const clean = reviewIsClean(review)
+  return (
+    <section className="rounded-xl border border-slate-200/80 bg-white p-5" aria-label="Review before finalizing">
+      <h2 className="flex items-center gap-2 text-sm font-bold text-ink-900">
+        <ClipboardCheck className="size-4 text-slate-500" />
+        {isDraft ? 'Review before finalizing' : 'Review'}
+        <span className="font-normal text-slate-500">
+          {previousLabel ? `· compared with ${previousLabel}` : '· no earlier payroll of this kind to compare with'}
+        </span>
+      </h2>
+      {clean ? (
+        <p className="mt-2 text-sm text-slate-600">
+          {review.compared
+            ? `Same people as the last payroll, and no net pay moved by ${Math.round(REVIEW_CHANGE_SHARE * 100)}% or more.`
+            : 'Everyone this run covers has a payslip.'}
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
+          {review.leftOut.length > 0 && (
+            <li>
+              <b className="text-rose-700">{plural(review.leftOut.length, 'employee')} covered by this run without a payslip:</b>{' '}
+              {namesText(review.leftOut)}. They were already paid for these days in another payroll, or were added after the
+              last computation — recompute to check.
+            </li>
+          )}
+          {review.added.length > 0 && (
+            <li>
+              <b>{review.added.length} new on this payroll:</b> {namesText(review.added)}
+            </li>
+          )}
+          {review.dropped.length > 0 && (
+            <li>
+              <b>{review.dropped.length} on the last payroll but not this one:</b> {namesText(review.dropped)}
+            </li>
+          )}
+          {review.changed.length > 0 && (
+            <li>
+              <b>
+                {plural(review.changed.length, 'net pay', 'net pays')} moved by {Math.round(REVIEW_CHANGE_SHARE * 100)}% or more:
+              </b>{' '}
+              {review.changed.slice(0, REVIEW_NAMES_SHOWN).map((c, i) => (
+                <span key={c.id}>
+                  {i > 0 && '; '}
+                  {c.name} {money(c.before)} → {money(c.now)}
+                  {c.pct !== null && ` (${c.pct > 0 ? '+' : '−'}${Math.abs(Math.round(c.pct * 100))}%)`}
+                </span>
+              ))}
+              {review.changed.length > REVIEW_NAMES_SHOWN && ` and ${review.changed.length - REVIEW_NAMES_SHOWN} more`}
+            </li>
+          )}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export default function PayrollRunDetail() {
   const { id } = useParams()
   const toast = useToast()
   const navigate = useNavigate()
   const { entities } = useEntity()
+  const { profile } = useAuth()
   const [run, setRun] = useState<PayrollRun | null>(null)
   const [slips, setSlips] = useState<Payslip[]>([])
   const [adjustments, setAdjustments] = useState<PayrollAdjustment[]>([])
@@ -97,6 +200,8 @@ export default function PayrollRunDetail() {
   const [voids, setVoids] = useState<PayrollVoidSummary[]>([])
   const [voiding, setVoiding] = useState(false)
   const [voidExport, setVoidExport] = useState<PayrollVoid | null>(null)
+  // the last finalized payroll of the same kind before this one, for the review
+  const [previous, setPrevious] = useState<{ label: string; slips: ReviewSlip[] } | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -129,6 +234,7 @@ export default function PayrollRunDetail() {
       ))
       setAdjustments(a)
       if (runRow) setEmployees(await getEmployees(runRow.entity_id))
+      setPrevious(runRow ? await previousPayroll(runRow) : null)
     } catch (err) {
       setLoadError(errorMessage(err, 'Could not load this payroll run'))
     } finally {
@@ -296,6 +402,17 @@ export default function PayrollRunDetail() {
 
   const computed = slips.length > 0
   const stale = isDraft && computed && !upToDate && !computing
+  // four eyes (a client setting): whoever computed the draft cannot finalize it
+  const fourEyes = entity.require_second_approver === true
+  // completeness and what moved since the last payroll, for whoever reviews it
+  const review = reviewRun({
+    slips: slips.map((x) => ({ id: x.employee_id, name: String((x.employee_snapshot as Record<string, string>).name ?? ''), net: Number(x.net_pay) })),
+    // a posted run is compared as it was posted: the employee list has moved on since
+    covered: isDraft && upToDate ? covered.map((e) => ({ id: e.id, name: fullName(e) })) : undefined,
+    previous: previous?.slips ?? null,
+  })
+  const selfComputed = fourEyes && isDraft && upToDate && !!run.computed_by && run.computed_by === profile?.id
+  const unstamped = fourEyes && isDraft && upToDate && !run.computed_by
   const extraEarnings = adjustments.filter((a) => a.kind === 'earning').reduce((sum, a) => sum + Number(a.amount), 0)
   const totalHours = slips.reduce((sum, x) => sum + Number(x.hours_worked), 0)
   const otHours = slips.reduce((sum, x) => sum + Number(x.overtime_hours), 0)
@@ -348,8 +465,18 @@ export default function PayrollRunDetail() {
       return next
     })
   const notices =
-    stale || hasWarnings ? (
+    stale || hasWarnings || selfComputed || unstamped ? (
       <>
+        {(selfComputed || unstamped) && (
+          <p className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+            <Users className="mt-0.5 size-4 shrink-0" />
+            <span>
+              {selfComputed
+                ? `${entity.name} requires a second person to finalize payroll. You computed this draft, so another admin of this client reviews and finalizes it.`
+                : `${entity.name} requires a second person to finalize payroll, and this draft does not record who computed it. Recompute it, then have another admin finalize it.`}
+            </span>
+          </p>
+        )}
         {stale && (
           <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
             Attendance, schedules, adjustments, deduction amounts, leave or pay settings changed since this draft
@@ -418,6 +545,9 @@ export default function PayrollRunDetail() {
         <div className="min-w-0 space-y-6">
           {/* below xl the aside drops under the payslips: keep what blocks finalizing in view */}
           {notices && <div className="space-y-4 xl:hidden">{notices}</div>}
+          {computed && !isThirteenth && (!stale || !isDraft) && (
+            <RunReviewCard review={review} previousLabel={previous?.label ?? null} isDraft={isDraft} />
+          )}
           <section className="rounded-xl border border-slate-200/80 bg-white">
             <div className="p-5">
               <h2 className="flex items-center gap-2 text-base font-bold text-ink-900">
@@ -426,7 +556,14 @@ export default function PayrollRunDetail() {
               </h2>
               {!isDraft && run.finalized_at && (
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {run.control_no ? `${run.control_no} · ` : ''}Finalized {fmtDateTime(run.finalized_at)} · employees can see their payslips
+                  {run.control_no ? `${run.control_no} · ` : ''}Finalized {fmtDateTime(run.finalized_at)}
+                  {run.finalized_by_name ? ` by ${run.finalized_by_name}` : ''}
+                  {run.computed_by_name && run.computed_by !== run.finalized_by ? ` · computed by ${run.computed_by_name}` : ''} · employees can see their payslips
+                </p>
+              )}
+              {isDraft && upToDate && run.computed_at && (
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Computed {fmtDateTime(run.computed_at)}{run.computed_by_name ? ` by ${run.computed_by_name}` : ''}
                 </p>
               )}
               <div className="mt-4 flex flex-wrap gap-x-10 gap-y-4">
@@ -864,7 +1001,12 @@ export default function PayrollRunDetail() {
                 <Calculator className="size-4" />
                 {computing ? 'Computing…' : computed ? 'Recompute draft' : 'Compute draft'}
               </Button>
-              <Button onClick={doFinalize} disabled={busy || computing || !upToDate} variant={computed && upToDate ? 'primary' : 'secondary'}>
+              <Button
+                onClick={doFinalize}
+                disabled={busy || computing || !upToDate || selfComputed || unstamped}
+                title={selfComputed ? 'Another admin of this client finalizes a draft you computed' : undefined}
+                variant={computed && upToDate && !selfComputed && !unstamped ? 'primary' : 'secondary'}
+              >
                 <Lock className="size-4" /> Finalize <ArrowRight className="size-4" />
               </Button>
             </>
