@@ -326,3 +326,107 @@ describe('review fixes (2026-10-24)', () => {
     expect(m.trace.warnings.some((w) => w.startsWith('Regular holiday not paid'))).toBe(false)
   })
 })
+
+describe('a regular holiday worked for part of the day (Labor Code Art. 94)', () => {
+  const HERO = [{ holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' as const }]
+  // Manila 09:00 is 01:00Z: 09:00 to 13:00 is four hours, no break
+  const half = { work_date: '2026-08-31', clock_in: '2026-08-31T01:00:00Z', clock_out: '2026-08-31T05:00:00Z' }
+  const full = { work_date: '2026-08-31', clock_in: '2026-08-31T01:00:00Z', clock_out: '2026-08-31T10:00:00Z' }
+  const slipFor = (employee: PayrollEmployeeInput, entries: { work_date: string; clock_in: string; clock_out: string }[], schedule = employee.schedule) =>
+    computePayslip({
+      employee,
+      settings,
+      period,
+      tables: DEFAULT_TABLES,
+      days: computeAttendance({ periodStart: '2026-08-31', periodEnd: '2026-08-31', schedule, standardHoursPerDay: 8, gracePeriodMinutes: 0, entries, holidays: HERO, approvedLeaves: [] }),
+      runType: 'regular',
+    })
+  const lineSum = (slip: ReturnType<typeof slipFor>, code: string) => slip.earnings.filter((l) => l.code === code).reduce((t, l) => t + l.amount, 0)
+
+  it('daily-paid: never less than the holiday not worked', () => {
+    const unworked = slipFor(daily, [])
+    expect(unworked.grossPay).toBe(800)
+    // half a day worked: the day's holiday pay (800) plus the pay for the work done (4 h = 400)
+    const worked = slipFor(daily, [half])
+    expect(lineSum(worked, 'basic')).toBe(400)
+    expect(lineSum(worked, 'holiday')).toBe(800)
+    expect(worked.grossPay).toBe(1200)
+    expect(worked.grossPay).toBeGreaterThan(unworked.grossPay)
+  })
+
+  it('daily-paid: a full day worked is still 200%', () => {
+    const slip = slipFor(daily, [full])
+    expect(lineSum(slip, 'basic')).toBe(800)
+    expect(lineSum(slip, 'holiday')).toBe(800)
+    expect(slip.grossPay).toBe(1600)
+  })
+
+  it('daily-paid minimum wage earner: the same pay, all of it exempt', () => {
+    const mwe = { ...daily, dailyRate: 755, isMinimumWageEarner: true }
+    const slip = slipFor(mwe, [half])
+    expect(slip.grossPay).toBe(1132.5) // 755 + 377.50
+    expect(slip.taxableIncome).toBe(0)
+  })
+
+  it('monthly-paid, the holiday on the rest day (divisor 261): its 100% is due in full, plus 260% of the hours worked less their 100%', () => {
+    // Mon-Fri at 30,000 a month: 1,379.31 a day, 172.41 an hour. The employee rests on Mondays here.
+    const tueSat = { days: [2, 3, 4, 5, 6], start: '09:00', end: '18:00', break_minutes: 60 }
+    const emp = { ...monthly, schedule: tueSat }
+    const unworked = slipFor(emp, [])
+    const worked = slipFor(emp, [half])
+    const dailyRate = (30000 * 12) / 261
+    expect(lineSum(unworked, 'holiday')).toBeCloseTo(dailyRate, 2)
+    // 4 h at 260% of the hourly rate, plus the unworked half of the day's 100%
+    expect(lineSum(worked, 'holiday')).toBeCloseTo((dailyRate / 8) * 4 * 2.6 + dailyRate / 2, 2)
+    expect(lineSum(worked, 'holiday')).toBeGreaterThan(lineSum(unworked, 'holiday'))
+  })
+
+  it('monthly-paid on a scheduled holiday: the salary already carries the day', () => {
+    const slip = slipFor(monthly, [half])
+    // the premium for the four hours worked only: no tardiness or undertime on a holiday
+    expect(lineSum(slip, 'holiday')).toBeCloseTo(((30000 * 12) / 261 / 8) * 4, 2)
+    expect(slip.earnings.some((l) => l.code === 'undertime' || l.code === 'late' || l.code === 'absence')).toBe(false)
+  })
+})
+
+describe('night work across midnight into a day of another kind', () => {
+  const night = { days: [1, 2, 3, 4, 5], start: '22:00', end: '06:00', break_minutes: 0 }
+  const HERO = [{ holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' as const }]
+  // Manila 22:00 on the 28th is 14:00Z; 06:00 on the 29th is 22:00Z on the 28th
+  const shift = (date: string) => ({ work_date: date, clock_in: `${date}T14:00:00Z`, clock_out: `${date}T22:00:00Z` })
+  const days = (entries: { work_date: string; clock_in: string; clock_out: string }[], from: string, to: string) =>
+    computeAttendance({ periodStart: from, periodEnd: to, schedule: night, standardHoursPerDay: 8, gracePeriodMinutes: 0, entries, holidays: HERO, approvedLeaves: [] })
+
+  it('marks the eve shift that ends on the holiday, with the hours past midnight', () => {
+    // Sunday Aug 30 is a rest day for this schedule: use a Sun-Thu night worker
+    const sunThu = { ...night, days: [7, 1, 2, 3, 4] }
+    const d = computeAttendance({ periodStart: '2026-08-30', periodEnd: '2026-08-30', schedule: sunThu, standardHoursPerDay: 8, gracePeriodMinutes: 0, entries: [shift('2026-08-30')], holidays: HERO, approvedLeaves: [] })
+    expect(d[0].dayType).toBe('regular')
+    expect(d[0].crossesInto).toEqual({ date: '2026-08-31', dayType: 'regular_holiday', holidayName: 'National Heroes Day', minutes: 360 })
+  })
+
+  it('marks the holiday shift that ends on an ordinary morning, and no ordinary night', () => {
+    const d = days([shift('2026-08-31'), shift('2026-08-27')], '2026-08-27', '2026-08-31')
+    const holiday = d.find((x) => x.date === '2026-08-31')!
+    expect(holiday.dayType).toBe('regular_holiday')
+    expect(holiday.crossesInto).toEqual({ date: '2026-09-01', dayType: 'regular', minutes: 360 })
+    expect(d.find((x) => x.date === '2026-08-27')!.crossesInto).toBeUndefined()
+  })
+
+  it('the payslip review names the hours: the premium follows the day the shift started', () => {
+    const sunThu = { ...night, days: [7, 1, 2, 3, 4] }
+    const emp = { ...monthly, schedule: sunThu }
+    const slip = computePayslip({
+      employee: emp,
+      settings,
+      period,
+      tables: DEFAULT_TABLES,
+      days: computeAttendance({ periodStart: '2026-08-30', periodEnd: '2026-08-30', schedule: sunThu, standardHoursPerDay: 8, gracePeriodMinutes: 0, entries: [shift('2026-08-30')], holidays: HERO, approvedLeaves: [] }),
+      runType: 'regular',
+    })
+    const w = slip.trace.warnings.find((x) => x.startsWith('Night work across midnight'))
+    expect(w).toContain('the shift of Aug 30 (an ordinary day) ran 6 h into Aug 31 (National Heroes Day)')
+    // paid as the ordinary day it started on: no holiday premium line
+    expect(slip.earnings.some((l) => l.code === 'holiday')).toBe(false)
+  })
+})

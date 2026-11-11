@@ -819,22 +819,37 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
   }, [entity.id, year, month, reload])
 
   const rows = useMemo(() => {
-    const m = new Map<string, { name: string; no: string; sss: string; ph: string; hdmf: string; v: number[] }>()
+    const m = new Map<string, { name: string; no: string; sss: string; ph: string; hdmf: string; v: number[]; mpf: [number, number] }>()
     for (const s of slips ?? []) {
       const snap = s.employee_snapshot as Record<string, string>
-      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0, 0] }
+      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0, 0], mpf: [0, 0] as [number, number] }
       const add = [
         Number(s.sss_ee) + Number(s.sss_mpf_ee), Number(s.sss_er) + Number(s.sss_mpf_er), Number(s.sss_ec_er),
         Number(s.sss_mpf_ee) + Number(s.sss_mpf_er), Number(s.philhealth_ee), Number(s.philhealth_er), Number(s.philhealth_ng ?? 0),
         Number(s.pagibig_ee), Number(s.pagibig_er),
       ]
       cur.v = cur.v.map((x, i) => Math.round((x + add[i]) * 100) / 100)
+      cur.mpf = [round2(cur.mpf[0] + Number(s.sss_mpf_ee)), round2(cur.mpf[1] + Number(s.sss_mpf_er))]
       m.set(s.employee_id, cur)
     }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
   }, [slips])
   const tot = rows.reduce((acc, r) => acc.map((x, i) => Math.round((x + r.v[i]) * 100) / 100), [0, 0, 0, 0, 0, 0, 0, 0, 0])
   const cols = ['SSS EE', 'SSS ER', 'EC', 'of which MPF', 'PhilHealth EE', 'PhilHealth ER', 'PhilHealth NG (not remitted)', 'Pag-IBIG EE', 'Pag-IBIG ER']
+  // The file each agency's collection list is keyed from: the regular SSS
+  // contribution apart from the MPF (MySSS Pension Booster) and EC, and each
+  // agency's total to remit.
+  const fileCols = [
+    'SSS EE (regular)', 'SSS ER (regular)', 'EC (ER)', 'MPF EE', 'MPF ER', 'SSS total to remit',
+    'PhilHealth EE', 'PhilHealth ER', 'PhilHealth total to remit', 'PhilHealth NG share (not remitted)',
+    'Pag-IBIG EE', 'Pag-IBIG ER', 'Pag-IBIG total to remit',
+  ]
+  const fileRow = (v: number[], mpf: [number, number]) => [
+    round2(v[0] - mpf[0]), round2(v[1] - mpf[1]), v[2], mpf[0], mpf[1], round2(v[0] + v[1] + v[2]),
+    v[4], v[5], round2(v[4] + v[5]), v[6],
+    v[7], v[8], round2(v[7] + v[8]),
+  ]
+  const totMpf = rows.reduce<[number, number]>((a, r) => [round2(a[0] + r.mpf[0]), round2(a[1] + r.mpf[1])], [0, 0])
 
   return (
     <Card
@@ -851,9 +866,9 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
             disabled={rows.length === 0}
             onClick={() =>
               downloadCsv(`contributions_${entity.code}_${year}-${month}.csv`, [
-                ['Employee No', 'Employee', 'SSS No', 'PhilHealth No', 'Pag-IBIG MID', ...cols],
-                ...rows.map((r) => [r.no, r.name, r.sss, r.ph, r.hdmf, ...r.v]),
-                ['', 'TOTAL', '', '', '', ...tot],
+                ['Employee No', 'Employee', 'SSS No', 'PhilHealth No', 'Pag-IBIG MID', ...fileCols],
+                ...rows.map((r) => [r.no, r.name, r.sss, r.ph, r.hdmf, ...fileRow(r.v, r.mpf)]),
+                ['', 'TOTAL', '', '', '', ...fileRow(tot, totMpf)],
               ], stamp(`Contributions for ${fmtMonth(`${year}-${month}-01`)}`))
             }
           >

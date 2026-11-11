@@ -800,9 +800,110 @@ Done, and live the same day (owner: "yes, deploy it"; see *Current deployed stat
   UTC-date flake fixed. `docs/SECURITY.md` (data inventory, owner checklist,
   breach runbook incl. the 72-hour NPC rule); README *Backups*.
 
+### 2026-11-11 — Whole-app audit (owner: "audit every area … fix everything … ready-to-ship"; branch `claude/quirky-bohr-elakrw`)
+
+**How it went:** nine parallel review agents (seven of them forks carrying
+this whole log) used up the account's 5-hour usage limit in about fifteen
+minutes and all died (lesson below). Restarted lean: two fresh web-research
+agents (tax/contributions, labor/holidays) and the code, database and screens
+reviewed in the main session. Live checked first (read-only): 41 migrations =
+repo, `fingerprint.sql` equal on all ten lines, advisors = the accepted list,
+data = the DEMO client only (10 employees, 0 runs, 1 admin).
+
+**Law (re-verified 2026-11-11, search extracts, official PDFs unreachable):**
+no rate, table or national holiday row needed changing (details in *Verified
+2026 PH statutory figures*). Fixed: pay above a de minimis ceiling was taxed
+at once, the regulation puts it in the ₱90,000 pool; a daily-paid worker's
+partly worked regular holiday paid less than the holiday not worked;
+apprentice pay cited repealed Labor Code articles (now RA 12063).
+
+**Engine and service:** a payroll never collects more than it pays
+(contributions deferred within the month or a receivable, tax and loans
+stop at the pay; a new hire's first week had a negative net pay that could
+be finalized); a 13th month run issued empty numbered payslips; night work
+across midnight into a holiday is named in the review.
+
+**Internal control:** migration `20261111083956_internal_controls`
+(live the same day, see *Current deployed state*) — an API caller could insert a
+run already "finalized" with any finalizer; actor columns are now the
+database's; optional four-eyes finalize; finalize refuses a negative net
+pay; `recurring_deductions` amounts can't be negative; `valid_ewt_data` was
+the one function `anon` could still execute. Run page: *Review before finalizing* (added / dropped / net moved 20% /
+covered without a payslip), who computed and who finalized.
+
+**Security and information:** the app refuses to run framed (clickjacking);
+same-origin referrer; lockout message names the reset link; payslip shows
+the pay rate and attendance; contributions CSV splits regular SSS / MPF / EC
+and totals per agency; employee profile carries a privacy notice;
+`docs/SECURITY.md` → *Known limits*. Tests 484 → 515 (vitest), SQL suite 26;
+a scratch browser harness (lesson *Browser walkthroughs*) rendered the run
+page, payslip, settings and employee profile at 1280 and 390 px with no
+page errors or overflow.
+
+**Reported, not built:** holiday hours by calendar day for night shifts; two
+regular holidays on one date; admitting an admin session only after the
+second factor; a per-address employee sign-in budget; 2316 / 2307 in the
+official layout; bank and agency upload files. (Half-day leave was on this
+list: built the same day, next entry.)
+
+### 2026-11-11 — Half-day leave, then PR #27 merged (owner: "build half-day leave then merge PR"; same branch)
+
+A leave for one date can be the morning or the afternoon only (lesson
+*Half-day leave covers hours not worked*). Migration
+`20261111091354_half_day_leave` (live, see *Current deployed state*):
+`leave_requests.half_day` (`am` / `pm`, one date), and `guard_leave_request`
+charges 0.5 day whatever the caller sent, refuses it for maternity leave,
+and refuses changing the half of an approved leave inside a finalized
+payroll. Attendance (`computeAttendance`) takes the hours the leave covers
+out of the lateness and undertime, the engine pays or docks the half
+(`halfLeave`, `partialAbsenceMinutes` on the day) and warns when the other
+half has no time in/out or when the whole shift is on record. Screens: both
+leave forms (the choice shows for one date, never for maternity leave),
+leave lists, Time In / Out badges (Fill leaves the row blank), roster,
+time report (remarks, fractional totals), attendance timeline (no "late"
+for the half on leave), dashboard (still expects time in/out that day),
+backup sheet. Tests 515 → 538 (vitest: `halfDayLeave.test.ts` for the
+engine, `flows/halfDayLeave.test.ts` through `computeRun`, leave / time
+report / timeline cases), SQL suite 27; the scratch harness walked both
+forms, the sheet, roster, report and employee attendance at 1280 and 390 px
+(no page errors, no overflow). The owner asked for PR #27 to be merged in
+the same message: done right after this commit.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-11 (09:13 UTC): `20261111091354 half_day_leave` is live, and PR
+#27 (the audit and half-day leave) is merged** (owner: "build half-day leave
+then merge PR"). The migration went through MCP `apply_migration` before the
+merge — the new front end selects `leave_requests.half_day` — and is
+additive (one nullable column, two CHECKs, `guard_leave_request` re-created
+from the replica's definition); repo file renamed from the `20261111120000`
+placeholder. `fingerprint.sql` on live = replica on all ten lines: tables 44
+`de0ce9b5`, columns 627 `815aff36`, constraints 345 `49e57113`, indexes 126
+`eed92050`, policies 70 `5d84aa29`, functions 94 `253ed9ed`, fn_grants
+`aff5c77e`, table_grants `6ba8c56b`, triggers 127 `69b0e9e1`,
+storage_policies 3 `e7dbd16f`. Security advisors unchanged (the accepted 22
+lint-0029 lines, RLS-no-policy INFO on the 5 service tables, leaked password
+protection). 43 migrations on live = the repo. Edge functions unchanged
+(`auth-guard` v2, `admin-users` v8).
+
+**2026-11-11 (08:39 UTC): `20261111083956 internal_controls` is live**
+(owner, asked in the session: "Apply migration + open PR"). Applied through
+MCP `apply_migration` in one call (no DROP, no semicolon inside strings or
+comments; the four re-created functions came from the replica's definitions
+through `gen_internal_controls.py`, a scratchpad script not in the repo);
+repo file renamed from the `20261111090000` placeholder to the recorded
+version. `fingerprint.sql` on live = replica on all ten lines: tables 44
+`de0ce9b5`, columns 626 `6e3d9200`, constraints 343 `3bb87be3`, indexes 126
+`eed92050`, policies 70 `5d84aa29`, functions 94 `3997b1ba`, fn_grants
+`aff5c77e`, table_grants `6ba8c56b`, triggers 127 `69b0e9e1`,
+storage_policies 3 `e7dbd16f`. Security advisors unchanged: the accepted 22
+lint-0029 lines, RLS-no-policy INFO on the 5 service tables, leaked password
+protection. Checked before the apply (read-only): 4 `recurring_deductions`
+rows, none breaking the new CHECK; no payroll runs. The front end of branch
+`claude/quirky-bohr-elakrw` went out with PR #27 (merged the same day, entry
+above). Live data is still the DEMO client only.
 
 **2026-11-06 (23:41–23:46 UTC): the security hardening is live** (owner:
 "yes, deploy it"). Through MCP: migration `20261106234101
@@ -1041,7 +1142,14 @@ Known-open items (deliberate scope cuts, also in README disclaimers): BIR
 DAT file not generated (CSV for the BIR Alphalist module instead); no
 tax-only or reversal adjustment for correcting a paid payroll (see
 *Correcting a payroll after payday*); the SSS maternity benefit and salary
-differential are entered by the admin, not computed. Settled by the owner's
+differential are entered by the admin, not computed; a half-day leave is
+half the shift's hours, not a clock window (no leave by the hour); premiums
+follow the day a shift started (a night shift
+into a holiday is flagged, not split); one holiday per date (no 300% double
+holiday); a monthly rate under divisor 261 is paid an extra day for an
+unworked regular holiday on the rest day (three Saturdays in 2027) — more
+than Wellington Investment v. Trajano (G.R. 114698) requires, the owner may
+prefer a setting. Settled by the owner's
 spec of 2026-10-25: an MWE's rest-day and special-day premiums are taxable.
 NCR-27 (suspended, in litigation) and its contingent top-up report were
 not built: no NCR client.
@@ -1144,6 +1252,41 @@ Confirmed current (seeded in DB, mirrored in `src/payroll/defaults.ts`):
   CBA+productivity ₱12,000/yr, OT meal 30% of regional minimum wage,
   monetized VL 12 days. The app treats de minimis as admin-flagged
   non-taxable allowances — ceilings are the admin's responsibility.
+
+**Re-check of 2026-11-11** (two research agents, search extracts only —
+every official host and the big-four pages refused the sandbox): BIR tables,
+the ₱250,000 zero bracket and the ₱90,000 cap unchanged for 2026 and nothing
+enacted for 2027; SSS (no increase "until 2027" per its president, Feb 2026),
+PhilHealth 5% and Pag-IBIG unchanged; all 21 national holiday rows of 2026
+and 19 of 2027 match Proclamations 1006 / 1189 / 1264 and 1427 (the Barangay
+/ SK polls moved to 2028 by RA 12326, so no election-day holiday); NCR-28
+₱755 confirmed. Changed or to watch:
+- **HB 10345** (0% up to ₱350,000 from 1 Jan 2027) passed the House Ways and
+  Means committee on 10 Aug 2026 and awaited plenary on 9 Nov 2026; Senate
+  bills pending (one raises the ₱90,000 cap to ₱150,000). If signed, new
+  `bir_wht` and `bir_annual` versions from 2027-01-01 are needed from the
+  BIR's implementing RR — check in December.
+- **Pag-IBIG Circular 499-2026** (from 21 Aug 2026): eSRS mandatory, a new
+  remittance schedule replaces Circular 275's windows (the new days were not
+  found; the due day stays the client's entry).
+- **RA 12063** (EBET Act, 7 Nov 2024) repealed Labor Code Arts. 57–77:
+  apprentices keep a training allowance of at least 75% of the minimum wage,
+  learnership is no longer a category (`law.ts` cites it; section number and
+  effectivity not read).
+- **Eid'l Fitr and Eid'l Adha 2027** not proclaimed yet: add them when they
+  are. NCR Nov 16–18, 2026 (Proc. 1447) stays a client-local holiday.
+- **NCR-27**: restrained since the Pasig RTC's status quo ante order of 24
+  Jul 2026, contested, pending in the Supreme Court (G.R. No. E-07950); if
+  the injunction is lifted expect ₱780 from 20 Jan 2027 and possible
+  arrears. "Never took effect" above is the courts' and employers' position.
+- **De minimis** (RR 29-2025) also has medical cash allowance to dependents
+  ₱2,000 a semester and achievement awards ₱12,000 a year (both seeded).
+- Records retention: labor records 3 years (Omnibus Rules Book III Rule X),
+  tax records 5 years (NIRC as amended by RA 11976; RR 7-2024).
+- DOLE Labor Advisory 14-26 (19 Aug 2026) on pay during weather
+  suspensions: no computation in the app; RR 6-2026 / RMC 112-2026: a
+  consultant's invoice shows the withheld tax on its own line (from 16 Oct
+  2026), no rate change.
 
 Re-verify on these triggers: every January (agency announcements, new BIR
 RRs); wage orders per region (NCR-28 has no second tranche; watch the
@@ -1647,6 +1790,20 @@ so an employee sees drafts and adjustments don't stale a draft: check those
 in SQL. Match real column names in faked RPC writes (`payroll_voids`
 `run_snapshot`), and return `{data, error}` once (not nested) from insert/
 update `.select()` — both cost a false alarm.
+
+A page-level harness without any stack (2026-11-11, ~20 minutes, scratchpad
+only): a Vite root with `node_modules` symlinked, a CSS file importing
+`src/index.css` with `@source` on `src`, and one `enforce: 'pre'` plugin
+whose `resolveId` resolves every import and swaps the two files by their
+resolved path — `src/lib/supabase.ts` → a wrapper of `flows/fakeSupabase`
+(a Proxy adding `lt` / `gt` / `is` / `contains`, select aliases like
+`name:employee_snapshot->>name`, `rpc`, `auth.getUser`; missing tables are
+created empty) and `src/lib/auth.tsx` → a stub `useAuth` (role from `?as=`).
+Seed through the repo's own `addEntity` / `addEmployee` / `computeRun` /
+`finalize`, render the page under `MemoryRouter` + `ToastProvider` +
+`EntityProvider`, and screenshot with Playwright while collecting page
+errors, console errors and `scrollWidth - clientWidth`. Resolving by path
+catches `./supabase` and `../../lib/supabase` alike.
 
 For one new component, a scratch Vite harness is enough (2026-11-06, ~10
 minutes): root in the scratchpad with `node_modules` symlinked from the
@@ -2189,10 +2346,10 @@ taxed a rice subsidy that was exactly at the ceiling.
 
 > From the cloud sandbox the BIR CDN, lawphil and PhilHealth hosts fail (proxy 403, DNS). Figures loaded from the owner's spec carry `verified_on` null and the report says so.
 
-Where the spec was silent (de minimis excess over a ceiling) the safe
-default was taken: taxed as supplementary pay. RR 2-98's last proviso of
-Sec. 2.78.1(A)(3) may instead put such excess in the ₱90,000 pool — asked
-the owner.
+Where the spec was silent (de minimis excess over a ceiling) the "safe"
+default was taken at first: taxed as supplementary pay. That was wrong
+against the employee — corrected 2026-11-11, see *Pay above a de minimis
+ceiling joins the ₱90,000 pool*.
 
 
 ### A posted payroll is voided and reissued, never reopened (design decision, 2026-10-29)
@@ -2312,3 +2469,114 @@ silently. Check after any change to the schema: run the script on the
 suites' fixture DB (`phr_test`) and count rows whose `entity_id` /
 `employee_id` no longer exist (expect zero). Never use it on real client
 data: it bypasses the void-and-reissue rule the CAS controls promise.
+
+### Pay above a de minimis ceiling joins the ₱90,000 pool (correction, 2026-11-11)
+
+> RR 2-98 Sec. 2.78.1(A)(3), last proviso (as amended by RR 11-2018; RR 29-2025 changed only the ceilings): the excess of a de minimis benefit over its ceiling "shall be considered as part of 'other benefits' and the employee receiving it will be subject to tax only on the excess over the ₱90,000 ceiling". The engine earns it as `de_minimis_excess` with bucket `other_benefits`; a benefit not on the list at all stays taxable (`other_supplementary`).
+
+Checked 2026-11-11 by phrase match in copies of RR 11-2018 and five 2026
+commentaries on RR 29-2025 (search extracts; nobody read the PDF: have a
+CPA confirm Sec. 1 of RR 29-2025 restates the proviso). Why it mattered: a
+₱3,000 rice subsidy was withheld on ₱500 every month for someone whose
+13th month and bonuses are far below ₱90,000 — the "safe default" was safe
+for the employer only. Stored payslips of the old kind would need the
+year-end adjustment to give it back (live had none).
+
+### A regular holiday worked for part of the day: the day in full, plus the work (correction, 2026-11-11)
+
+> Labor Code Art. 94(a) pays the regular daily wage on a regular holiday whether or not worked; (b) adds the pay for work done. Daily-paid (and a monthly rate that does not cover the day, e.g. the rest day under divisor 261): `holidayPremium += daily × (1 − fraction worked)` on top of basic × fraction and the premium × fraction (`holidayShortfall`).
+
+Before, 200% × hours worked meant two hours of work paid half a day, less
+than the unworked holiday (a full day). A monthly rate that covers the day
+was already right (salary + premium on the hours, no tardiness on a
+holiday). Special days stay proportional (no work, no pay).
+
+### A payroll never collects more than it pays (design decision, 2026-11-11)
+
+> Employee SSS / PhilHealth / Pag-IBIG stop at the gross pay: before the month's closing payroll the shortfall just waits (the closing payroll deducts `monthly − already`); on the closing payroll the shares stay in full (they are remitted) and the shortfall is a negative `ee_collect` line, a receivable on Cash Advances. Period withholding stops at the pay left after contributions (the cumulative average catches up later), then loans and other deductions take what is left in order; what did not fit stays in a tracked balance (`balance` is now passed for loans too) or is named in the warnings. Finalize refuses `net_pay < 0` (database, the run page and `fakeSupabase.finalize`).
+
+Why it mattered: a hire on the Friday of a weekly cutoff grossed ₱482.76
+against ₱490 of shares (−₱1,917 under `first_period`), the draft could be
+finalized, and finalize moved loan balances by amounts nobody collected.
+Blocking finalize alone would have left the admin stuck (contributions
+can't be edited), so the engine had to stop first. Maternity months keep
+their own rule (`ee_pending` / `ee_collect`).
+
+### Actor columns belong to the database; a run starts as a draft (correction, 2026-11-11)
+
+> `stamp_payroll_run` (BEFORE INSERT OR UPDATE) refuses an API insert with a status other than draft, sets `created_by`, keeps `finalized_*` and `created_by` unchanged outside the lifecycle RPCs, and stamps `computed_by / computed_by_name / computed_at` when a draft's totals gain `employees` (the end of `computeRun`). `stamp_actor` does the same for `leave_requests.reviewed_by/at` and `payroll_adjustments.created_by`. Four eyes: `entities.require_second_approver` (company admins only, `guard_entity_update`) makes `finalize_payroll_run` refuse `computed_by = auth.uid()` (and a draft with no stamp).
+
+Both functions are SECURITY INVOKER and tell an API caller by
+`current_user in ('authenticated','anon')`: the suites impersonate with
+`set local role authenticated` and no `role` claim, so the claim test used
+for sessions would have skipped them, and definer functions (finalize,
+void, the staleness triggers) and direct sessions (seeds, migrations) pass
+untouched. Trigger order is by name: `payroll_runs_guard` (which clears the
+totals when the period changes) runs before `payroll_runs_stamp`. The
+audit trigger ignores the computation stamp like the totals; the row that
+records the posting carries both people. A settings change stales the
+drafts, so after switching the rule on, the draft is recomputed anyway.
+Why it mattered: "status changes only inside the RPCs" was true for UPDATE
+only — a direct INSERT made a "finalized" run with a forged finalizer, no
+control number, and its period's attendance locked.
+
+### Premiums follow the day the shift started; a night shift into a holiday is flagged, not split (design decision, 2026-11-11)
+
+> `computeAttendance` marks `crossesInto` (date, day type, minutes) on a worked day whose hours run past Manila midnight into a day of another kind; the engine warns with the hours. The service reads holidays through `period_end + 1` for it.
+
+Splitting the premium at midnight was designed and dropped: with the
+unworked-holiday pay (and the partly-worked rule above) the totals for a
+daily-paid worker come out the same under either convention in the common
+cases (eve shift only, holiday shift only, both), the difference being
+which line carries it; real differences are overtime and night-differential
+multipliers after midnight, special days, and a monthly-paid worker who
+works only one of the two shifts. No DOLE issuance settling it was found
+(the research agent did not get to it). If a client wants calendar-day
+holiday hours, build it as a client setting with `parts` per day
+(regular / OT / ND minutes per calendar date, the unpaid break taken from
+the part holding the shift's midpoint) and deduct the hours already paid
+from the unworked-holiday pay of the same date.
+
+### Half-day leave covers hours not worked, up to half the shift (design decision, 2026-11-11)
+
+**A half-day request is not a clock window: it covers the shift's hours not
+worked, up to half the shift, and what is left is lateness or undertime.**
+
+- `computeAttendance` reads `LeaveLite.half_day`. A morning leave excuses
+  the lateness first, an afternoon leave the undertime; two requests (am +
+  pm) make the day. A whole-day leave on the date wins; rest days and
+  holidays take none.
+- Pay: a paid half is inside a monthly rate, and paid at the day's rate for
+  the minutes covered to a daily-paid employee; an unpaid half is leave
+  without pay for that fraction. A day half worked and half on leave counts
+  once for per-day allowances and the minimum-wage check, and the daily-paid
+  line reads "11 day/s worked, 0.5 of them on paid leave" (inside the day,
+  not a day more — "+ 0.5 paid leave" read as eleven and a half days' pay).
+- No time in/out at all: the half not on leave is half a day's absence (not
+  for a fixed salary), with a warning. The whole shift on record: the leave
+  changes nothing, with a warning to cancel it.
+- The database decides the charge: `guard_leave_request` sets `days` to 0.5
+  for a half-day request, whatever the caller sent. One date only (CHECK),
+  none for maternity leave (calendar days), and the half of an approved
+  leave inside a finalized payroll cannot change — it is attendance.
+- Every attendance view passes the half on (`dayTimeline`'s `halfLeaves`,
+  the time report's `ReportLeave.half_day`); the dashboard's missing-time
+  list reads whole-day leaves only (`half_day is null`).
+
+**Why it mattered:** shifts differ (meal breaks, flexible starts, compressed
+weeks), so a clock midpoint would be wrong for some of them, and an employee
+who came in a little early or late around noon would be docked minutes the
+leave was meant to cover. Covering the shortfall pays exactly one day for a
+half worked plus a half on leave, never more than the day. A view that
+ignored the half showed "late" on a morning the employee had on leave.
+
+### Parallel forks spend the usage limit, not time (process lesson, 2026-11-11)
+
+> A fork inherits the whole conversation (here ~200k tokens, this log included) and re-reads it on every tool call; seven forks plus two research agents ended the account's 5-hour limit in about fifteen minutes with nothing delivered, and the main session stalled with them.
+
+What worked after: fresh agents with a narrow brief and the exact files and
+line ranges for web research (small context, their search output stays out
+of the main session), and the code review done in the main session, one
+area at a time, committing and pushing after each batch. Ask agents for
+search-extract verification early: both needed ~10 minutes.
+

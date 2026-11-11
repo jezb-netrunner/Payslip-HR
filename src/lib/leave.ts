@@ -101,3 +101,24 @@ export function leaveDaysInYear(
   if (r.start_date >= y0 && r.end_date <= y1) return Number(r.days)
   return leaveDays(type, r.start_date > y0 ? r.start_date : y0, r.end_date < y1 ? r.end_date : y1, schedule, holidays)
 }
+
+export type HalfDay = 'am' | 'pm'
+
+export const HALF_DAY_LABELS: Record<HalfDay, string> = { am: 'morning', pm: 'afternoon' }
+
+/** A half day can be taken on one date of a leave counted in working days (not maternity leave). */
+export function halfDayAllowed(t: Pick<LeaveType, 'code'> | undefined, start: string, end: string): boolean {
+  return !!start && start === end && !countsCalendarDays(t)
+}
+
+/** Days a request charges: half the day for a half-day request (nothing on a day off). */
+export function requestDays(wholeDays: number, half: HalfDay | '' | null | undefined): number {
+  return half ? (wholeDays > 0 ? 0.5 : 0) : wholeDays
+}
+
+/** "Half day (morning)", "1 day", "3 days". */
+export function leaveLength(r: Pick<LeaveRequest, 'days' | 'half_day'>): string {
+  if (r.half_day) return `Half day (${HALF_DAY_LABELS[r.half_day]})`
+  const n = Number(r.days)
+  return `${n} ${n === 1 ? 'day' : 'days'}`
+}

@@ -1,8 +1,9 @@
 import { FilePen } from 'lucide-react'
 import type { Holiday, TimeEntry } from '../lib/db'
 import { fmtHours, fmtTime } from '../lib/format'
+import { HALF_DAY_LABELS, type HalfDay } from '../lib/leave'
 import { eachDate, manilaInstant } from '../lib/manila'
-import { dayTimeline, shiftOn, timelineTicks, timelineWindow, type DayTimeline, type SegmentKind } from '../lib/timeline'
+import { dayTimeline, halfLeavesOn, shiftOn, timelineTicks, timelineWindow, type DayTimeline, type SegmentKind } from '../lib/timeline'
 import type { ScheduleSource } from '../payroll/types'
 import { Badge, EmptyState } from './ui'
 
@@ -18,6 +19,8 @@ export interface TimelineLeave {
   start_date: string
   end_date: string
   label: string
+  /** half a day of leave: the morning or the afternoon */
+  half?: HalfDay
 }
 
 function clock(min: number) {
@@ -99,10 +102,16 @@ export default function AttendanceTimeline({
   const leaveOn = (date: string) => {
     const h = holidayOn(date)
     if (!shiftOn(date, schedule) || (h && h.kind !== 'special_working')) return undefined
-    return leaves.find((l) => l.start_date <= date && l.end_date >= date)
+    return leaves.find((l) => !l.half && l.start_date <= date && l.end_date >= date)
+  }
+  // half-day leaves on a workday (none beside a whole-day leave): the other half is worked
+  const halvesOn = (date: string) => {
+    const h = holidayOn(date)
+    if (!shiftOn(date, schedule) || (h && h.kind !== 'special_working') || leaveOn(date)) return []
+    return leaves.filter((l) => !!l.half && l.start_date <= date && l.end_date >= date)
   }
   const dates = new Set(entries.map((e) => e.work_date))
-  if (last >= from) for (const d of eachDate(from, last)) if (leaveOn(d)) dates.add(d)
+  if (last >= from) for (const d of eachDate(from, last)) if (leaveOn(d) || halvesOn(d).length) dates.add(d)
   const days = [...dates]
     .filter((d) => d >= from && d <= to)
     .sort()
@@ -110,13 +119,15 @@ export default function AttendanceTimeline({
     .map((date) => {
       const mine = entries.filter((e) => e.work_date === date)
       const holiday = holidayOn(date)
+      const halves = halvesOn(date)
       const line = dayTimeline(date, mine, schedule, {
         now: date === today ? new Date().toISOString() : undefined,
         graceMinutes,
         standardHoursPerDay,
         holidays,
+        halfLeaves: halfLeavesOn(halves, date),
       })
-      return { date, entries: mine, line, holiday, leave: mine.length ? undefined : leaveOn(date) }
+      return { date, entries: mine, line, holiday, halves, leave: mine.length ? undefined : leaveOn(date) }
     })
   const [lo, hi] = timelineWindow(
     days.map((d) => d.line),
@@ -133,7 +144,7 @@ export default function AttendanceTimeline({
       <div className="pb-1">
         <TimelineLegend />
       </div>
-      {days.map(({ date, entries: mine, line, holiday, leave }) => {
+      {days.map(({ date, entries: mine, line, holiday, halves, leave }) => {
         const flags = [...new Set(mine.flatMap((e) => e.flags.filter((f) => f !== 'corrected')))]
         const corrected = mine.some((e) => e.manually_edited)
         const firstEntry = [...mine].sort((a, b) => a.clock_in.localeCompare(b.clock_in))[0]
@@ -155,6 +166,11 @@ export default function AttendanceTimeline({
                   </Badge>
                 )}
                 {leave && <Badge tone="amber">{leave.label}</Badge>}
+                {halves.map((l, i) => (
+                  <Badge key={i} tone="amber">
+                    {l.label} (half day: {HALF_DAY_LABELS[l.half!]})
+                  </Badge>
+                ))}
                 {onRequestFix &&
                   mine.map((e, i) => (
                     <button
@@ -208,6 +224,10 @@ export default function AttendanceTimeline({
                   {leave ? (
                     <span className={`absolute inset-0 flex items-center justify-center text-[11px] font-semibold ${LOOK.leave.bar}`}>
                       {leave.label}
+                    </span>
+                  ) : halves.length > 0 && mine.length === 0 ? (
+                    <span className={`absolute inset-0 flex items-center justify-center text-[11px] font-semibold ${LOOK.leave.bar}`}>
+                      {halves.length > 1 ? 'On leave' : 'Half day on leave · other half: no time in/out'}
                     </span>
                   ) : (
                     line.segments.map((s, i) => {

@@ -120,8 +120,17 @@ export const HOURS = {
 
 /** Wages and employment. */
 export const EMPLOYMENT = {
-  /** apprentices and learners may be paid this share of the applicable minimum wage */
-  apprenticeShareOfMinimumWage: { value: 0.75, effectiveFrom: LABOR_CODE, source: 'Labor Code Arts. 61 and 73' },
+  /**
+   * an apprentice's training allowance: this share of the applicable minimum
+   * wage at least. The Labor Code's chapters on apprentices and learners
+   * (Arts. 57 to 77) were repealed by RA 12063, which keeps the 75% for
+   * apprentices; learnership is no longer a category of its own.
+   */
+  apprenticeShareOfMinimumWage: {
+    value: 0.75,
+    effectiveFrom: LABOR_CODE,
+    source: 'RA 12063 (Enterprise-Based Education and Training Framework Act, 2024) and its implementing rules; before it, Labor Code Arts. 61 and 73',
+  },
   /** probationary employment: six months, 180 days counted with the first day excluded */
   probationDays: {
     value: 180,

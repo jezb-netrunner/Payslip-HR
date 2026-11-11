@@ -95,7 +95,7 @@ export function filingCalendar(
     rows.push({
       filing: 'pagibig', period,
       due: client.pagibigDueDay ? dayOf(year, m + 1, client.pagibigDueDay) : '',
-      basis: 'Entered by the client (HDMF circular not verified)',
+      basis: 'Entered by the client from its eSRS schedule (HDMF Circular 499-2026 replaced the windows of Circular 275)',
       note: client.pagibigDueDay ? '' : 'Enter the Pag-IBIG due day in Client Settings',
     })
   }

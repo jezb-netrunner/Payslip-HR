@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable'
 import { safeDoc } from './text'
 import type { Payslip } from '../lib/db'
 import type { PayslipCompany, PayslipRunInfo } from '../components/PayslipView'
-import { employerFor, roundingLines } from '../lib/payslip'
+import { employerFor, payslipRate, roundingLines } from '../lib/payslip'
 import { manilaStamp, stampFooter, tinLine, type ReportStamp } from '../lib/reportStamp'
 
 export interface PayslipPdfOptions {
@@ -131,10 +131,12 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(...SLATE)
+  const rate = payslipRate(slip)
   const infoLeft = [
     `Employee No: ${snap.employee_no ?? '—'}`,
     `Position: ${snap.position || '—'}`,
     `Department: ${snap.department || '—'}`,
+    ...(rate ? [`Pay rate: ${php(rate.amount)} a ${rate.per}`] : []),
   ]
   const infoRight = [
     `SSS: ${snap.sss_no || '—'}`,
@@ -144,7 +146,7 @@ function drawPayslip(doc: jsPDF, slip: Payslip, run: PayslipRunInfo, company: Pa
   const halfW = pageW / 2 - margin - 2
   infoLeft.forEach((t, i) => doc.text(fitText(doc, t, halfW), margin, y + 5.5 + i * 4.2))
   infoRight.forEach((t, i) => doc.text(fitText(doc, t, halfW), pageW / 2 + 4, y + 5.5 + i * 4.2))
-  y += 21
+  y += 21 + (infoLeft.length > 3 ? 4.2 : 0)
 
   // ---- earnings & deductions tables side by side ----
   const colW = (pageW - margin * 2 - 6) / 2

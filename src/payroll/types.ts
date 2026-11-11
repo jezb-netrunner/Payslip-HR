@@ -156,6 +156,8 @@ export interface LeaveLite {
   type_name: string
   /** the leave type's code (ML = maternity leave, paid through the maternity benefit) */
   type_code?: string
+  /** half a day of leave on one date: the morning or the afternoon half */
+  half_day?: 'am' | 'pm' | null
 }
 
 export type DayType =
@@ -192,6 +194,24 @@ export interface DayComputation {
   leaveCode?: string
   /** the first day of that leave */
   leaveStart?: string
+  /**
+   * Half-day leave on a scheduled ordinary day (one half, or two requests for
+   * the two halves): the minutes of the shift's hours it covered, paid and
+   * unpaid. It covers hours not worked up to half the shift a request;
+   * lateness and undertime are what is left after it.
+   */
+  halfLeave?: { paidMinutes: number; unpaidMinutes: number; typeName: string }
+  /**
+   * Beside a half-day leave, with no time in/out at all: the minutes of the
+   * shift neither worked nor on leave (half a day's absence).
+   */
+  partialAbsenceMinutes?: number
+  /**
+   * Work that ran past midnight into a day of another kind (an ordinary eve
+   * into a holiday, a holiday into an ordinary day): the premiums follow the
+   * day the shift started, and the review names these hours.
+   */
+  crossesInto?: { date: string; dayType: DayType; holidayName?: string; minutes: number }
 }
 
 // ---------- payroll ----------
@@ -222,7 +242,7 @@ export type BirBucket =
   | 'night_diff'
   | 'hazard'
   | 'thirteenth' //        13th month pay
-  | 'other_benefits' //    bonuses etc. — shares the ₱90,000 cap with the 13th month
+  | 'other_benefits' //    bonuses etc., and pay above a de minimis ceiling — shares the ₱90,000 cap with the 13th month
   | 'de_minimis'
   | 'representation'
   | 'transportation'
@@ -232,7 +252,7 @@ export type BirBucket =
   | 'commission' //        supplementary: commissions (2316 item 45)
   | 'profit_sharing' //    supplementary: profit sharing (item 46)
   | 'fees' //              supplementary: fees, directors' fees included (item 47)
-  | 'other_supplementary' // other taxable supplementary pay: pay above a de minimis ceiling, leave converted to cash (2316 item 51)
+  | 'other_supplementary' // other taxable supplementary pay: a benefit not on the de minimis list, service incentive leave converted to cash (2316 item 51)
   | 'other_non_taxable'
 
 export type AllowanceCategory =
@@ -298,7 +318,7 @@ export interface PayrollEmployeeInput {
    */
   rateSegments?: RateSegment[]
   isMinimumWageEarner: boolean
-  /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
+  /** Apprentice: the pay floor is 75% of the minimum wage (RA 12063, which replaced Labor Code Arts. 57 to 77). */
   apprentice?: boolean
   /**
    * The national government pays the PhilHealth employee half this payroll

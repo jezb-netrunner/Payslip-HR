@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dayTimeline, minutesFrom, shiftOn, timelineTicks, timelineWindow } from './timeline'
+import { dayTimeline, halfLeavesOn, minutesFrom, shiftOn, timelineTicks, timelineWindow } from './timeline'
 import type { WorkSchedule } from '../payroll/types'
 
 const sched: WorkSchedule = { days: [1, 2, 3, 4, 5], start: '09:00', end: '18:00', break_minutes: 60 }
@@ -66,6 +66,22 @@ describe('attendance timeline', () => {
     })
     expect(holiday.late).toBe(false)
     expect(holiday.segments.some((x) => x.kind === 'late')).toBe(false)
+  })
+
+  it('charges no lateness for a morning on half-day leave', () => {
+    const afternoon = [{ clock_in: at('14:00'), clock_out: at('18:00') }]
+    expect(dayTimeline('2026-10-21', afternoon, sched).late).toBe(true)
+    const d = dayTimeline('2026-10-21', afternoon, sched, { halfLeaves: ['am'] })
+    expect(d.late).toBe(false)
+    expect(d.segments.map((s) => s.kind)).toEqual(['work'])
+    // an afternoon leave does not excuse the late morning
+    expect(dayTimeline('2026-10-21', [{ clock_in: at('09:40'), clock_out: at('13:00') }], sched, { halfLeaves: ['pm'] }).lateMinutes).toBe(40)
+    const leaves = [
+      { start_date: '2026-10-21', end_date: '2026-10-21', half: 'am' as const },
+      { start_date: '2026-10-20', end_date: '2026-10-22' },
+    ]
+    expect(halfLeavesOn(leaves, '2026-10-21')).toEqual(['am'])
+    expect(halfLeavesOn(leaves, '2026-10-22')).toEqual([])
   })
 
   it('draws rest-day work without late or overtime marks', () => {

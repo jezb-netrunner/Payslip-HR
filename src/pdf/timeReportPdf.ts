@@ -178,7 +178,7 @@ function drawDtr(doc: jsPDF, r: EmployeeTimeReport, company: ReportCompany, gene
       if (!d) return
       // rest days and holidays shaded; what payroll docks or ignores in red
       if (!d.scheduled || d.holiday) data.cell.styles.fillColor = SHADE
-      if (data.column.index === 10 && (d.absent || d.missingTimeOut)) data.cell.styles.textColor = ROSE
+      if (data.column.index === 10 && (d.absent || d.missingTimeOut || (d.halfLeave?.absentDays ?? 0) > 0)) data.cell.styles.textColor = ROSE
     },
   })
   y = (doc as AutoTableDoc).lastAutoTable.finalY + 6

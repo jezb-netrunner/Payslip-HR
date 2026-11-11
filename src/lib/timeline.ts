@@ -48,6 +48,13 @@ export interface DayTimelineOptions {
   standardHoursPerDay?: number
   /** the client's holidays: payroll charges no tardiness on non-working ones */
   holidays?: HolidayLite[]
+  /** approved half-day leaves on the date: payroll charges no tardiness for the half on leave */
+  halfLeaves?: ('am' | 'pm')[]
+}
+
+/** The half-day leaves on a date, for dayTimeline's `halfLeaves`. */
+export function halfLeavesOn(leaves: { start_date: string; end_date: string; half?: 'am' | 'pm' }[], date: string): ('am' | 'pm')[] {
+  return leaves.flatMap((l) => (l.half && l.start_date <= date && l.end_date >= date ? [l.half] : []))
 }
 
 export function minutesFrom(date: string, iso: string): number {
@@ -73,7 +80,7 @@ export function dayTimeline(
   date: string,
   entries: EntrySpan[],
   schedule: ScheduleSource | null | undefined,
-  { now: nowIso, graceMinutes = 0, standardHoursPerDay = 8, holidays = [] }: DayTimelineOptions = {},
+  { now: nowIso, graceMinutes = 0, standardHoursPerDay = 8, holidays = [], halfLeaves = [] }: DayTimelineOptions = {},
 ): DayTimeline {
   const now = nowIso ? minutesFrom(date, nowIso) : null
   const spans = entries
@@ -96,7 +103,7 @@ export function dayTimeline(
           .filter((e) => e.clock_out)
           .map((e) => ({ work_date: date, clock_in: e.clock_in, clock_out: e.clock_out })),
         holidays,
-        approvedLeaves: [],
+        approvedLeaves: halfLeaves.map((half_day) => ({ start_date: date, end_date: date, paid: true, type_name: 'Leave', half_day })),
       })[0]
     : undefined
   const lateMinutes = day?.lateMinutes ?? 0

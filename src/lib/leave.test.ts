@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { eligibleFrom, leaveDaysInYear, leaveWorkdays, notYetUsable, usableOn } from './leave'
+import { eligibleFrom, halfDayAllowed, leaveDaysInYear, leaveLength, leaveWorkdays, notYetUsable, requestDays, usableOn } from './leave'
 import { addMonths } from './manila'
 
 const MON_FRI = [1, 2, 3, 4, 5]
@@ -18,6 +18,31 @@ describe('leave days', () => {
     expect(leaveDaysInYear(r, 2026, MON_FRI, hols)).toBe(2)
     expect(leaveDaysInYear(r, 2027, MON_FRI, hols)).toBe(2)
     expect(leaveDaysInYear({ start_date: '2026-03-02', end_date: '2026-03-03', days: 2 }, 2026, MON_FRI)).toBe(2)
+  })
+})
+
+describe('half-day leave', () => {
+  it('is one date of a leave counted in working days', () => {
+    expect(halfDayAllowed({ code: 'SL' }, '2026-10-06', '2026-10-06')).toBe(true)
+    expect(halfDayAllowed({ code: 'SL' }, '2026-10-06', '2026-10-07')).toBe(false)
+    // maternity leave runs in calendar days
+    expect(halfDayAllowed({ code: 'ML' }, '2026-10-06', '2026-10-06')).toBe(false)
+    expect(halfDayAllowed({ code: 'SL' }, '', '')).toBe(false)
+  })
+
+  it('charges half a workday, and nothing on a day off', () => {
+    expect(requestDays(1, 'am')).toBe(0.5)
+    expect(requestDays(0, 'pm')).toBe(0)
+    expect(requestDays(3, '')).toBe(3)
+    expect(requestDays(1, null)).toBe(1)
+  })
+
+  it('names the length of a request, and counts the half toward the year', () => {
+    expect(leaveLength({ days: 0.5, half_day: 'am' })).toBe('Half day (morning)')
+    expect(leaveLength({ days: 0.5, half_day: 'pm' })).toBe('Half day (afternoon)')
+    expect(leaveLength({ days: 1, half_day: null })).toBe('1 day')
+    expect(leaveLength({ days: 3 })).toBe('3 days')
+    expect(leaveDaysInYear({ start_date: '2026-03-02', end_date: '2026-03-02', days: 0.5 }, 2026, MON_FRI)).toBe(0.5)
   })
 })
 

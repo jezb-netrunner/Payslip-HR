@@ -364,6 +364,9 @@ export function finalize(runId: string) {
   // payroll_run_out_of_balance: every payslip adds up, and the run totals equal the payslips
   const control = controlTotals(slips as unknown as ControlSlip[], run.totals)
   if (!control.balanced) throw new Error(`Out of balance: ${control.unbalanced.join(', ')} ${JSON.stringify(control.mismatches)}`)
+  // a payroll cannot collect more than it pays
+  const negative = slips.find((p) => Number(p.net_pay) < 0)
+  if (negative) throw new Error(`Net pay is negative for ${negative.employee_snapshot?.name ?? negative.employee_id}`)
   const orphan = db.t.payroll_adjustments.find(
     (a) => a.payroll_run_id === runId && !slips.some((p) => p.employee_id === a.employee_id),
   )

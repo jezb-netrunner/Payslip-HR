@@ -138,10 +138,21 @@ export function unworkedHolidaysPaid(
         paid.set(d.date, ok)
         attended = ok
       }
-    } else if (d.dayType === 'regular') attended = worked || d.onPaidLeave || d.leaveCode === MATERNITY_LEAVE_CODE
+    } else if (d.dayType === 'regular') attended = worked || d.onPaidLeave || (d.halfLeave?.paidMinutes ?? 0) > 0 || d.leaveCode === MATERNITY_LEAVE_CODE
     else if (worked) attended = true
   }
   return paid
+}
+
+/**
+ * The part of a regular holiday's 100% that work did not earn: the daily
+ * wage for the share of the standard day not worked (nothing once the day
+ * is complete). Labor Code Art. 94(a) pays the regular daily wage on a
+ * regular holiday whether or not it is worked; Art. 94(b) adds the pay for
+ * the work done.
+ */
+function holidayShortfall(daily: number, fractionWorked: number): number {
+  return fractionWorked < 1 ? daily * (1 - fractionWorked) : 0
 }
 
 function otMultiplier(dayType: DayType): number {
@@ -497,7 +508,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // may be below the minimum (the period's pay is checked instead)
   const byResults = employee.outputPay?.class === 'basic'
 
-  // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
+  // an apprentice's training allowance is at least 75% of the minimum wage (RA 12063)
   const wageFloor = settings.minimumWageDaily * (employee.apprentice ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
   if (!byResults && daily + 0.005 < wageFloor) {
     warnings.push(
@@ -539,6 +550,37 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       `Regular holiday not paid (${unpaidHolidays.map((d) => `${d.holidayName ?? 'holiday'}, ${shortDate(d.date)}`).join('; ')}): no work or paid leave on the workday before it (IRR Book III, Rule IV, Sec. 6; the client's holiday absence rule). If the employee worked that day, enter the time and recompute.`,
     )
   }
+  // Half-day leave beside a half with no time on record, or beside a full
+  // day of time on record: the admin may have missed an entry, or the leave
+  // was not taken after all.
+  const halfDays = days.filter((d) => d.halfLeave && d.dayType === 'regular' && employed(d.date))
+  const halfNoTime = fixed ? [] : halfDays.filter((d) => (d.partialAbsenceMinutes ?? 0) > 0)
+  if (halfNoTime.length > 0) {
+    warnings.push(
+      `Half-day leave on ${halfNoTime.map((d) => shortDate(d.date)).join(', ')} with no time in/out for the other half: that half is charged as an absence. If the employee worked it, enter the time and recompute.`,
+    )
+  }
+  const halfUnused = fixed ? [] : halfDays.filter((d) => d.workedMinutes > 0 && d.halfLeave!.paidMinutes + d.halfLeave!.unpaidMinutes === 0)
+  if (halfUnused.length > 0) {
+    warnings.push(
+      `Half-day leave on ${halfUnused.map((d) => shortDate(d.date)).join(', ')}, but the time on record already covers the whole shift: the leave changed nothing in pay. Cancel the leave if the employee worked the whole day.`,
+    )
+  }
+  // Night work across midnight into a day of another kind: the premium
+  // (holiday, special day) follows the day the shift started. A company
+  // that counts holiday hours by the calendar day adjusts the difference.
+  const crossing = fixed ? [] : days.filter((d) => d.crossesInto && d.workedMinutes > 0 && employed(d.date))
+  if (crossing.length > 0) {
+    const kind = (t: DayType) => (isRegularHolidayType(t) ? 'a regular holiday' : t === 'special_day' || t === 'special_day_rest' ? 'a special non-working day' : 'an ordinary day')
+    warnings.push(
+      `Night work across midnight: ${crossing
+        .map((d) => {
+          const c = d.crossesInto!
+          return `the shift of ${shortDate(d.date)} (${d.holidayName ?? kind(d.dayType)}) ran ${round2(c.minutes / 60)} h into ${shortDate(c.date)} (${c.holidayName ?? kind(c.dayType)})`
+        })
+        .join('; ')}. Holiday and special-day premiums are paid for the day the shift started. If the company counts those hours by the calendar day, add or take back the difference with a payroll adjustment (Holiday).`,
+    )
+  }
   if (holidayPayExempt && params.days.some((d) => isRegularHolidayType(d.dayType))) {
     notes.push(
       'Regular holidays are paid as ordinary days: a retail or service establishment regularly employing less than 10 workers is exempt from holiday pay (Labor Code Art. 94).',
@@ -556,6 +598,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // days with overtime or night work (the de minimis overtime meal ceiling)
   let overtimeOrNightDays = 0
   let paidLeaveDays = 0
+  // paid leave on days with no work at all (a day worked for half and on leave for half counts once, as worked)
+  let paidLeaveDaysNotWorked = 0
   let unpaidLeaveDays = 0
   let unworkedRegularHolidays = 0
   let paidUnworkedHolidays = 0
@@ -604,7 +648,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // per rate segment: the days and minutes each rate values
   const seg = segs.map(() => ({
     covered: 0, maternity: 0, absence: 0, unpaidHoliday: 0, outside: 0, late: 0, undertime: 0, extra: 0,
-    dailyBasic: 0, worked: 0, paidLeave: 0, absentDays: 0,
+    dailyBasic: 0, worked: 0, paidLeave: 0, paidLeaveApart: 0, absentDays: 0,
   }))
 
   for (const d of days) {
@@ -642,6 +686,38 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       c.absence += dayShare(d)
       c.absentDays += 1
     }
+    // Half-day leave (attendance already took the hours it covers out of the
+    // lateness and undertime). A paid half is inside a monthly rate, and is
+    // paid at the day's rate to a daily-paid employee. An unpaid half is leave
+    // without pay. With no time in/out at all, the half not on leave is half
+    // a day's absence.
+    const half = d.dayType === 'regular' ? d.halfLeave : undefined
+    if (half) {
+      const expected = d.expectedMinutes || stdMin
+      if (half.unpaidMinutes > 0) {
+        unpaidLeaveDays += half.unpaidMinutes / expected
+        c.absence += half.unpaidMinutes / stdMin
+        c.absentDays += half.unpaidMinutes / expected
+      }
+      if (half.paidMinutes > 0) {
+        paidLeaveDays += half.paidMinutes / expected
+        c.paidLeave += half.paidMinutes / expected
+        if (payType === 'daily') {
+          dailyBasic += daily * (half.paidMinutes / stdMin)
+          c.dailyBasic += daily * (half.paidMinutes / stdMin)
+        }
+        if (!worked && !fixed) {
+          paidLeaveDaysNotWorked += half.paidMinutes / expected
+          c.paidLeaveApart += half.paidMinutes / expected
+        }
+      }
+      const missed = fixed ? 0 : (d.partialAbsenceMinutes ?? 0)
+      if (missed > 0) {
+        absentDays += missed / expected
+        c.absence += missed / stdMin
+        c.absentDays += missed / expected
+      }
+    }
     // Leave flags exist on every covered day. Paid-leave credit applies to
     // ordinary scheduled days. Unpaid leave deducts every day the pay basis
     // would otherwise cover: for monthly-paid, any day the divisor deems
@@ -650,7 +726,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // (no work already means no pay).
     if (d.onPaidLeave && d.dayType === 'regular') {
       paidLeaveDays += 1
+      paidLeaveDaysNotWorked += 1
       c.paidLeave += 1
+      c.paidLeaveApart += 1
     }
     // an unworked regular holiday is paid on the workday-before rule, even
     // inside a leave without pay that starts on it — never before the hire
@@ -698,6 +776,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += extra
         else if (isRegularHolidayType(d.dayType)) holidayPremium += extra
+        // a regular holiday on a day the rate does not cover (the rest day
+        // under divisor 261): its 100% is due whether or not worked, so hours
+        // short of the day are still holiday pay
+        if (isRegularHolidayType(d.dayType) && builtIn === 0) holidayPremium += holidayShortfall(daily, fraction)
       } else if (isRegularHolidayType(d.dayType)) {
         // Paid: a holiday on a day the divisor does NOT deem paid (e.g. a
         // rest day under divisor 261) earns 100% of the daily wage (Art.
@@ -721,6 +803,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += premium
         else if (isRegularHolidayType(d.dayType)) holidayPremium += premium
+        // the regular daily wage is due on a regular holiday whether or not
+        // worked (Art. 94(a)): the hours short of the day are still holiday
+        // pay, so working part of it never pays less than staying home
+        if (isRegularHolidayType(d.dayType)) holidayPremium += holidayShortfall(daily, fraction)
       } else if (isRegularHolidayType(d.dayType)) {
         // Unworked regular holiday: 100% of daily wage (Labor Code Art. 94),
         // whether or not it falls on the rest day, on the workday-before rule
@@ -772,10 +858,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const itemBucket = (category: BirBucket, t: PayItemType | undefined): BirBucket =>
     t === 'commission' || t === 'profit_sharing' || t === 'fees' ? t : category
   // De minimis benefits are exempt up to their ceilings, and only those on
-  // the list: any other benefit is taxable, and so is pay above a ceiling
-  // (RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 29-2025 Sec. 1; RR 5-2011
-  // Sec. 1, the list is exclusive). The ceilings count what earlier payrolls
-  // of the month, semester or year paid.
+  // the list: any other benefit is taxable (RR 5-2011 Sec. 1, the list is
+  // exclusive). Pay above a ceiling is one of the "other benefits" that share
+  // the yearly exemption with the 13th month pay, taxable only beyond it (RR
+  // 2-98 Sec. 2.78.1(A)(3), last proviso, as amended by RR 11-2018; ceilings
+  // of RR 29-2025 Sec. 1). The ceilings count what earlier payrolls of the
+  // month, semester or year paid.
   const dmUsed: Partial<Record<DeMinimisKind, DeMinimisUsed>> = Object.fromEntries(
     Object.entries(params.deMinimisUsed ?? {}).map(([k, v]) => [k, { ...v }]),
   )
@@ -810,7 +898,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       consume(kind, exempt)
     }
     const excess = round2(amount - exempt)
-    if (excess > 0) earn('de_minimis_excess', `${label} (above the de minimis ceiling: taxable)`, excess, 'other_supplementary', { meta: id, dm: kind })
+    if (excess > 0) earn('de_minimis_excess', `${label} (${ABOVE_CEILING})`, excess, 'other_benefits', { meta: id, dm: kind })
   }
   // Unused leave converted to cash: de minimis up to the yearly days ceiling
   // when the client grants vacation leave (5 days or more: outside SIL,
@@ -831,7 +919,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
     const excess = round2(amount - exempt)
     if (excess > 0) {
-      earn('de_minimis_excess', `${label} (above the ${c?.limit ?? 0}-day de minimis ceiling: taxable)`, excess, 'other_supplementary', {
+      earn('de_minimis_excess', `${label} (above the ${c?.limit ?? 0}-day de minimis ceiling: ${OTHER_BENEFIT})`, excess, 'other_benefits', {
         meta: id,
         dm: 'monetized_vl',
         leaveDays: round2(days - exemptDays),
@@ -857,10 +945,17 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       : k === segs.length - 1
         ? `from ${shortDate(segs[k].from)}`
         : `${shortDate(segs[k].from)}–${shortDate(addDays(segs[k + 1].from, -1))}`
+  // Paid leave beside the days worked. A half day on leave within a day
+  // worked is inside that day, not a day more: "11 day/s worked, 0.5 of them
+  // on paid leave" is eleven days' pay.
+  const paidLeaveText = (all: number, apart: number) => {
+    const within = round2(all - apart)
+    return `${within > 0 ? `, ${within} of them on paid leave` : ''}${round2(apart) > 0 ? ` + ${round2(apart)} paid leave` : ''}`
+  }
   const segmentRate = (k: number) =>
     segs[k].payType === 'monthly'
       ? `${plainAmount(segs[k].monthlyRate)} a month`
-      : `${seg[k].worked} day/s${seg[k].paidLeave ? ` + ${seg[k].paidLeave} paid leave` : ''} at ${plainAmount(segs[k].dailyRate)}`
+      : `${seg[k].worked} day/s${paidLeaveText(seg[k].paidLeave, seg[k].paidLeaveApart)} at ${plainAmount(segs[k].dailyRate)}`
   for (let k = 1; k < segs.length; k++) {
     const was = segs[k - 1]
     const now = segs[k]
@@ -962,7 +1057,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     basicPay = round2(dailyBasic)
     earn(
       'basic',
-      `Basic Pay (${daysWorked} day/s worked${paidLeaveDays ? ` + ${paidLeaveDays} paid leave` : ''})`,
+      `Basic Pay (${daysWorked} day/s worked${paidLeaveText(paidLeaveDays, paidLeaveDaysNotWorked)})`,
       basicPay,
       'basic',
     )
@@ -985,7 +1080,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     earn('holiday_premium', 'Holiday Rest Day Premium (taxable)', round2(mweHolidayRestPremium), 'premium')
   }
 
-  const paidDays = daysWorked + paidLeaveDays + paidUnworkedHolidays
+  const paidDays = round2(daysWorked + paidLeaveDaysNotWorked + paidUnworkedHolidays)
   for (const a of extrasOnly ? [] : employee.allowances) {
     let amt: number
     let suffix = ''
@@ -1076,7 +1171,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // normal working hours of each day paid (the regional wage order; Labor
     // Code Art. 101)
     const wagePay = round2(earnings.filter((l) => l.bir === 'basic').reduce((s, l) => s + l.amount, 0))
-    const wageDays = daysWorked + paidLeaveDays
+    const wageDays = round2(daysWorked + paidLeaveDaysNotWorked)
     const floorPay = round2(wageFloor * wageDays)
     if (wageDays > 0 && wagePay + 0.005 < floorPay) {
       warnings.push(
@@ -1255,18 +1350,54 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const noSssPay = !exactSss && !!mc && !maternityMonth && sssCompensation(earnings, settings) <= 0
   const sssPart = (due: number, already: number | undefined, rate: number) =>
     exactSss ? settle(due, already) : noSssPay ? 0 : share(rate, already)
-  const sssEe = sssPart(sssMonth.ee, mc?.already.sssEe, stat.sss.ee)
-  const sssMpfEe = sssPart(sssMonth.mpfEe, mc?.already.sssMpfEe, stat.sss.mpfEe)
+  let sssEe = sssPart(sssMonth.ee, mc?.already.sssEe, stat.sss.ee)
+  let sssMpfEe = sssPart(sssMonth.mpfEe, mc?.already.sssMpfEe, stat.sss.mpfEe)
   const sssEr = sssPart(sssMonth.er, mc?.already.sssEr, stat.sss.er)
   const sssMpfEr = sssPart(sssMonth.mpfEr, mc?.already.sssMpfEr, stat.sss.mpfEr)
   const sssEcEr = sssPart(sssMonth.ecEr, mc?.already.sssEcEr, stat.sss.ecEr)
   // under the NG share the month owes no employee half: the closing payroll
   // refunds what a payroll deducted before the share was recorded
-  const philhealthEe =
+  let philhealthEe =
     employee.philhealthNg && mc?.closes && !extrasOnly
       ? round2(0 - mc.already.philhealthEe)
       : share(philhealthEeDue, mc?.already.philhealthEe)
-  const pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
+  let pagibigEe = share(stat.pagibigEe, mc?.already.pagibigEe)
+
+  // The employee's shares come out of this payroll's pay and never take more
+  // than it pays (a new hire's first days, a period on leave without pay).
+  // What a short payroll cannot bear waits for a later payroll of the month:
+  // the month's closing payroll deducts what the month still owes. When this
+  // is that payroll, the employer remits the share in full and collects the
+  // rest from the employee ("Employee share to collect", a receivable).
+  // Maternity leave months have their own rule below.
+  let shareToCollect = 0
+  if (!extrasOnly && !maternityMonth) {
+    let roomCents = Math.max(0, Math.round(grossPay * 100))
+    // a refund of an earlier over-deduction adds to what the pay can bear
+    for (const v of [sssEe, sssMpfEe, philhealthEe, pagibigEe]) if (v < 0) roomCents += Math.round(-v * 100)
+    const fit = (amount: number) => {
+      if (amount <= 0) return amount
+      const take = Math.min(Math.round(amount * 100), roomCents)
+      roomCents -= take
+      return take / 100
+    }
+    const fitted = { sssEe: fit(sssEe), sssMpfEe: fit(sssMpfEe), philhealthEe: fit(philhealthEe), pagibigEe: fit(pagibigEe) }
+    const due = (a: number, b: number, c: number, d: number) => Math.max(0, a) + Math.max(0, b) + Math.max(0, c) + Math.max(0, d)
+    const short = round2(
+      due(sssEe, sssMpfEe, philhealthEe, pagibigEe) - due(fitted.sssEe, fitted.sssMpfEe, fitted.philhealthEe, fitted.pagibigEe),
+    )
+    if (short > 0 && mc && !mc.closes) {
+      sssEe = fitted.sssEe
+      sssMpfEe = fitted.sssMpfEe
+      philhealthEe = fitted.philhealthEe
+      pagibigEe = fitted.pagibigEe
+      notes.push(
+        `This payroll pays less than the employee's SSS, PhilHealth and Pag-IBIG shares: ₱${plainAmount(short)} of them waits for a later payroll of the month (its last payroll deducts what the month still owes).`,
+      )
+    } else if (short > 0) {
+      shareToCollect = short
+    }
+  }
   const philhealthEr = share(stat.philhealthEr, mc?.already.philhealthEr)
   const philhealthNg = employee.philhealthNg ? share(stat.philhealthEe, mc?.already.philhealthNg) : 0
   const pagibigEr = share(stat.pagibigEr, mc?.already.pagibigEr)
@@ -1337,6 +1468,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     })
   }
   if (pagibigEe > 0) deductions.push({ code: 'pagibig', label: 'Pag-IBIG Contribution', amount: pagibigEe })
+  if (shareToCollect > 0) {
+    deductions.push({ code: 'ee_collect', label: 'Employee share to collect (advanced by the employer)', amount: -shareToCollect })
+    warnings.push(
+      `Employee share to collect: ₱${plainAmount(shareToCollect)} of the employee's SSS, PhilHealth and Pag-IBIG for the month is more than this payroll pays. The employer remits it with its own share and collects it from the employee (Cash Advances lists it as a receivable).`,
+    )
+  }
 
   // Maternity leave: the employee's shares for the leave months come out of
   // the maternity pay (RA 11210 Sec. 5(c); IRR Rule VI Sec. 5). A leave month
@@ -1488,9 +1625,18 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       taxYear: params.taxYear,
     })
     const { tax, ...how } = r
-    withholdingTax = tax
+    // never more than the pay left after contributions: the cumulative
+    // average method catches up on what earlier payrolls withheld short, and
+    // what a small payroll cannot bear it takes from the next one
+    const bearable = round2(Math.max(0, grossPay - deductions.reduce((t, l) => t + l.amount, 0) - unionDues))
+    withholdingTax = Math.min(tax, bearable)
     taxTrace = { ...taxTrace, ...how }
     notes.push(...withholdingNotes(r, regularTaxable, supplementaryTaxable, params.taxYear, settings.payFrequency, tables))
+    if (withholdingTax < tax) {
+      notes.push(
+        `Withholding tax due ₱${plainAmount(tax)}, but this payroll pays ₱${plainAmount(bearable)} after contributions: ₱${plainAmount(withholdingTax)} is withheld and the rest follows in later payrolls (or the year-end adjustment).`,
+      )
+    }
   }
   if (withholdingTax !== 0) deductions.push({ code: 'wht', label: whtLabel, amount: withholdingTax })
   if (params.annualization) {
@@ -1515,6 +1661,27 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         const d = employee.extraDeductions.find((x) => x.id === l.meta)
         warnings.push(
           `${l.label}: ₱${plainAmount(short)} could not be deducted — the year's tax takes the pay first${d?.balance !== undefined && !d.settlement ? '; it stays in the balance for later payrolls.' : '. Collect it outside payroll.'}`,
+        )
+        l.amount = takeCents / 100
+        otherDeductionsTotal = round2(otherDeductionsTotal - short)
+      }
+    }
+  } else {
+    // Loans and other deductions take what is left of the pay after
+    // contributions and tax, in order, never more: a payroll cannot collect
+    // more than it pays. What does not fit stays in a tracked balance for
+    // later payrolls, and is named for the rest.
+    let leftCents = Math.round((grossPay - deductions.reduce((t, l) => t + l.amount, 0) - unionDues) * 100)
+    for (const l of otherLines) {
+      if (l.code.endsWith(':union_dues')) continue
+      const dueCents = Math.round(l.amount * 100)
+      const takeCents = Math.min(dueCents, Math.max(0, leftCents))
+      leftCents -= takeCents
+      if (takeCents < dueCents) {
+        const short = (dueCents - takeCents) / 100
+        const d = employee.extraDeductions.find((x) => x.id === l.meta)
+        warnings.push(
+          `${l.label}: ₱${plainAmount(short)} could not be deducted — this payroll does not pay enough after contributions and tax${d?.balance !== undefined && !d.settlement ? '; it stays in the balance for later payrolls.' : '. Deduct it from a later payroll or collect it outside payroll.'}`,
         )
         l.amount = takeCents / 100
         otherDeductionsTotal = round2(otherDeductionsTotal - short)
@@ -1586,7 +1753,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     nightDiffHours: round2(ndHours),
     lateMinutes: Math.round(lateMin),
     undertimeMinutes: Math.round(undertimeMin),
-    absentDays: absentDays + unpaidLeaveDays,
+    absentDays: round2(absentDays + unpaidLeaveDays),
     earnings,
     deductions,
     basicPay: earnedBasic,
@@ -1621,6 +1788,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     },
   }
 }
+
+/** What a payslip line says of pay above a de minimis ceiling (no peso sign: the lines print in PDFs). */
+const OTHER_BENEFIT = 'an "other benefit", exempt with the 13th month pay up to the yearly limit'
+const ABOVE_CEILING = `above the de minimis ceiling: ${OTHER_BENEFIT}`
 
 /** Plain-language notes on how this payroll's withholding was computed. */
 function withholdingNotes(

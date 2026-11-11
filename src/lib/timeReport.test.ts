@@ -155,6 +155,45 @@ describe('time in/out report', () => {
     expect(daily.totals.unpaidLeaveDays).toBe(1)
   })
 
+  it('counts a half-day leave by its half, and the other half by the time on record', () => {
+    const half = (d: string, h: 'am' | 'pm', paid = true) => ({
+      employee_id: 'h', start_date: d, end_date: d, name: paid ? 'Sick Leave' : 'Leave Without Pay', paid, half_day: h,
+    })
+    const params = {
+      ...base,
+      to: '2026-10-05',
+      leaves: [half('2026-10-01', 'am'), half('2026-10-02', 'pm', false), half('2026-10-05', 'am')],
+      entries: [
+        entry('h', '2026-10-01', '13:00', '17:00'), // the afternoon worked after a morning on leave
+        entry('h', '2026-10-02', '08:00', '12:00'), // the morning worked, the afternoon on unpaid leave
+        // Oct 5: the morning on leave, no time in/out for the afternoon
+      ],
+    }
+    const [h] = buildTimeReport({ ...params, employees: [emp('h')] })
+    const on = (d: string) => h.days.find((x) => x.date === d)!
+    expect(on('2026-10-01')).toMatchObject({
+      workedMinutes: 240, lateMinutes: 0, undertimeMinutes: 0, absent: false,
+      halfLeave: { name: 'Sick Leave', paidDays: 0.5, unpaidDays: 0, absentDays: 0 },
+      remarks: ['Half-day leave: Sick Leave'],
+    })
+    expect(on('2026-10-01').leave).toBeUndefined()
+    expect(on('2026-10-02')).toMatchObject({
+      lateMinutes: 0, undertimeMinutes: 0,
+      halfLeave: { paidDays: 0, unpaidDays: 0.5, absentDays: 0 },
+      remarks: ['Half-day leave: Leave Without Pay (unpaid)'],
+    })
+    expect(on('2026-10-05')).toMatchObject({
+      absent: false,
+      halfLeave: { paidDays: 0.5, absentDays: 0.5 },
+      remarks: ['Half-day leave: Sick Leave', 'No time in/out for the other half: absent for it'],
+    })
+    expect(h.totals).toMatchObject({ workdays: 3, daysWorked: 2, absences: 0.5, paidLeaveDays: 1, unpaidLeaveDays: 0.5, lateMinutes: 0, undertimeMinutes: 0 })
+    // a fixed salary keeps no attendance: the half with no time is no absence
+    const [f] = buildTimeReport({ ...params, employees: [emp('h', { pay_type: 'monthly', fixed_salary: true })] })
+    expect(f.totals).toMatchObject({ absences: 0, paidLeaveDays: 1, unpaidLeaveDays: 0.5 })
+    expect(sumTotals([h, h, h]).absences).toBe(1.5)
+  })
+
   it('marks the next-day half of an overnight shift', () => {
     const night = emp('n', { work_schedule: { days: [1, 2, 3, 4, 5], start: '22:00', end: '06:00', break_minutes: 0 } })
     const [n] = buildTimeReport({

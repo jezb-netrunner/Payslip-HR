@@ -355,12 +355,13 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   const resultsLookbackStart = addDays(run.period_start, -RESULTS_LOOKBACK_DAYS)
   const holidays: HolidayLite[] = isThirteenth
     ? []
-    : (await getHolidaysBetween(entity.id, resultsLookbackStart, run.period_end)).map((h) => ({
+    : // through the day after the period: a night shift on its last day may end on a holiday
+      (await getHolidaysBetween(entity.id, resultsLookbackStart, addDays(run.period_end, 1))).map((h) => ({
         holiday_date: h.holiday_date,
         name: h.name,
         kind: h.kind,
       }))
-  const regularHoliday = holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start)
+  const regularHoliday = holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start && h.holiday_date <= run.period_end)
   // only the client's holiday absence rule (off by default) needs those days
   const looksBack = entity.holiday_absence_rule === true && regularHoliday
 
@@ -481,11 +482,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ),
     isThirteenth
       ? Promise.resolve([])
-      : fetchAll<{ employee_id: string; start_date: string; end_date: string; leave_types: { name: string; paid: boolean; code: string } | null }>(
+      : fetchAll<{ employee_id: string; start_date: string; end_date: string; half_day: 'am' | 'pm' | null; leave_types: { name: string; paid: boolean; code: string } | null }>(
           (from, to) =>
             supabase
               .from('leave_requests')
-              .select('employee_id, start_date, end_date, leave_types(name, paid, code)')
+              .select('employee_id, start_date, end_date, half_day, leave_types(name, paid, code)')
               .eq('entity_id', entity.id)
               .eq('status', 'approved')
               .lte('start_date', run.period_end)
@@ -693,6 +694,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       paid: l.leave_types?.paid ?? false,
       type_name: l.leave_types?.name ?? 'Leave',
       type_code: l.leave_types?.code,
+      half_day: l.half_day ?? null,
     }))
 
     const attendanceOf = (periodStart: string, periodEnd: string) =>
@@ -841,6 +843,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       cumulative: !!taxYearRow?.has_previous_employer || taxBefore.some((p) => whtMethodOf(p) === 'cumulative_average'),
     }
 
+    // 13th month: the basic salary earned in the payroll year
+    const ytdBasicPay =
+      empYear.filter((p) => p.run_type !== 'thirteenth_month').reduce((s, p) => s + Number(p.basic_pay), 0) +
+      Number(payrollYearOpening?.thirteenth_basis ?? 0)
+
     const slip = computePayslip({
       employee: {
         id: emp.id,
@@ -880,6 +887,8 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
                   d.balance !== null && d.balance !== undefined
                     ? Math.min(setFor(d) ?? Number(d.amount_per_period), Math.max(0, Number(d.balance)))
                     : (setFor(d) ?? Number(d.amount_per_period)),
+                // a tracked balance keeps what this payroll could not take
+                ...(d.balance !== null && d.balance !== undefined ? { balance: Number(d.balance) } : {}),
               })),
               ...empAdjustments
                 .filter((a) => a.kind === 'deduction')
@@ -956,9 +965,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
           ),
         opens: !isThirteenth && !empMonth.some((p) => p.run_type !== 'thirteenth_month'),
       },
-      ytdBasicPay:
-        empYear.filter((p) => p.run_type !== 'thirteenth_month').reduce((s, p) => s + Number(p.basic_pay), 0) +
-        Number(payrollYearOpening?.thirteenth_basis ?? 0),
+      ytdBasicPay,
       ytdThirteenthPaid:
         empYear.filter((p) => p.run_type === 'thirteenth_month').reduce((s, p) => s + Number(p.gross_pay), 0) +
         Number(payrollYearOpening?.thirteenth_installments ?? 0),
@@ -974,6 +981,21 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ? maternityContext(leaveFor.get(emp.id)!, matSlips.filter((p) => p.employee_id === emp.id), run.period_month)
         : undefined,
     })
+    // A 13th month run with nothing to pay or withhold for someone (paid in
+    // full when they left, or no finalized payroll this year) issues no
+    // payslip: an empty one would take a control number and show the
+    // employee a 13th month pay of zero.
+    if (isThirteenth && slip.grossPay === 0 && slip.totalDeductions === 0 && slip.netPay === 0) {
+      warnings.push({
+        employee: `${emp.first_name} ${emp.last_name}`,
+        warnings: [
+          ytdBasicPay > 0
+            ? 'Left out: the 13th month pay on the basic pay counted so far was already paid in full.'
+            : `Left out: no basic pay on finalized payrolls of ${payrollYear}, so there is no 13th month pay to compute yet. Finalize the year's payrolls first (or enter the opening balances), then recompute.`,
+        ],
+      })
+      continue
+    }
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
     // someone who left in an earlier year (a final pay released this year)
     // has no year here to complete

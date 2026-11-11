@@ -316,7 +316,7 @@ describe('headcount and turnover report', () => {
     expect(t.some((x) => x.startsWith('2 of the 3 separations came within the first six months'))).toBe(true)
     expect(t.some((x) => x.startsWith('Still probationary after six months: Ben Cruz (since Apr 1, 2026)'))).toBe(true)
     expect(t.some((x) => x.startsWith('Probation ends within 30 days for Carla Cruz (Nov 6, 2026)'))).toBe(true)
-    expect(t.some((x) => x.startsWith("Paid below the client's minimum wage setting (₱645.00 a day, NCR; 75% of it for apprentices and learners): Fe Cruz (₱500.00)"))).toBe(true)
+    expect(t.some((x) => x.startsWith("Paid below the client's minimum wage setting (₱645.00 a day, NCR; 75% of it for apprentices): Fe Cruz (₱500.00)"))).toBe(true)
     expect(t).toContain('Why they left: resignation 1, end of contract / project 1, termination 1.')
   })
 })
