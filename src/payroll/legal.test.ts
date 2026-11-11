@@ -388,3 +388,45 @@ describe('a regular holiday worked for part of the day (Labor Code Art. 94)', ()
     expect(slip.earnings.some((l) => l.code === 'undertime' || l.code === 'late' || l.code === 'absence')).toBe(false)
   })
 })
+
+describe('night work across midnight into a day of another kind', () => {
+  const night = { days: [1, 2, 3, 4, 5], start: '22:00', end: '06:00', break_minutes: 0 }
+  const HERO = [{ holiday_date: '2026-08-31', name: 'National Heroes Day', kind: 'regular' as const }]
+  // Manila 22:00 on the 28th is 14:00Z; 06:00 on the 29th is 22:00Z on the 28th
+  const shift = (date: string) => ({ work_date: date, clock_in: `${date}T14:00:00Z`, clock_out: `${date}T22:00:00Z` })
+  const days = (entries: { work_date: string; clock_in: string; clock_out: string }[], from: string, to: string) =>
+    computeAttendance({ periodStart: from, periodEnd: to, schedule: night, standardHoursPerDay: 8, gracePeriodMinutes: 0, entries, holidays: HERO, approvedLeaves: [] })
+
+  it('marks the eve shift that ends on the holiday, with the hours past midnight', () => {
+    // Sunday Aug 30 is a rest day for this schedule: use a Sun-Thu night worker
+    const sunThu = { ...night, days: [7, 1, 2, 3, 4] }
+    const d = computeAttendance({ periodStart: '2026-08-30', periodEnd: '2026-08-30', schedule: sunThu, standardHoursPerDay: 8, gracePeriodMinutes: 0, entries: [shift('2026-08-30')], holidays: HERO, approvedLeaves: [] })
+    expect(d[0].dayType).toBe('regular')
+    expect(d[0].crossesInto).toEqual({ date: '2026-08-31', dayType: 'regular_holiday', holidayName: 'National Heroes Day', minutes: 360 })
+  })
+
+  it('marks the holiday shift that ends on an ordinary morning, and no ordinary night', () => {
+    const d = days([shift('2026-08-31'), shift('2026-08-27')], '2026-08-27', '2026-08-31')
+    const holiday = d.find((x) => x.date === '2026-08-31')!
+    expect(holiday.dayType).toBe('regular_holiday')
+    expect(holiday.crossesInto).toEqual({ date: '2026-09-01', dayType: 'regular', minutes: 360 })
+    expect(d.find((x) => x.date === '2026-08-27')!.crossesInto).toBeUndefined()
+  })
+
+  it('the payslip review names the hours: the premium follows the day the shift started', () => {
+    const sunThu = { ...night, days: [7, 1, 2, 3, 4] }
+    const emp = { ...monthly, schedule: sunThu }
+    const slip = computePayslip({
+      employee: emp,
+      settings,
+      period,
+      tables: DEFAULT_TABLES,
+      days: computeAttendance({ periodStart: '2026-08-30', periodEnd: '2026-08-30', schedule: sunThu, standardHoursPerDay: 8, gracePeriodMinutes: 0, entries: [shift('2026-08-30')], holidays: HERO, approvedLeaves: [] }),
+      runType: 'regular',
+    })
+    const w = slip.trace.warnings.find((x) => x.startsWith('Night work across midnight'))
+    expect(w).toContain('the shift of Aug 30 (an ordinary day) ran 6 h into Aug 31 (National Heroes Day)')
+    // paid as the ordinary day it started on: no holiday premium line
+    expect(slip.earnings.some((l) => l.code === 'holiday')).toBe(false)
+  })
+})

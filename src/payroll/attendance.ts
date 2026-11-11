@@ -7,6 +7,7 @@
 
 import { HOURS } from './law'
 import {
+  addDays,
   eachDate,
   hhmmToMinutes,
   manilaInstant,
@@ -238,6 +239,27 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
 
     const absent = scheduled && !worked && dayType === 'regular' && !leave
 
+    // Work past midnight into a day of another kind (the eve of a holiday,
+    // or a holiday's night shift ending on an ordinary morning). The whole
+    // shift is paid as the day it started: the review names these hours.
+    let crossesInto: DayComputation['crossesInto']
+    if (worked) {
+      const nextDate = addDays(date, 1)
+      const midnightMs = manilaInstant(nextDate, 0).getTime()
+      const after = intervals.reduce((sum, iv) => sum + Math.max(0, (iv.outMs - Math.max(iv.inMs, midnightMs)) / 60000), 0)
+      if (after > 0) {
+        const next = classifyDay(scheduled, holidayByDate.get(nextDate))
+        if (next.dayType !== dayType) {
+          crossesInto = {
+            date: nextDate,
+            dayType: next.dayType,
+            ...(next.holidayName ? { holidayName: next.holidayName } : {}),
+            minutes: Math.round(Math.min(after, netMinutes)),
+          }
+        }
+      }
+    }
+
     out.push({
       date,
       dayType,
@@ -261,6 +283,7 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       leaveType: !worked && leave ? leave.type_name : undefined,
       leaveCode: !worked && leave ? leave.type_code : undefined,
       leaveStart: !worked && leave ? leave.start_date : undefined,
+      ...(crossesInto ? { crossesInto } : {}),
     })
   }
   return out

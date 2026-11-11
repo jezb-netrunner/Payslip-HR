@@ -192,6 +192,12 @@ export interface DayComputation {
   leaveCode?: string
   /** the first day of that leave */
   leaveStart?: string
+  /**
+   * Work that ran past midnight into a day of another kind (an ordinary eve
+   * into a holiday, a holiday into an ordinary day): the premiums follow the
+   * day the shift started, and the review names these hours.
+   */
+  crossesInto?: { date: string; dayType: DayType; holidayName?: string; minutes: number }
 }
 
 // ---------- payroll ----------

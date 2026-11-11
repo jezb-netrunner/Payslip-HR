@@ -550,6 +550,21 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       `Regular holiday not paid (${unpaidHolidays.map((d) => `${d.holidayName ?? 'holiday'}, ${shortDate(d.date)}`).join('; ')}): no work or paid leave on the workday before it (IRR Book III, Rule IV, Sec. 6; the client's holiday absence rule). If the employee worked that day, enter the time and recompute.`,
     )
   }
+  // Night work across midnight into a day of another kind: the premium
+  // (holiday, special day) follows the day the shift started. A company
+  // that counts holiday hours by the calendar day adjusts the difference.
+  const crossing = fixed ? [] : days.filter((d) => d.crossesInto && d.workedMinutes > 0 && employed(d.date))
+  if (crossing.length > 0) {
+    const kind = (t: DayType) => (isRegularHolidayType(t) ? 'a regular holiday' : t === 'special_day' || t === 'special_day_rest' ? 'a special non-working day' : 'an ordinary day')
+    warnings.push(
+      `Night work across midnight: ${crossing
+        .map((d) => {
+          const c = d.crossesInto!
+          return `the shift of ${shortDate(d.date)} (${d.holidayName ?? kind(d.dayType)}) ran ${round2(c.minutes / 60)} h into ${shortDate(c.date)} (${c.holidayName ?? kind(c.dayType)})`
+        })
+        .join('; ')}. Holiday and special-day premiums are paid for the day the shift started. If the company counts those hours by the calendar day, add or take back the difference with a payroll adjustment (Holiday).`,
+    )
+  }
   if (holidayPayExempt && params.days.some((d) => isRegularHolidayType(d.dayType))) {
     notes.push(
       'Regular holidays are paid as ordinary days: a retail or service establishment regularly employing less than 10 workers is exempt from holiday pay (Labor Code Art. 94).',

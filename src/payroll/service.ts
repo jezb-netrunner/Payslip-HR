@@ -355,12 +355,13 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
   const resultsLookbackStart = addDays(run.period_start, -RESULTS_LOOKBACK_DAYS)
   const holidays: HolidayLite[] = isThirteenth
     ? []
-    : (await getHolidaysBetween(entity.id, resultsLookbackStart, run.period_end)).map((h) => ({
+    : // through the day after the period: a night shift on its last day may end on a holiday
+      (await getHolidaysBetween(entity.id, resultsLookbackStart, addDays(run.period_end, 1))).map((h) => ({
         holiday_date: h.holiday_date,
         name: h.name,
         kind: h.kind,
       }))
-  const regularHoliday = holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start)
+  const regularHoliday = holidays.some((h) => h.kind === 'regular' && h.holiday_date >= run.period_start && h.holiday_date <= run.period_end)
   // only the client's holiday absence rule (off by default) needs those days
   const looksBack = entity.holiday_absence_rule === true && regularHoliday
 
