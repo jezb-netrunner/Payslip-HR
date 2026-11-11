@@ -863,7 +863,7 @@ storage_policies 3 `e7dbd16f`. Security advisors unchanged: the accepted 22
 lint-0029 lines, RLS-no-policy INFO on the 5 service tables, leaked password
 protection. Checked before the apply (read-only): 4 `recurring_deductions`
 rows, none breaking the new CHECK; no payroll runs. The front end of branch
-`claude/quirky-bohr-elakrw` is in a pull request, **not merged**: `main`'s
+`claude/quirky-bohr-elakrw` is in PR #27, **not merged** (the owner merges): `main`'s
 front end keeps working against the new schema (it creates runs as drafts,
 and the actor columns it sends are overwritten); the second-person setting
 appears once the branch is merged. Live data is still the DEMO client only.
