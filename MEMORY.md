@@ -823,8 +823,8 @@ stop at the pay; a new hire's first week had a negative net pay that could
 be finalized); a 13th month run issued empty numbered payslips; night work
 across midnight into a holiday is named in the review.
 
-**Internal control:** migration `20261111090000_internal_controls`
-(placeholder version, **not applied live**) — an API caller could insert a
+**Internal control:** migration `20261111083956_internal_controls`
+(live the same day, see *Current deployed state*) — an API caller could insert a
 run already "finalized" with any finalizer; actor columns are now the
 database's; optional four-eyes finalize; finalize refuses a negative net
 pay; `recurring_deductions` amounts can't be negative; `valid_ewt_data` was
@@ -849,23 +849,24 @@ only after the second factor; a per-address employee sign-in budget; 2316 /
 
 ## Current deployed state (update when it changes)
 
-**2026-11-11: nothing new is live.** Branch `claude/quirky-bohr-elakrw`
-(pushed, no PR yet) holds the audit's front end and the migration
-`20261111090000_internal_controls.sql` under a placeholder version. Either
-order works at go-live (the screens hide the second-person setting until the
-column exists, the database ignores the actor columns an older front end
-sends). To apply: `apply_migration` through MCP (no DROP, no semicolon inside
-strings or comments; functions re-created with `CREATE OR REPLACE` from the
-replica's definitions by `gen_internal_controls.py`, which is not in the
-repo), rename the file to the recorded version, compare `fingerprint.sql`
-with the replica — after it, on the replica: tables 44 `de0ce9b5`, columns
-626 `6e3d9200`, constraints 343 `3bb87be3`, indexes 126 `eed92050`, policies
-70 `5d84aa29`, functions 94 `3997b1ba`, fn_grants `aff5c77e`, table_grants
-`6ba8c56b`, triggers 127 `69b0e9e1`, storage_policies 3 `e7dbd16f` — and run
-the security advisors (expect no new line: the two new functions are trigger
-functions with EXECUTE revoked). Checked on live 2026-11-11 (read-only): 4
-`recurring_deductions` rows, none breaks the new not-negative CHECK; no
-payroll runs. Live is still the state of 2026-11-06 below.
+**2026-11-11 (08:39 UTC): `20261111083956 internal_controls` is live**
+(owner, asked in the session: "Apply migration + open PR"). Applied through
+MCP `apply_migration` in one call (no DROP, no semicolon inside strings or
+comments; the four re-created functions came from the replica's definitions
+through `gen_internal_controls.py`, a scratchpad script not in the repo);
+repo file renamed from the `20261111090000` placeholder to the recorded
+version. `fingerprint.sql` on live = replica on all ten lines: tables 44
+`de0ce9b5`, columns 626 `6e3d9200`, constraints 343 `3bb87be3`, indexes 126
+`eed92050`, policies 70 `5d84aa29`, functions 94 `3997b1ba`, fn_grants
+`aff5c77e`, table_grants `6ba8c56b`, triggers 127 `69b0e9e1`,
+storage_policies 3 `e7dbd16f`. Security advisors unchanged: the accepted 22
+lint-0029 lines, RLS-no-policy INFO on the 5 service tables, leaked password
+protection. Checked before the apply (read-only): 4 `recurring_deductions`
+rows, none breaking the new CHECK; no payroll runs. The front end of branch
+`claude/quirky-bohr-elakrw` is in a pull request, **not merged**: `main`'s
+front end keeps working against the new schema (it creates runs as drafts,
+and the actor columns it sends are overwritten); the second-person setting
+appears once the branch is merged. Live data is still the DEMO client only.
 
 **2026-11-06 (23:41–23:46 UTC): the security hardening is live** (owner:
 "yes, deploy it"). Through MCP: migration `20261106234101
