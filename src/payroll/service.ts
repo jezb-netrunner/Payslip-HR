@@ -841,6 +841,11 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
       cumulative: !!taxYearRow?.has_previous_employer || taxBefore.some((p) => whtMethodOf(p) === 'cumulative_average'),
     }
 
+    // 13th month: the basic salary earned in the payroll year
+    const ytdBasicPay =
+      empYear.filter((p) => p.run_type !== 'thirteenth_month').reduce((s, p) => s + Number(p.basic_pay), 0) +
+      Number(payrollYearOpening?.thirteenth_basis ?? 0)
+
     const slip = computePayslip({
       employee: {
         id: emp.id,
@@ -956,9 +961,7 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
           ),
         opens: !isThirteenth && !empMonth.some((p) => p.run_type !== 'thirteenth_month'),
       },
-      ytdBasicPay:
-        empYear.filter((p) => p.run_type !== 'thirteenth_month').reduce((s, p) => s + Number(p.basic_pay), 0) +
-        Number(payrollYearOpening?.thirteenth_basis ?? 0),
+      ytdBasicPay,
       ytdThirteenthPaid:
         empYear.filter((p) => p.run_type === 'thirteenth_month').reduce((s, p) => s + Number(p.gross_pay), 0) +
         Number(payrollYearOpening?.thirteenth_installments ?? 0),
@@ -974,6 +977,21 @@ export async function computeRun(run: PayrollRun, selected: Entity): Promise<Run
         ? maternityContext(leaveFor.get(emp.id)!, matSlips.filter((p) => p.employee_id === emp.id), run.period_month)
         : undefined,
     })
+    // A 13th month run with nothing to pay or withhold for someone (paid in
+    // full when they left, or no finalized payroll this year) issues no
+    // payslip: an empty one would take a control number and show the
+    // employee a 13th month pay of zero.
+    if (isThirteenth && slip.grossPay === 0 && slip.totalDeductions === 0 && slip.netPay === 0) {
+      warnings.push({
+        employee: `${emp.first_name} ${emp.last_name}`,
+        warnings: [
+          ytdBasicPay > 0
+            ? 'Left out: the 13th month pay on the basic pay counted so far was already paid in full.'
+            : `Left out: no basic pay on finalized payrolls of ${payrollYear}, so there is no 13th month pay to compute yet. Finalize the year's payrolls first (or enter the opening balances), then recompute.`,
+        ],
+      })
+      continue
+    }
     slip.trace.warnings.unshift(...(slipWarnings.get(emp.id) ?? []))
     // someone who left in an earlier year (a final pay released this year)
     // has no year here to complete

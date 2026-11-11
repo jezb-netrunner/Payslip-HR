@@ -144,6 +144,17 @@ export function unworkedHolidaysPaid(
   return paid
 }
 
+/**
+ * The part of a regular holiday's 100% that work did not earn: the daily
+ * wage for the share of the standard day not worked (nothing once the day
+ * is complete). Labor Code Art. 94(a) pays the regular daily wage on a
+ * regular holiday whether or not it is worked; Art. 94(b) adds the pay for
+ * the work done.
+ */
+function holidayShortfall(daily: number, fractionWorked: number): number {
+  return fractionWorked < 1 ? daily * (1 - fractionWorked) : 0
+}
+
 function otMultiplier(dayType: DayType): number {
   return dayType === 'regular' ? 1 + OVERTIME.ordinaryDay.value : DAY_MULT[dayType] * (1 + OVERTIME.premiumDay.value)
 }
@@ -698,6 +709,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += extra
         else if (isRegularHolidayType(d.dayType)) holidayPremium += extra
+        // a regular holiday on a day the rate does not cover (the rest day
+        // under divisor 261): its 100% is due whether or not worked, so hours
+        // short of the day are still holiday pay
+        if (isRegularHolidayType(d.dayType) && builtIn === 0) holidayPremium += holidayShortfall(daily, fraction)
       } else if (isRegularHolidayType(d.dayType)) {
         // Paid: a holiday on a day the divisor does NOT deem paid (e.g. a
         // rest day under divisor 261) earns 100% of the daily wage (Art.
@@ -721,6 +736,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         else if (d.dayType === 'special_day' || d.dayType === 'special_day_rest')
           specialDayPremium += premium
         else if (isRegularHolidayType(d.dayType)) holidayPremium += premium
+        // the regular daily wage is due on a regular holiday whether or not
+        // worked (Art. 94(a)): the hours short of the day are still holiday
+        // pay, so working part of it never pays less than staying home
+        if (isRegularHolidayType(d.dayType)) holidayPremium += holidayShortfall(daily, fraction)
       } else if (isRegularHolidayType(d.dayType)) {
         // Unworked regular holiday: 100% of daily wage (Labor Code Art. 94),
         // whether or not it falls on the rest day, on the workday-before rule

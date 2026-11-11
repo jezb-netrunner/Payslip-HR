@@ -564,6 +564,10 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
 
         <Card title="Notes" icon={<StickyNote />}>
           <Textarea rows={2} value={f.notes ?? ''} onChange={(e) => set('notes', e.target.value)} />
+          <p className="mt-1.5 text-xs text-slate-500">
+            Part of the employee's own record: not shown in their portal, but theirs to see on request (Data Privacy
+            Act, right of access). Keep it to facts you would disclose to them.
+          </p>
         </Card>
 
         <Button disabled={busy} onClick={save} className="w-full">

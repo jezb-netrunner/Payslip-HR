@@ -293,7 +293,9 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 </Select>
               </Field>
             )}
-            <Field label="Pag-IBIG due day (next month)" hint="As your Pag-IBIG branch sets it; blank until entered">
+            <Field
+              label="Pag-IBIG due day (next month)"
+              hint="From your schedule in Virtual Pag-IBIG for Employers: HDMF Circular 499-2026 (from 21 Aug 2026) makes eSRS mandatory and replaced the remittance schedule of Circular 275. Blank until entered">
               <Input type="number" min={1} max={31} value={s.pagibig_due_day ?? ''} onChange={(e) => set('pagibig_due_day', e.target.value as unknown as number)} />
             </Field>
           </div>
