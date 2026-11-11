@@ -1153,13 +1153,13 @@ export function headcountReport(all: PersonRow[], range: MonthRange, today: stri
     })
   }
   if (pay.minimumWageDaily > 0) {
-    // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
+    // an apprentice's training allowance is at least 75% of the minimum wage (RA 12063)
     const floorOf = (e: PersonRow) => pay.minimumWageDaily * (e.employment_status === 'apprentice' ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
     const below = activeNow.filter((e) => dailyEquivalent(e, pay.workingDaysPerYear) + 0.005 < floorOf(e))
     if (below.length) {
       insights.push({
         tone: 'warn',
-        text: `Paid below the client's minimum wage setting (${money(pay.minimumWageDaily)} a day${pay.minimumWageRegion ? `, ${pay.minimumWageRegion}` : ''}; 75% of it for apprentices and learners): ${names(below.map((e) => `${name(e)} (${money(dailyEquivalent(e, pay.workingDaysPerYear))})`))}. Check the rate, or the exemption that allows it.`,
+        text: `Paid below the client's minimum wage setting (${money(pay.minimumWageDaily)} a day${pay.minimumWageRegion ? `, ${pay.minimumWageRegion}` : ''}; 75% of it for apprentices): ${names(below.map((e) => `${name(e)} (${money(dailyEquivalent(e, pay.workingDaysPerYear))})`))}. Check the rate, or the exemption that allows it.`,
       })
     }
   }

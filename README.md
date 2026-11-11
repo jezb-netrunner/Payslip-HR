@@ -243,7 +243,7 @@ eBIRForms / eFPS.
 |---|---|---|
 | Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward; supplementary pay RR 2-98 Sec. 2.79(B)(3) and (5)(a) | Period tables versioned in DB; supplementary pay at the regular pay's bracket, or the cumulative average method (zero-bracket regular pay, supplementary ≥ regular, or an earlier employer) for the rest of the year |
 | Year-end adjustment | NIRC Secs. 79(F), 83(A); RR 2-98 Sec. 2.79(B)(5)(b) | Last payroll paid in December or the separation pay: annual table on actual pay; a shortfall is withheld only as far as the pay goes, the employer advancing the rest (receivable); refunds by 25 Jan reduce that month's 1601-C |
-| De minimis | RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 29-2025 (from 6 Jan 2026); RR 5-2011 (exclusive list) | Ceilings versioned in `legal_parameters`; each benefit named; the excess, and anything not on the list, taxable; unused VL to cash de minimis up to 12 days for a client granting 5+ VL days, SIL-only conversion taxable (setting) |
+| De minimis | RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 11-2018 (last proviso) and RR 29-2025 (ceilings from 6 Jan 2026); RR 5-2011 (exclusive list) | Ceilings versioned in `legal_parameters`; each benefit named; pay above a ceiling is an "other benefit" sharing the ₱90,000 exemption with the 13th month (taxed only beyond it); anything not on the list taxable; unused VL to cash de minimis up to 12 days for a client granting 5+ VL days, SIL-only conversion taxable (setting) |
 | SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MySSS Pension Booster (MPF) above ₱20k; EC ₱10/₱30; all remuneration of the SSS month (Secs. 8(f), 8(h); IRR Rule 12) | One MSC on the month's total — OT, premiums, allowances, de minimis, bonuses, the 13th month (setting) — except a Christmas bonus and allowances subject to liquidation; the closing payroll settles it with a refund line; maternity leave months at the usual amounts |
 | PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50; employee half paid by the government for solo parents and PWDs (Circulars 2026-0015, 2026-0017; RA 11228) | Odd centavo carried by employer (official convention); NG share shown, neither deducted nor remitted, from the first month through the month before the ID's expiry |
 | Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | On basic salary plus allowances, capped |
@@ -252,7 +252,7 @@ eBIRForms / eFPS.
 | Hours of work & schedules | Art. 83 (8 hours), Art. 85 + IRR Book III Rule I §7 (meal ≥ 60 min unpaid; shorter meals and rests ≤ 20 min are hours worked), Art. 91 (weekly rest day), DOLE DA 02-04 (compressed workweek) | Each date measured against its own shift; compressed days regular up to the shift (max 12 h; ≤ 5 days and 48 h a week) |
 | Leaves | Art. 95 (SIL after 12 months), RA 11861 (solo parent, 6 months), RA 9710 (women, 6 months), RA 11210 (maternity 105 calendar days), RA 8187, RA 9262 | Service requirements enforced; maternity paid as the SSS benefit + salary differential (tax-exempt, 2316 item 37, outside the ₱90k pool), not as salary; contributions continue at the usual amounts, the employee's shares taken from the maternity pay; DOLE exemption from the differential recorded with its validity |
 | Deductions | Art. 113, IRR Book III Rule VIII §10 (DO 195-18) | Company loans, HMO and other deductions need the employee's written authorization date |
-| Minimum wage | RA 6727 regional wage orders (e.g. NCR-28, ₱755 from Sep 26, 2026); MWE exemption RA 9504; apprentices/learners 75% (Arts. 61, 73) | Per-client wage region and rate; MWE exempt package; payslip warnings when a rate is below the floor or an MWE is paid above the minimum |
+| Minimum wage | RA 6727 regional wage orders (e.g. NCR-28, ₱755 from Sep 26, 2026); MWE exemption RA 9504; apprentices 75% (RA 12063, which replaced Labor Code Arts. 57–77) | Per-client wage region and rate; MWE exempt package; payslip warnings when a rate is below the floor or an MWE is paid above the minimum |
 | Holidays | 2026: Proclamations 1006 / 1189 / 1264; 2027: Proclamation 1427 | National list + per-client local holidays |
 | Due dates | BIR 1601-C / 1604-C form pages, RR 26-2002, NIRC Secs. 79(F), 83; RR 11-2018; SSS Circular 2019-012; PhilHealth payment schedule | Calendar per client: 1601-C (manual or eFPS group), SSS, PhilHealth by employer number, Pag-IBIG as entered; weekends and holidays noted, not moved; extensions per year |
 
@@ -507,7 +507,8 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
   adjustments (the SSS figure comes from the SSS portal); payroll only stops
   paying the leave days as salary and reminds you.
 - De minimis benefits must be named when entered; the ceilings (RR 29-2025)
-  are applied per month, semester or year, the excess taxed.
+  are applied per month, semester or year, and pay above a ceiling counts
+  toward the ₱90,000 exemption for the 13th month pay and other benefits.
 - NCR-27 (suspended, in litigation) is not applied and no contingent
   top-up report is built: no client is in NCR.
 - This software assists with compliance but is not legal advice — always

@@ -497,7 +497,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // may be below the minimum (the period's pay is checked instead)
   const byResults = employee.outputPay?.class === 'basic'
 
-  // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
+  // an apprentice's training allowance is at least 75% of the minimum wage (RA 12063)
   const wageFloor = settings.minimumWageDaily * (employee.apprentice ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
   if (!byResults && daily + 0.005 < wageFloor) {
     warnings.push(
@@ -772,10 +772,12 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   const itemBucket = (category: BirBucket, t: PayItemType | undefined): BirBucket =>
     t === 'commission' || t === 'profit_sharing' || t === 'fees' ? t : category
   // De minimis benefits are exempt up to their ceilings, and only those on
-  // the list: any other benefit is taxable, and so is pay above a ceiling
-  // (RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 29-2025 Sec. 1; RR 5-2011
-  // Sec. 1, the list is exclusive). The ceilings count what earlier payrolls
-  // of the month, semester or year paid.
+  // the list: any other benefit is taxable (RR 5-2011 Sec. 1, the list is
+  // exclusive). Pay above a ceiling is one of the "other benefits" that share
+  // the yearly exemption with the 13th month pay, taxable only beyond it (RR
+  // 2-98 Sec. 2.78.1(A)(3), last proviso, as amended by RR 11-2018; ceilings
+  // of RR 29-2025 Sec. 1). The ceilings count what earlier payrolls of the
+  // month, semester or year paid.
   const dmUsed: Partial<Record<DeMinimisKind, DeMinimisUsed>> = Object.fromEntries(
     Object.entries(params.deMinimisUsed ?? {}).map(([k, v]) => [k, { ...v }]),
   )
@@ -810,7 +812,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       consume(kind, exempt)
     }
     const excess = round2(amount - exempt)
-    if (excess > 0) earn('de_minimis_excess', `${label} (above the de minimis ceiling: taxable)`, excess, 'other_supplementary', { meta: id, dm: kind })
+    if (excess > 0) earn('de_minimis_excess', `${label} (${ABOVE_CEILING})`, excess, 'other_benefits', { meta: id, dm: kind })
   }
   // Unused leave converted to cash: de minimis up to the yearly days ceiling
   // when the client grants vacation leave (5 days or more: outside SIL,
@@ -831,7 +833,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     }
     const excess = round2(amount - exempt)
     if (excess > 0) {
-      earn('de_minimis_excess', `${label} (above the ${c?.limit ?? 0}-day de minimis ceiling: taxable)`, excess, 'other_supplementary', {
+      earn('de_minimis_excess', `${label} (above the ${c?.limit ?? 0}-day de minimis ceiling: ${OTHER_BENEFIT})`, excess, 'other_benefits', {
         meta: id,
         dm: 'monetized_vl',
         leaveDays: round2(days - exemptDays),
@@ -1621,6 +1623,10 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     },
   }
 }
+
+/** What a payslip line says of pay above a de minimis ceiling (no peso sign: the lines print in PDFs). */
+const OTHER_BENEFIT = 'an "other benefit", exempt with the 13th month pay up to the yearly limit'
+const ABOVE_CEILING = `above the de minimis ceiling: ${OTHER_BENEFIT}`
 
 /** Plain-language notes on how this payroll's withholding was computed. */
 function withholdingNotes(

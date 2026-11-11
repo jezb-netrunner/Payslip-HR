@@ -35,7 +35,7 @@ export default function Login() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   // why the app signed the user out (a sign-in elsewhere ended this session),
-  // or why the Auth server refused a link (a reset link of a locked account)
+  // or why the Auth server refused a link (a reset link that expired, was already used, or belongs to a deactivated account)
   const [signedOutNotice] = useState(() => peekSignInNotice() || linkProblem())
   useEffect(() => {
     clearSignInNotice()

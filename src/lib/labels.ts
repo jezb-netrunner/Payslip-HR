@@ -17,7 +17,7 @@ export const EMPLOYMENT_STATUS_LABELS: Record<EmploymentStatus, string> = {
   contractual: 'Contractual',
   project_based: 'Project-based',
   seasonal: 'Seasonal',
-  apprentice: 'Apprentice / Learner',
+  apprentice: 'Apprentice',
 }
 
 /** BIR alphalist employment status codes (RMC 73-2019). */

@@ -1234,7 +1234,7 @@ function AdjustmentModal({
           <p className="text-xs text-slate-400">
             {benefit
               ? 'Maternity leave days are not paid as salary: the SSS maternity benefit (advanced in full within 30 days of the leave application) and the salary differential up to full pay are their own earnings, both tax-exempt (RMC 105-2019).'
-              : 'Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory minimum wage package stays exempt for minimum wage earners. De minimis benefits are exempt up to their ceilings (RR 29-2025); the rest is taxed.'}
+              : 'Basic-pay corrections count toward the 13th month; bonuses share the ₱90,000 cap; the statutory minimum wage package stays exempt for minimum wage earners. De minimis benefits are exempt up to their ceilings (RR 29-2025); pay above a ceiling counts toward the ₱90,000 exemption with the 13th month and bonuses, and a benefit not on the list is taxed.'}
           </p>
         )}
         <Button className="w-full" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Add adjustment'}</Button>

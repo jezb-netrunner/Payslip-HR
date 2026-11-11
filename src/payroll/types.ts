@@ -222,7 +222,7 @@ export type BirBucket =
   | 'night_diff'
   | 'hazard'
   | 'thirteenth' //        13th month pay
-  | 'other_benefits' //    bonuses etc. — shares the ₱90,000 cap with the 13th month
+  | 'other_benefits' //    bonuses etc., and pay above a de minimis ceiling — shares the ₱90,000 cap with the 13th month
   | 'de_minimis'
   | 'representation'
   | 'transportation'
@@ -232,7 +232,7 @@ export type BirBucket =
   | 'commission' //        supplementary: commissions (2316 item 45)
   | 'profit_sharing' //    supplementary: profit sharing (item 46)
   | 'fees' //              supplementary: fees, directors' fees included (item 47)
-  | 'other_supplementary' // other taxable supplementary pay: pay above a de minimis ceiling, leave converted to cash (2316 item 51)
+  | 'other_supplementary' // other taxable supplementary pay: a benefit not on the de minimis list, service incentive leave converted to cash (2316 item 51)
   | 'other_non_taxable'
 
 export type AllowanceCategory =
@@ -298,7 +298,7 @@ export interface PayrollEmployeeInput {
    */
   rateSegments?: RateSegment[]
   isMinimumWageEarner: boolean
-  /** Apprentice or learner: the wage floor is 75% of the minimum (Labor Code Arts. 61 and 73). */
+  /** Apprentice: the pay floor is 75% of the minimum wage (RA 12063, which replaced Labor Code Arts. 57 to 77). */
   apprentice?: boolean
   /**
    * The national government pays the PhilHealth employee half this payroll

@@ -3,7 +3,7 @@ import type { Entity, Payslip, PayrollRun } from '../lib/db'
 import { fmtDate, fmtPeriod, money } from '../lib/format'
 import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
 import { Avatar, Badge, Button } from './ui'
-import { employerFor, roundingLines } from '../lib/payslip'
+import { attendanceFacts, employerFor, payslipRate, roundingLines } from '../lib/payslip'
 import { tinLine } from '../lib/reportStamp'
 import { useReportStamp } from '../lib/useReportStamp'
 import { logActivity } from '../lib/activity'
@@ -72,6 +72,8 @@ export default function PayslipView({
   const trace = slip.computation_trace
   const rounding = roundingLines(slip)
   const computedNet = Number(slip.gross_pay) - Number(slip.total_deductions)
+  const rate = payslipRate(slip)
+  const attendance = attendanceFacts(slip)
 
   return (
     <div className="space-y-5">
@@ -98,6 +100,23 @@ export default function PayslipView({
           </Button>
         </div>
       </div>
+
+      {(rate || attendance.length > 0) && (
+        <dl className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs">
+          {rate && (
+            <div>
+              <dt className="text-slate-500">Pay rate</dt>
+              <dd className="font-semibold text-ink-900">{money(rate.amount)} a {rate.per}</dd>
+            </div>
+          )}
+          {attendance.map((f) => (
+            <div key={f.label}>
+              <dt className="text-slate-500">{f.label}</dt>
+              <dd className="font-semibold text-ink-900">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-slate-200">
