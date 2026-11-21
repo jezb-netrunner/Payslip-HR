@@ -3,8 +3,8 @@
 -- 1. A leave request charges more than 0 and at most its calendar span of
 --    days. The days were the caller's own count: an employee could file a
 --    five-day leave charging -30 or 0 days, and approval kept it (the
---    balances read days; payroll reads the dates). Approval in the app now
---    counts the days again from the schedule; the database bounds them.
+--    balances read days, payroll reads the dates). Approval in the app now
+--    counts the days again from the schedule, the database bounds them.
 -- 2. Reasons are at most 500 characters and review notes 1,000, like the
 --    cash-advance requests, and an employee has at most 20 pending leave
 --    requests, 31 pending time corrections and 5 pending cash-advance
@@ -13,10 +13,10 @@
 -- 3. Signed-in users lose TRUNCATE, REFERENCES and TRIGGER on every public
 --    table (the Supabase default grants them). The API never issues them,
 --    but row-level security does not cover TRUNCATE, so the grant is a
---    standing risk; later tables don't get them either.
+--    standing risk, and later tables don't get them either.
 --
 -- Live data checked before (2026-11-21): 5 leave requests, none outside the
--- day bounds; longest reason 63 characters; at most 1 pending request of any
+-- day bounds, longest reason 63 characters, at most 1 pending request of any
 -- kind per employee.
 
 -- 1 + 2: leave requests
