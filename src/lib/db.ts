@@ -517,6 +517,8 @@ export interface PayslipLine {
   leaveDays?: number
   /** a maternity payout's contribution deduction: the leave months it covers */
   covers?: { month: string; amount: number }[]
+  /** a maternity payout: the SSS benefit advanced or the salary differential */
+  benefit?: 'sss_maternity' | 'maternity_differential'
 }
 
 export interface Payslip {

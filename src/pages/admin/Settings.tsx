@@ -217,7 +217,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           </Card>
           <Card title="Minimum wage" icon={<Coins />}>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Wage region">
+              <Field label="Wage region" className="sm:col-span-2">
                 <Select value={s.minimum_wage_region} onChange={(e) => set('minimum_wage_region', e.target.value)}>
                   <option value="">Select…</option>
                   {PH_REGIONS.map((r) => (
@@ -252,7 +252,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 ))}
               </Select>
             </Field>
-            <Field label="Contribution deduction timing" hint="How monthly SSS / PhilHealth / Pag-IBIG are spread">
+            <Field label="Contribution deduction timing" hint="How monthly SSS / PhilHealth / Pag-IBIG are spread" className="sm:col-span-2">
               <Select
                 value={s.contribution_deduction_timing}
                 onChange={(e) => set('contribution_deduction_timing', e.target.value as Entity['contribution_deduction_timing'])}
@@ -277,7 +277,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             <Field label="Days from period end to pay date" hint="Used to suggest the pay date of new runs">
               <Input type="number" value={s.pay_date_lag_days} onChange={(e) => set('pay_date_lag_days', e.target.value as unknown as number)} />
             </Field>
-            <Field label="BIR 1601-C filing" hint="Sets the due dates under BIR & Reports">
+            <Field label="BIR 1601-C filing" hint="Sets the due dates under BIR & Reports" className="sm:col-span-2">
               <Select value={s.bir_filing_method} onChange={(e) => set('bir_filing_method', e.target.value as Entity['bir_filing_method'])}>
                 <option value="manual">Manual / eBIRForms (10th of the next month)</option>
                 <option value="efps">eFPS</option>
@@ -295,7 +295,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             )}
             <Field
               label="Pag-IBIG due day (next month)"
-              hint="From your schedule in Virtual Pag-IBIG for Employers: HDMF Circular 499-2026 (from 21 Aug 2026) makes eSRS mandatory and replaced the remittance schedule of Circular 275. Blank until entered">
+              hint="From your schedule in Virtual Pag-IBIG for Employers: HDMF Circular 499-2026 (from 21 Aug 2026) makes eSRS mandatory and replaced the remittance schedule of Circular 275. Reported windows by the first letter of the employer's registered name (PIA, 7 Nov 2026; check your eSRS schedule): A–F the 1st–7th, G–N the 5th–11th, O–Z and numbers the 9th–15th. Enter the last day of yours. Blank until entered">
               <Input type="number" min={1} max={31} value={s.pagibig_due_day ?? ''} onChange={(e) => set('pagibig_due_day', e.target.value as unknown as number)} />
             </Field>
           </div>

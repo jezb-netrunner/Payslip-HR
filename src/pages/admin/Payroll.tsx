@@ -183,8 +183,8 @@ function RunList({ entity }: { entity: Entity }) {
               const open = () => navigate(`/admin/payroll/${r.id}`)
               return (
                 <tr key={r.id} className="cursor-pointer" onClick={open}>
-                  <Td>
-                    <p className="font-semibold text-ink-900">{runLabel(r)}</p>
+                  <Td className="min-w-52">
+                    <p className="whitespace-nowrap font-semibold text-ink-900">{runLabel(r)}</p>
                     <p className="text-xs text-slate-400">
                       {r.control_no && <span className="font-medium text-slate-500">{r.control_no} · </span>}
                       {fmtMonth(r.period_month)}

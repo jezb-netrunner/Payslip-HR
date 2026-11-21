@@ -346,6 +346,7 @@ export default function MyLeaves() {
           <Field label="Reason">
             <Textarea
               rows={3}
+              maxLength={500}
               value={form.reason}
               onChange={(e) => setForm({ ...form, reason: e.target.value })}
             />

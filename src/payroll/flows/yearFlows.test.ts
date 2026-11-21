@@ -66,9 +66,10 @@ describe('flows', () => {
     const sh = runs.flatMap((r) => slipsOf(r.id, h.id))
     expect(ee(sa)).toBe(2450)
     expect(er(sa)).toBe(3980)
-    // the hire's month paid ₱12,241.38 (Oct) / ₱12,482.76 (Aug, five cutoffs): SSS MSC 12,000 / 12,500,
+    // the hire's first week is paid by the days employed (Oct 14–16: 3, Aug 14: 1, × ₱1,379.31),
+    // so the month paid ₱11,637.93 (Oct) / ₱13,379.31 (Aug, five cutoffs): SSS MSC 11,500 / 13,500,
     // plus PhilHealth 750 and Pag-IBIG 200 on the rate
-    expect(ee(sh)).toBe(ym === '2026-10' ? 1550 : 1575)
+    expect(ee(sh)).toBe(ym === '2026-10' ? 1525 : 1625)
   })
 
   it.each(['split', 'first_period'] as const)('%s: rate decrease mid-month — no negative, no duplicate', async (timing) => {
@@ -96,7 +97,8 @@ describe('flows', () => {
     addAttendance(emp, '2026-10-19', '2026-10-31')
     const { r: r2 } = await runAndFinalize(ent, { period_start: '2026-10-16', period_end: '2026-10-31', pay_date: '2026-11-05' })
     const oct = [...slipsOf(r1.id), ...slipsOf(r2.id)]
-    // SSS on October's pay (₱3,965.52 + ₱13,620.69 → MSC 17,500: 875), PhilHealth 750 and Pag-IBIG 200 once
-    expect(ee(oct)).toBe(1825)
+    // both halves are paid by the days employed (3 and 10 × ₱1,379.31): SSS on October's
+    // pay (₱4,137.93 + ₱13,793.10 → MSC 18,000: 900), PhilHealth 750 and Pag-IBIG 200 once
+    expect(ee(oct)).toBe(1850)
   })
 })

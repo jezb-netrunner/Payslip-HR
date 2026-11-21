@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { reviewIsClean, reviewRun } from './runReview'
+import { groupWarnings, reviewIsClean, reviewRun } from './runReview'
 
 const slip = (id: string, net: number, name = `Emp ${id}`) => ({ id, name, net })
 
@@ -52,5 +52,28 @@ describe('reviewRun', () => {
   it('is clean when nothing changed', () => {
     const r = reviewRun({ slips: [slip('a', 10000)], covered: [{ id: 'a', name: 'Emp a' }], previous: [slip('a', 10100)] })
     expect(reviewIsClean(r)).toBe(true)
+  })
+})
+
+describe('grouped review warnings', () => {
+  it('says the same warning once, with the names', () => {
+    const g = groupWarnings([
+      { name: 'Jose Reyes Dela Cruz', firstName: 'Jose', warning: 'Jose was employed before Oct 1, 2026. If this employer paid Jose earlier, enter it.' },
+      { name: 'Liza Mae Mendoza', firstName: 'Liza Mae', warning: '2 outputs have no output report attached.' },
+      { name: 'Maria Cristina Lopez Santos', firstName: 'Maria Cristina', warning: 'Maria Cristina was employed before Oct 1, 2026. If this employer paid Maria Cristina earlier, enter it.' },
+    ])
+    expect(g).toEqual([
+      {
+        names: ['Jose Reyes Dela Cruz', 'Maria Cristina Lopez Santos'],
+        text: 'The employee was employed before Oct 1, 2026. If this employer paid the employee earlier, enter it.',
+      },
+      { names: ['Liza Mae Mendoza'], text: '2 outputs have no output report attached.' },
+    ])
+  })
+
+  it('keeps a warning seen once as it was written', () => {
+    expect(groupWarnings([{ name: 'Ana Reyes', firstName: 'Ana', warning: 'Ana was employed before Oct 1.' }])).toEqual([
+      { names: ['Ana Reyes'], text: 'Ana was employed before Oct 1.' },
+    ])
   })
 })

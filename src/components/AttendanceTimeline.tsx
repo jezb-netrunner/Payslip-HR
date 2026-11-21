@@ -188,11 +188,11 @@ export default function AttendanceTimeline({
               <div className="flex gap-6 md:block">
                 <div>
                   <p className="text-xs text-slate-500">Time in</p>
-                  <p className="text-sm font-semibold text-ink-900">{firstEntry ? fmtTime(firstEntry.clock_in) : '—'}</p>
+                  <p className="whitespace-nowrap text-sm font-semibold text-ink-900">{firstEntry ? fmtTime(firstEntry.clock_in) : '—'}</p>
                 </div>
                 <div className="md:hidden">
                   <p className="text-xs text-slate-500">Time out</p>
-                  <p className="text-sm font-semibold text-ink-900">{lastOut ? fmtTime(lastOut.clock_out) : '—'}</p>
+                  <p className="whitespace-nowrap text-sm font-semibold text-ink-900">{lastOut ? fmtTime(lastOut.clock_out) : '—'}</p>
                 </div>
                 <div className="md:hidden">
                   <p className="text-xs text-slate-500">Hours</p>
@@ -249,7 +249,7 @@ export default function AttendanceTimeline({
               <div className="hidden gap-6 md:flex md:border-l md:border-slate-200 md:pl-4">
                 <div>
                   <p className="text-xs text-slate-500">Time out</p>
-                  <p className="text-sm font-semibold text-ink-900">{lastOut ? fmtTime(lastOut.clock_out) : '—'}</p>
+                  <p className="whitespace-nowrap text-sm font-semibold text-ink-900">{lastOut ? fmtTime(lastOut.clock_out) : '—'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Hours</p>

@@ -11,7 +11,7 @@ import { remittances1601C } from './remittance'
 import { computeSss, computeWithholdingTax } from './statutory'
 import { periodsThisYear, periodWithholding } from './withholding'
 import { philhealthNgFor, philhealthNgProblem } from './philhealth'
-import { filingCalendar, type DueDate } from './dueDates'
+import { EDITABLE_FILINGS, filingCalendar, type DueDate } from './dueDates'
 import { round2, type DayComputation, type DayType, type PayLine, type PayrollEmployeeInput, type PayrollSettingsInput, type PeriodInput } from './types'
 
 const settings: PayrollSettingsInput = {
@@ -690,6 +690,14 @@ describe('C9: filing due dates', () => {
   it('1601-C: the 10th of the next month, December on 15 January (manual filing)', () => {
     expect(due(rows, '1601c', '2026-03-01')?.due).toBe('2026-04-10')
     expect(due(rows, '1601c', '2026-12-01')?.due).toBe('2027-01-15')
+  })
+
+  it('13th month: paid by 24 December, reported to DOLE by 15 January (Labor Advisory 21-2026); neither is changed per year', () => {
+    expect(due(rows, 'thirteenth_pay', '2026-01-01')?.due).toBe('2026-12-24')
+    expect(due(rows, 'dole_13th', '2026-01-01')).toMatchObject({ due: '2027-01-15', note: '' })
+    // later years: DOLE sets the date anew each year
+    expect(due(filingCalendar(2027, client, []), 'dole_13th', '2027-01-01')?.note).toMatch(/labor advisory/)
+    expect(EDITABLE_FILINGS).not.toContain('dole_13th')
   })
 
   it('1601-C on eFPS: 15/14/13/12/11 days after month-end for groups A to E', () => {

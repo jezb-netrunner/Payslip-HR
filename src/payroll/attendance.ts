@@ -333,6 +333,9 @@ export function computeAttendance(params: AttendanceParams): DayComputation[] {
       leaveStart: !worked && leave ? leave.start_date : undefined,
       ...(halfLeave ? { halfLeave } : {}),
       ...(partialAbsenceMinutes > 0 ? { partialAbsenceMinutes } : {}),
+      // a whole-day leave on a scheduled day with time on record: the day is
+      // paid from the time, the leave set aside (the review says so)
+      ...(worked && leave && scheduled && dayType === 'regular' ? { leaveOverWork: leave.type_name } : {}),
       ...(crossesInto ? { crossesInto } : {}),
     })
   }

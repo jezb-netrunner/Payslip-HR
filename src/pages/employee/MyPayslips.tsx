@@ -5,7 +5,7 @@ import { Badge, Card, EmptyState, Modal, PageHeader, Select, Spinner } from '../
 import { useAuth } from '../../lib/auth'
 import type { Entity, Payslip } from '../../lib/db'
 import { todayManila } from '../../lib/manila'
-import { fmtDate, money } from '../../lib/format'
+import { fmtDate, money, personInitials } from '../../lib/format'
 import { supabase } from '../../lib/supabase'
 
 // Employees can only SELECT their own payslips of finalized runs (RLS), and
@@ -93,7 +93,7 @@ export default function MyPayslips() {
       )}
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>
-        {viewing && entity && <PayslipView slip={viewing} run={runFromSlip(viewing)} company={entity} />}
+        {viewing && entity && <PayslipView slip={viewing} run={runFromSlip(viewing)} company={entity} initials={employee ? personInitials(employee) : undefined} />}
       </Modal>
     </div>
   )

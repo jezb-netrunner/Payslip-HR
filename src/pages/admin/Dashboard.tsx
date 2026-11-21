@@ -423,6 +423,8 @@ function derive(data: DashData, entity: Entity, today: string) {
     if (h && h.kind !== 'special_working') return []
     return active.filter(
       (e) =>
+        // a fixed salary keeps no time in/out
+        e.fixed_salary !== true &&
         (data.schedules.get(e.id)?.(date).shift ?? null) !== null &&
         e.hire_date <= date &&
         !data.recentLeaves.some((l) => l.employee_id === e.id && l.start_date <= date && l.end_date >= date),
@@ -564,7 +566,8 @@ function derive(data: DashData, entity: Entity, today: string) {
       icon: <Wallet className="size-4" />,
     })
 
-  const zeroRate = active.filter((e) => Number(e.monthly_rate) === 0 && Number(e.daily_rate) === 0)
+  // a worker paid by results may have no rate: the outputs pay them
+  const zeroRate = active.filter((e) => Number(e.monthly_rate) === 0 && Number(e.daily_rate) === 0 && e.output_pay !== 'basic')
   if (zeroRate.length > 0)
     actions.push({
       title: `${plural(zeroRate.length, 'employee')} with no pay rate set`,

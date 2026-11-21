@@ -207,6 +207,12 @@ export interface DayComputation {
    */
   partialAbsenceMinutes?: number
   /**
+   * An approved whole-day leave (its type name) on a scheduled ordinary day
+   * that has time in/out on record: payroll pays the day from the time and
+   * sets the leave aside, which still uses a leave credit.
+   */
+  leaveOverWork?: string
+  /**
    * Work that ran past midnight into a day of another kind (an ordinary eve
    * into a holiday, a holiday into an ordinary day): the premiums follow the
    * day the shift started, and the review names these hours.
@@ -560,6 +566,12 @@ export interface PayslipComputation {
     warnings: string[]
     days: DayComputation[]
     tax?: TaxTrace
+    /** the payroll holding a separation: what the final pay still owes (src/payroll/finalPay.ts) */
+    finalPay?: {
+      separationDate: string
+      thirteenth: number
+      leave: { typeId: string; code: string; name: string; days: number }[]
+    }
   }
 }
 
