@@ -911,11 +911,29 @@ and `react(purity)` warnings on old patterns (cleanup `stale` flags, `new
 Date()` in render): 54 → 62 warnings, none new code. Majors (TypeScript 7,
 vitest 5, @types/node 26, the actions bumps) left to their PRs, now checked
 by CI. Tests 538 → 561 vitest, 19 SQL suites. Changed screens re-shot in the
-harness at 1280/390 px: no page errors, no overflow.
+harness at 1280/390 px: no page errors, no overflow. Then (owner: "yes, apply
+the migration and merge") the migration went live and PR #29 merged; and
+(owner: "revoke the MAINTAIN privilege too") `revoke_maintain` went live with
+CI moved to Postgres 17 (see *Current deployed state*).
 
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-21 (23:52 UTC): `20261121235208 revoke_maintain` is live** (owner:
+"revoke the MAINTAIN privilege too", then "go ahead and merge it after
+applying"). PostgreSQL 17's MAINTAIN (VACUUM, ANALYZE, CLUSTER, REINDEX,
+LOCK TABLE) was granted to `authenticated` on 39 of the 44 public tables and
+in `postgres`' default privileges: now 0 tables, default `arwd`, `select`
+still on the 39. The statements sit in a `server_version_num >= 170000`
+block (PG 16 has no MAINTAIN, a plain REVOKE would break a 16 replay). CI's
+database job now runs **Postgres 17** like live (the whole replay passed on
+17 for the first time, and suite 28.5 checks MAINTAIN there; the local
+replica on 16 skips it with a notice). `fingerprint.sql` does not hash
+MAINTAIN (its `has_table_privilege(…, 'maintain')` errors on 16), so its ten
+lines are unchanged from the entry below. 45 migrations on live = the repo
+(file renamed from the `20261122000000` placeholder). Advisors unchanged. PR
+#29's front end deployed (Pages run 22 green, 23:50 UTC).
 
 **2026-11-21 (23:45 UTC): `20261121234510 request_limits_and_privileges` is
 live, and branch `claude/hopeful-pascal-jbro6o` goes to `main` in the PR
@@ -929,10 +947,8 @@ TRIGGER) on live = replica on all ten lines: tables 44 `de0ce9b5`, columns
 627 `815aff36`, constraints 351 `00a63827`, indexes 126 `eed92050`, policies
 70 `5d84aa29`, functions 94 `7ad516e8`, fn_grants `aff5c77e`, table_grants
 `c3d3adde`, triggers 127 `69b0e9e1`, storage_policies 3 `e7dbd16f`. Default
-privileges for `postgres`' tables now give `authenticated` `arwdm`. **Open:**
-the `m` is PostgreSQL 17's MAINTAIN (live is PG 17.6; the replica and CI are
-PG 16, which has no MAINTAIN): revoke it in a later migration inside a
-`server_version_num >= 170000` block so the replica still replays. Security
+privileges for `postgres`' tables gave `authenticated` `arwdm`: the `m`
+(PostgreSQL 17's MAINTAIN) is revoked by the next entry. Security
 advisors unchanged (22 lint-0029, RLS-no-policy INFO on the 5 service
 tables, leaked password protection). 44 migrations on live = the repo. Edge
 functions unchanged (`auth-guard` v2, `admin-users` v8).

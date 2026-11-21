@@ -9,8 +9,9 @@
 -- risk that row-level security does not cover: a LOCK TABLE would block
 -- payroll for everyone.
 --
--- The local replica and CI run PostgreSQL 16, which has no MAINTAIN, so the
--- statements run only on 17 or later and the migration still replays there.
+-- PostgreSQL 16 (the local replica) has no MAINTAIN, so the statements run
+-- only on 17 or later and the migration still replays there. CI and live
+-- run 17.
 
 do $$
 begin
