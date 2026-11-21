@@ -143,4 +143,24 @@ select set_config('request.jwt.claim.sub', :ra, true);
 select pg_temp.expect_error($$truncate public.payslips$$, '%permission denied%');
 rollback;
 
+\echo '--- 28.5 no MAINTAIN for API roles, now or later (PostgreSQL 17 and later: 16 has no MAINTAIN)'
+begin;
+create table public.zz_later_table_17 (id int);
+do $$
+begin
+  if current_setting('server_version_num')::int >= 170000 then
+    if exists (
+      select 1 from pg_class c
+      where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'
+        and (has_table_privilege('authenticated', c.oid, 'maintain') or has_table_privilege('anon', c.oid, 'maintain'))
+    ) then
+      raise exception 'CHECK FAILED: an API role holds MAINTAIN on a public table';
+    end if;
+  else
+    raise notice 'PostgreSQL %: no MAINTAIN privilege, 28.5 skipped', current_setting('server_version');
+  end if;
+end
+$$;
+rollback;
+
 \echo 'PASSED 28'
