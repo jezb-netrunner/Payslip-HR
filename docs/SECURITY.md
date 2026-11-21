@@ -26,9 +26,12 @@ PDF) leave the system: they are as sensitive as the database.
 - **Access rules in the database.** Row-level security on every table:
   admins reach only their clients, employees only their own records, and
   employees can never write attendance or payslips. Signed-out callers have
-  no table privileges at all. 25 SQL suites test the rules on a replica of
-  every migration (`supabase/tests/run.sh`); `fingerprint.sql` proves live
-  runs the tested schema.
+  no table privileges at all, and signed-in ones no TRUNCATE, REFERENCES or
+  TRIGGER (row-level security does not cover TRUNCATE). Request queues have
+  limits (reason length, pending requests per employee). 19 SQL suites test
+  the rules on a replica of every migration (`supabase/tests/run.sh`, also
+  run by CI on every pull request); `fingerprint.sql` proves live runs the
+  tested schema.
 - **Admin sign-in** (`auth-guard`): 12+ character passwords screened against
   known breaches, five failures lock the account for 30 minutes, two-step
   sign-in (authenticator app) for every admin, one active session, and the

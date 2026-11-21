@@ -869,9 +869,64 @@ forms, the sheet, roster, report and employee attendance at 1280 and 390 px
 (no page errors, no overflow). The owner asked for PR #27 to be merged in
 the same message: done right after this commit.
 
+### 2026-11-21 — Final review, then "fix all the findings" (branch `claude/hopeful-pascal-jbro6o`)
+
+**Review (no edits):** baseline green (538 vitest, build, lint, 18 SQL
+suites, `npm audit`); live = repo (43 migrations, `fingerprint.sql` equal on
+all ten lines, advisors = the accepted list); a fresh law re-check by a
+research agent (search extracts; nothing changed, see *Verified 2026 PH
+statutory figures*); a browser walkthrough agent (harness of the lesson
+*Browser walkthroughs*, 293 renders, 3 roles × 2 widths) plus engine probes
+in a scratch vitest config. Findings: monthly pay for part-period
+employment / heavy absence (lesson below), no final-pay prompt for the
+pro-rated 13th month or unused leave, leave `days` trusted from the caller
+(an employee filed −30 and 0 days; approval kept them), a 13th month payslip
+could withhold more than it paid, no warning for a whole-day leave on a
+worked day, TRUNCATE/REFERENCES/TRIGGER granted to `authenticated`,
+unlimited reasons and pending requests, no CI on PRs, no journal entry, and
+ten screen defects.
+
+**Fixed (owner: "fix all the findings"):** engine days method (lesson);
+`finalPay.ts` + the run page's *Final pay still due* (lesson); approval
+recounts leave days from the schedule; 13th month tax capped at its pay;
+`leaveOverWork` warning; `journal.ts` (balanced voucher per run, Journal
+entry CSV); due dates for the 13th month pay (Dec 24) and the DOLE report
+(Jan 15, LA 21-2026; not overridable: `filing_due_dates` CHECK can't widen
+on live); the 13th month note cites the Revised Guidelines' exclusions
+(verified by search: holiday pay is out of the basis unless a contract or
+practice includes it); Pag-IBIG hint with the reported Circular 499 windows.
+Migration `20261121120000_request_limits_and_privileges` (placeholder, **not
+live**): leave days 0 < days ≤ span (guard + CHECK), reason ≤ 500 / review
+notes ≤ 1,000, pending caps 20 leaves / 31 corrections / 5 advances (advisory
+lock per employee), TRUNCATE/REFERENCES/TRIGGER revoked incl. default
+privileges; SQL suite 28; `fingerprint.sql` table_grants now include those
+privileges (hash format changed). Screens: walkthrough items 1–10, grouped
+review warnings (`groupWarnings`), compact/wrap table cells (`Th compact
+wrap`, `Td compact pad`), phone time sheets as stacked grid rows, Holidays
+error state. CI: `.github/workflows/ci.yml` (lint, tests, build, SQL suite on
+Postgres 16) on PRs and branch pushes; the deploy calls it first. Merged
+Dependabot's minor/patch group (supabase-js 2.119, React 19.3, oxlint 1.91,
+vite 8.3.6): tests/build/audit clean; oxlint 1.91 adds `react(immutability)`
+and `react(purity)` warnings on old patterns (cleanup `stale` flags, `new
+Date()` in render): 54 → 62 warnings, none new code. Majors (TypeScript 7,
+vitest 5, @types/node 26, the actions bumps) left to their PRs, now checked
+by CI. Tests 538 → 561 vitest, 19 SQL suites. Changed screens re-shot in the
+harness at 1280/390 px: no page errors, no overflow.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-21: not live yet** — migration
+`20261121120000_request_limits_and_privileges` (replica only, all 19 suites
+pass) and the front end of branch `claude/hopeful-pascal-jbro6o` await the
+owner. They are independent (the front end reads no new column), but apply
+the migration with the merge. After the apply, live's `fingerprint.sql`
+should equal the replica's: constraints 351 `00a63827`, functions 94
+`7ad516e8`, table_grants `c3d3adde` (new format), the other seven unchanged
+from 2026-11-11. Live data checked 2026-11-21 (read-only): 5 leave requests
+all within the new bounds, longest reason 63 characters, ≤ 1 pending request
+per employee.
 
 **2026-11-11 (09:13 UTC): `20261111091354 half_day_leave` is live, and PR
 #27 (the audit and half-day leave) is merged** (owner: "build half-day leave
@@ -1287,6 +1342,19 @@ and 19 of 2027 match Proclamations 1006 / 1189 / 1264 and 1427 (the Barangay
   suspensions: no computation in the app; RR 6-2026 / RMC 112-2026: a
   consultant's invoice shows the withheld tax on its own line (from 16 Oct
   2026), no rate change.
+
+**Re-check of 2026-11-21** (research agent, search extracts): no change to
+any rate, table or holiday since 11 Nov; nothing enacted for 2027 (HB 10345
+still in committee/plenary, Senate bills filed). New: DOLE **Labor Advisory
+21-2026** (6 Nov) — 13th month by 24 Dec, report through the DOLE online
+compliance portal by **15 Jan 2027** (in the due dates); **HDMF Circular 499**
+windows reported by PIA (7 Nov) by the employer name's first letter: A–F
+1st–7th, G–N 5th–11th, O–Z 9th–15th of the next month (other sites still
+show the old windows — the Settings hint says to check eSRS); **CAR-24**
+₱505/day from 30 Dec 2025, no further tranche; NCR-27 still before the
+Supreme Court (₱780 tranche from 20 Jan 2027 if revived). RR 29-2025's
+laundry ₱400 and achievement award ₱12,000 not seen in the extracts (no
+amendment found either).
 
 Re-verify on these triggers: every January (agency announcements, new BIR
 RRs); wage orders per region (NCR-28 has no second tranche; watch the
@@ -1804,6 +1872,12 @@ Seed through the repo's own `addEntity` / `addEmployee` / `computeRun` /
 `EntityProvider`, and screenshot with Playwright while collecting page
 errors, console errors and `scrollWidth - clientWidth`. Resolving by path
 catches `./supabase` and `../../lib/supabase` alike.
+
+The harness's Vite server does not see edits to the repo (outside its
+root): restart it (`--force`) after each change or it serves the old code
+(2026-11-21, a "fix" looked unapplied). Its fake builder needs any new
+query method the pages call (`overlaps` was missing: the page crashed only
+in the harness).
 
 For one new component, a scratch Vite harness is enough (2026-11-06, ~10
 minutes): root in the scratchpad with `node_modules` symlinked from the
@@ -2569,6 +2643,32 @@ who came in a little early or late around noon would be docked minutes the
 leave was meant to cover. Covering the shortfall pays exactly one day for a
 half worked plus a half on leave, never more than the day. A view that
 ignored the half showed "late" on a morning the employee had on leave.
+
+### A monthly rate is paid by the days for part of a period or most of it unpaid (design decision, 2026-11-21)
+
+> `computePayslip`, one monthly rate segment: `partial` (a covered day outside the employment) or `heavy` (unpaid covered days > paid) → basic = min(daily × paid days, period salary, and for `heavy` the salary less absences with one day more paid); otherwise salary less absences. Days outside the employment are neither paid nor absences (`coveredIn`, no `outside_employment` line on one segment).
+
+A half month holds 9 to 13 workdays but the salary pays the divisor's
+average (261 ÷ 24 = 10.875), so salary less absences pays a short period
+something for no work (₱30k, absent all of Feb 16–28: ₱2,586.21) and a long
+one less than the days worked (worked 1 of 12: ₱0; a ₱14k hire's 2 days:
+₱563.22, below any minimum wage). A pure switch to days × rate at "more than
+half unpaid" paid more for fewer days in 12-workday periods (6 worked:
+₱6,724.14; 5 worked: ₱6,896.55), hence the one-day-more cap; a straight-line
+taper was rejected because a day's value would no longer be the daily rate.
+`partialPeriod.test.ts` sweeps every attendance count of a 12- and a
+9-workday period for monotony. Rate changes inside the period (several
+segments) keep the old rule. A minimum-wage-per-paid-day warning covers
+salary less absences in the ordinary regime. Why it mattered: the old
+results were legally wrong at both ends and no warning fired.
+
+### Final pay's 13th month is a 13th month run ending on the separation date (confirmed approach, 2026-11-21)
+
+> `payroll_adjustments.category` has no 13th month and can't widen on live, so the payroll holding a separation stores `computation_trace.finalPay` (13th month to the last day, leave left from `unusedLeave`) and the run page creates a `thirteenth_month` run with `employee_ids = [leaver]`, `period_end = separation_date` (its month's SSS then trues up), pay date ≥ the payroll's, once the separation payroll is final (its basic counts). Leave conversions are `de_minimis`/`monetized_vl` adjustments added from the same card on a draft (the engine decides taxability).
+
+Why it mattered: final pay is due within 30 days (LA 06-20) and nothing in
+the app said so; the 13th month run for one employee and a final_pay run
+after the last day both already worked, they only needed the prompt.
 
 ### Parallel forks spend the usage limit, not time (process lesson, 2026-11-11)
 
