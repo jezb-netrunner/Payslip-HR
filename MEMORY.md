@@ -895,8 +895,8 @@ entry CSV); due dates for the 13th month pay (Dec 24) and the DOLE report
 on live); the 13th month note cites the Revised Guidelines' exclusions
 (verified by search: holiday pay is out of the basis unless a contract or
 practice includes it); Pag-IBIG hint with the reported Circular 499 windows.
-Migration `20261121120000_request_limits_and_privileges` (placeholder, **not
-live**): leave days 0 < days ≤ span (guard + CHECK), reason ≤ 500 / review
+Migration `20261121234510_request_limits_and_privileges` (live the same day,
+see *Current deployed state*): leave days 0 < days ≤ span (guard + CHECK), reason ≤ 500 / review
 notes ≤ 1,000, pending caps 20 leaves / 31 corrections / 5 advances (advisory
 lock per employee), TRUNCATE/REFERENCES/TRIGGER revoked incl. default
 privileges; SQL suite 28; `fingerprint.sql` table_grants now include those
@@ -917,16 +917,25 @@ harness at 1280/390 px: no page errors, no overflow.
 
 ## Current deployed state (update when it changes)
 
-**2026-11-21: not live yet** — migration
-`20261121120000_request_limits_and_privileges` (replica only, all 19 suites
-pass) and the front end of branch `claude/hopeful-pascal-jbro6o` await the
-owner. They are independent (the front end reads no new column), but apply
-the migration with the merge. After the apply, live's `fingerprint.sql`
-should equal the replica's: constraints 351 `00a63827`, functions 94
-`7ad516e8`, table_grants `c3d3adde` (new format), the other seven unchanged
-from 2026-11-11. Live data checked 2026-11-21 (read-only): 5 leave requests
-all within the new bounds, longest reason 63 characters, ≤ 1 pending request
-per employee.
+**2026-11-21 (23:45 UTC): `20261121234510 request_limits_and_privileges` is
+live, and branch `claude/hopeful-pascal-jbro6o` goes to `main` in the PR
+carrying this entry** (owner: "yes, apply the migration and merge"). Applied
+through MCP `apply_migration` in one call (no DROP, comments without
+semicolons, the three guards from the replica's definitions); repo file
+renamed from the `20261121120000` placeholder. Checked just before: live at
+`20261111091354`, its 5 leave requests and all reasons/notes within the new
+CHECKs. `fingerprint.sql` (table_grants now include TRUNCATE / REFERENCES /
+TRIGGER) on live = replica on all ten lines: tables 44 `de0ce9b5`, columns
+627 `815aff36`, constraints 351 `00a63827`, indexes 126 `eed92050`, policies
+70 `5d84aa29`, functions 94 `7ad516e8`, fn_grants `aff5c77e`, table_grants
+`c3d3adde`, triggers 127 `69b0e9e1`, storage_policies 3 `e7dbd16f`. Default
+privileges for `postgres`' tables now give `authenticated` `arwdm`. **Open:**
+the `m` is PostgreSQL 17's MAINTAIN (live is PG 17.6; the replica and CI are
+PG 16, which has no MAINTAIN): revoke it in a later migration inside a
+`server_version_num >= 170000` block so the replica still replays. Security
+advisors unchanged (22 lint-0029, RLS-no-policy INFO on the 5 service
+tables, leaked password protection). 44 migrations on live = the repo. Edge
+functions unchanged (`auth-guard` v2, `admin-users` v8).
 
 **2026-11-11 (09:13 UTC): `20261111091354 half_day_leave` is live, and PR
 #27 (the audit and half-day leave) is merged** (owner: "build half-day leave
