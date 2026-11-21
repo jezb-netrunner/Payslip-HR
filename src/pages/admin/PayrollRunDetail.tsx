@@ -54,16 +54,18 @@ import type { Employee, Payslip, PayrollAdjustment, PayrollRun, PayrollVoid, Pay
 import { useEntity } from '../../lib/entity'
 import { useAuth } from '../../lib/auth'
 import { useRecordClient } from '../../lib/recordClient'
-import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, plural } from '../../lib/format'
+import { fmtDate, fmtDateTime, fmtMonth, fmtPeriod, fullName, money, personInitials, plural } from '../../lib/format'
 import { BIR_BUCKET_LABELS, FREQUENCY_LABELS, MATERNITY_BENEFIT_LABELS, PAYMENT_METHOD_LABELS, LIQUIDATABLE_CATEGORIES, PAY_ITEM_TYPE_LABELS, SUPPLEMENTARY_ITEM_TYPES } from '../../lib/labels'
 import { computeRun, employeesForRun, finalizeRun, voidRun, type RunComputationResult } from '../../payroll/service'
 import { controlTotals } from '../../payroll/controlTotals'
+import { payrollJournal } from '../../payroll/journal'
 import { useReportStamp } from '../../lib/useReportStamp'
 import { logActivity } from '../../lib/activity'
 import { RunDeductionsCard } from './RunDeductions'
+import { FinalPayCard } from './FinalPayCard'
 import { supabase } from '../../lib/supabase'
 import { errorMessage } from '../../lib/errors'
-import { REVIEW_CHANGE_SHARE, reviewIsClean, reviewRun, type ReviewSlip, type RunReview } from '../../lib/runReview'
+import { groupWarnings, REVIEW_CHANGE_SHARE, reviewIsClean, reviewRun, type ReviewSlip, type RunReview } from '../../lib/runReview'
 import { round2, type DeMinimisKind, type MaternityBenefit, type PayItemType } from '../../payroll/types'
 import { ALLOWANCE_DE_MINIMIS, DE_MINIMIS_LABELS } from '../../lib/deMinimis'
 
@@ -365,6 +367,25 @@ export default function PayrollRunDetail() {
     )
   }
 
+  /** The run's balanced journal entry for the books (src/payroll/journal.ts). */
+  function exportJournal() {
+    if (!run) return
+    const j = payrollJournal(slips)
+    const no = run.control_no ?? '(draft)'
+    const date = run.pay_date
+    downloadCsv(
+      `payroll_journal_${entity?.code}_${run.period_end}.csv`,
+      [
+        ['Date', 'Reference', 'Account', 'Debit', 'Credit'],
+        ...j.lines.map((l) => [date, no, l.account, l.debit || '', l.credit || '']),
+        ['', '', `TOTAL${j.balanced ? '' : ' (OUT OF BALANCE)'}`, j.debit, j.credit],
+        [],
+        [`Payroll ${runLabel(run)}, pay date ${fmtDate(run.pay_date)}${isDraft ? ' (DRAFT: not posted)' : ''}. Map the accounts to the client's chart of accounts.`],
+      ],
+      stamp(`Payroll journal entry ${no}, ${runLabel(run)}, pay date ${fmtDate(run.pay_date)}`),
+    )
+  }
+
   const cashSlips = slips.filter((s) => s.payment_method === 'cash')
   const cashRows = cashSlips.map((s) => ({ slip: s, b: denominationBreakdown(Number(s.net_pay)) }))
   const cashTotal = sumBreakdowns(cashRows.map((r) => r.b))
@@ -388,13 +409,21 @@ export default function PayrollRunDetail() {
   const warnings = slips.flatMap((s) =>
     (s.computation_trace?.warnings ?? []).map((w) => ({
       name: (s.employee_snapshot as Record<string, string>).name ?? '',
+      firstName: employees.find((e) => e.id === s.employee_id)?.first_name,
       warning: w,
     })),
   )
+  // the same warning for several people reads once, with their names
+  const warningGroups = groupWarnings(warnings)
   const isDraft = run.status === 'draft'
   // the database clears totals whenever attendance, adjustments, leave or
   // pay settings change after computing; finalize refuses such a draft
   const upToDate = typeof t.employees === 'number' && t.employees === slips.length && slips.length > 0
+  // the avatar's letters from the employee record (first and last name), as on every other screen
+  const initialsOf = (eid: string) => {
+    const e = employees.find((x) => x.id === eid)
+    return e ? personInitials(e) : undefined
+  }
   const empName = (eid: string) => {
     const e = employees.find((x) => x.id === eid)
     return e ? fullName(e) : '—'
@@ -505,8 +534,10 @@ export default function PayrollRunDetail() {
                 • {w.employee === 'This run' ? '' : `${w.employee}: `}{w.warnings.join('; ')}
               </p>
             ))}
-            {warnings.map((w, i) => (
-              <p key={i} className="text-xs text-amber-700">• {w.name}: {w.warning}</p>
+            {warningGroups.map((g, i) => (
+              <p key={i} className="text-xs text-amber-700">
+                • <span className="font-semibold">{g.names.join(', ')}</span>: {g.text}
+              </p>
             ))}
           </div>
         )}
@@ -538,6 +569,9 @@ export default function PayrollRunDetail() {
           )}
           <Button variant="secondary" onClick={() => exportRegister()} disabled={slips.length === 0}>
             <Download className="size-4" /> Register CSV
+          </Button>
+          <Button variant="secondary" onClick={exportJournal} disabled={slips.length === 0} title="Balanced debit/credit entry for the books">
+            <Download className="size-4" /> Journal entry
           </Button>
           <Button variant="secondary" onClick={() => setExporting(true)} disabled={slips.length === 0}>
             <FileDown className="size-4" /> Payslips PDF
@@ -577,7 +611,8 @@ export default function PayrollRunDetail() {
                   Computed {fmtDateTime(run.computed_at)}{run.computed_by_name ? ` by ${run.computed_by_name}` : ''}
                 </p>
               )}
-              <div className="mt-4 flex flex-wrap gap-x-10 gap-y-4">
+              {/* two by two: four stats in a wrapping row left one alone on a line */}
+              <div className="mt-4 grid grid-cols-2 gap-x-10 gap-y-4">
                 <Fact big label="Net payout" value={money(t.net ?? 0)} />
                 <Fact label="Gross pay" value={money(t.gross ?? 0)} />
                 {isThirteenth ? (
@@ -688,7 +723,7 @@ export default function PayrollRunDetail() {
                             checked={picked.has(s.employee_id)}
                             onChange={() => togglePicked(s.employee_id)}
                           />
-                          <Avatar name={snap.name ?? '?'} />
+                          <Avatar name={snap.name ?? '?'} initials={initialsOf(s.employee_id)} />
                           <div className="min-w-0">
                             <p className="line-clamp-2 break-words font-semibold leading-snug text-ink-900">{snap.name}</p>
                             <p className="truncate text-xs text-slate-400">
@@ -815,6 +850,8 @@ export default function PayrollRunDetail() {
               )}
             </Card>
           )}
+
+          {!isThirteenth && <FinalPayCard run={run} slips={slips} adjustments={adjustments} onChanged={load} />}
 
           {!isThirteenth && <RunDeductionsCard run={run} covered={covered} slips={slips} onChanged={load} />}
 
@@ -974,7 +1011,18 @@ export default function PayrollRunDetail() {
                 <RunFact label="Net pay" value={money(control.net)} />
                 <RunFact label="Withholding tax" value={money(control.withholdingTax)} />
                 {control.firstNo && (
-                  <RunFact label="Payslip nos." value={control.firstNo === control.lastNo ? control.firstNo : `${control.firstNo} to ${control.lastNo}`} />
+                  <RunFact
+                    label="Payslip nos."
+                    value={
+                      control.firstNo === control.lastNo ? (
+                        control.firstNo
+                      ) : (
+                        <>
+                          <span className="whitespace-nowrap">{control.firstNo}</span> to <span className="whitespace-nowrap">{control.lastNo}</span>
+                        </>
+                      )
+                    }
+                  />
                 )}
               </dl>
               {isDraft && !upToDate ? (
@@ -1030,7 +1078,7 @@ export default function PayrollRunDetail() {
       </div>
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>
-        {viewing && <PayslipView slip={viewing} run={run} company={entity} showTrace />}
+        {viewing && <PayslipView slip={viewing} run={run} company={entity} showTrace initials={initialsOf(viewing.employee_id)} />}
       </Modal>
 
       {exporting && (

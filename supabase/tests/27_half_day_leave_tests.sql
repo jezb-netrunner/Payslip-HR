@@ -89,7 +89,7 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', :uh1, true);
 select pg_temp.expect_error($$update leave_requests set half_day = 'am' where id = '50000027-0000-0000-0000-000000000001'$$, '%only cancel a pending request%');
-select pg_temp.expect_error($$update leave_requests set half_day = null, days = 0 where id = '50000027-0000-0000-0000-000000000001'$$, '%only cancel a pending request%');
+select pg_temp.expect_error($$update leave_requests set half_day = null, days = 1 where id = '50000027-0000-0000-0000-000000000001'$$, '%only cancel a pending request%');
 select pg_temp.expect_error($$update leave_requests set half_day = 'am' where id = '50000027-0000-0000-0000-000000000002'$$, '%only cancel a pending request%');
 update leave_requests set status = 'cancelled' where id = '50000027-0000-0000-0000-000000000002';
 select pg_temp.check((select status = 'cancelled' from leave_requests where id = '50000027-0000-0000-0000-000000000002'), 'cancelling still works');

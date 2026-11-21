@@ -22,7 +22,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # lint, tests, build and the SQL / RLS suite (ci.yml) before anything deploys
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

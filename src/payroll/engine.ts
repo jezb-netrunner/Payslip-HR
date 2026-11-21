@@ -566,6 +566,14 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       `Half-day leave on ${halfUnused.map((d) => shortDate(d.date)).join(', ')}, but the time on record already covers the whole shift: the leave changed nothing in pay. Cancel the leave if the employee worked the whole day.`,
     )
   }
+  // A whole-day leave on a day with time on record: the day is paid from the
+  // time and the leave is set aside, but it still uses a leave credit.
+  const leaveOnWork = fixed ? [] : days.filter((d) => d.leaveOverWork && employed(d.date))
+  if (leaveOnWork.length > 0) {
+    warnings.push(
+      `Approved leave on a day with time in/out on record (${leaveOnWork.map((d) => `${d.leaveOverWork}, ${shortDate(d.date)}`).join('; ')}): payroll pays the day from the time on record and sets the leave aside, which still uses a leave credit. If the employee worked, cancel the leave (or make it a half day); if not, delete the time entry.`,
+    )
+  }
   // Night work across midnight into a day of another kind: the premium
   // (holiday, special day) follows the day the shift started. A company
   // that counts holiday hours by the calendar day adjusts the difference.
@@ -646,8 +654,9 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   }
 
   // per rate segment: the days and minutes each rate values
+  // (covered: days the monthly rate covers; coveredIn: those inside the employment)
   const seg = segs.map(() => ({
-    covered: 0, maternity: 0, absence: 0, unpaidHoliday: 0, outside: 0, late: 0, undertime: 0, extra: 0,
+    covered: 0, coveredIn: 0, maternity: 0, absence: 0, unpaidHoliday: 0, outside: 0, late: 0, undertime: 0, extra: 0,
     dailyBasic: 0, worked: 0, paidLeave: 0, paidLeaveApart: 0, absentDays: 0,
   }))
 
@@ -661,7 +670,11 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     const c = seg[k]
     const { daily, hourly } = segRates[k]
     const payType = segs[k].payType
+    // days before the hire date or after the last day are outside the
+    // employment: neither paid nor absences
+    const employedThen = employed(d.date)
     if (builtIn > 0) c.covered += dayShare(d)
+    if (builtIn > 0 && employedThen) c.coveredIn += dayShare(d)
     // maternity leave is paid as the maternity benefit, not as salary (and
     // the benefit runs on every calendar day, holidays included)
     if (!worked && d.leaveCode === MATERNITY_LEAVE_CODE) {
@@ -681,7 +694,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       c.late += d.lateMinutes
       c.undertime += d.undertimeMinutes
     }
-    if (d.absent && !fixed) {
+    if (d.absent && !fixed && employedThen) {
       absentDays += 1
       c.absence += dayShare(d)
       c.absentDays += 1
@@ -691,7 +704,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // paid at the day's rate to a daily-paid employee. An unpaid half is leave
     // without pay. With no time in/out at all, the half not on leave is half
     // a day's absence.
-    const half = d.dayType === 'regular' ? d.halfLeave : undefined
+    const half = d.dayType === 'regular' && employedThen ? d.halfLeave : undefined
     if (half) {
       const expected = d.expectedMinutes || stdMin
       if (half.unpaidMinutes > 0) {
@@ -724,7 +737,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // paid inside the rate (regular days always; holidays; rest days too
     // under divisor 365); for daily-paid it is a statistic on scheduled days
     // (no work already means no pay).
-    if (d.onPaidLeave && d.dayType === 'regular') {
+    if (d.onPaidLeave && d.dayType === 'regular' && employedThen) {
       paidLeaveDays += 1
       paidLeaveDaysNotWorked += 1
       c.paidLeave += 1
@@ -733,18 +746,17 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     // an unworked regular holiday is paid on the workday-before rule, even
     // inside a leave without pay that starts on it — never before the hire
     // date or after the last day
-    const employedThen = employed(d.date)
     const holidayOk = employedThen && holidayPaid.get(d.date) !== false
-    if (!worked && !employedThen && (!d.absent || fixed) && !d.onUnpaidLeave && payType === 'monthly' && builtIn > 0) {
+    if (!worked && !employedThen && payType === 'monthly' && builtIn > 0) {
       outsideEmploymentDays += 1
-      c.outside += fixed ? dayShare(d) : 1
+      c.outside += dayShare(d)
     }
     // a fixed salary presumes the scheduled workdays worked (allowances per day)
     if (fixed && employedThen && d.scheduled && d.dayType === 'regular' && !d.onPaidLeave && !d.onUnpaidLeave) {
       daysWorked += 1
       c.worked += 1
     }
-    if (d.onUnpaidLeave && !worked && !(isRegularHolidayType(d.dayType) && holidayOk)) {
+    if (d.onUnpaidLeave && !worked && employedThen && !(isRegularHolidayType(d.dayType) && holidayOk)) {
       if (unpaidLeaveCharged(d.dayType, payType, settings.workingDaysDivisor)) {
         unpaidLeaveDays += 1
         c.absence += dayShare(d)
@@ -812,7 +824,7 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
         // whether or not it falls on the rest day, on the workday-before rule
         if (holidayOk) holidayPremium += daily
       }
-      if (d.onPaidLeave && d.dayType === 'regular') {
+      if (d.onPaidLeave && d.dayType === 'regular' && employedThen) {
         dailyBasic += daily * dayShare(d)
         c.dailyBasic += daily * dayShare(d)
       }
@@ -931,6 +943,8 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
   // certified by DOLE or an allied agency (RR 2-98 Sec. 2.78.1(B)(13))
   const uncertifiedHazard = (bucket: BirBucket) => isMwe && bucket === 'hazard' && !employee.hazardCertificationRef?.trim()
   let basicPay: number
+  // a monthly rate paid by the days this period (employed for part of it, or most of it unpaid)
+  let byDays = false
   // a day count or minutes valued at each monthly segment's rate (a daily
   // rate pays the days worked, so it docks nothing)
   const perDay = (k: number) => segRates[k].daily
@@ -968,9 +982,53 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
     notes.push('Final pay after the last paid period: one-time items, tax adjustment and rounding settlement only.')
   } else if (segs.some((g) => g.payType === 'monthly')) {
     let monthlyBasic: number
+    // a period wholly on maternity leave pays no salary, whatever its number
+    // of workdays (the maternity benefit replaces it)
+    const wholePeriodOnLeave = days.length > 0 && days.every((d) => d.leaveCode === MATERNITY_LEAVE_CODE && d.workedMinutes <= 0)
     if (segs.length === 1) {
-      basicPay = monthlyBasic = allocateMonthly(segs[0].monthlyRate, period.index, period.count)
-      earn('basic', 'Basic Pay', basicPay, 'basic')
+      const salary = allocateMonthly(segs[0].monthlyRate, period.index, period.count)
+      const g = seg[0]
+      const rate = segRates[0].daily
+      // days the rate covers inside the employment that it does not pay
+      const unpaid = g.absence + g.unpaidHoliday + g.maternity
+      const paid = Math.max(0, g.coveredIn - unpaid)
+      // A period holds 9 to 13 workdays while the salary pays the divisor's
+      // average (10.875 a half month), so "salary less absences" pays a period
+      // with fewer workdays something for no work, and a longer one less than
+      // the days worked. That evens out over a year of ordinary attendance,
+      // not for someone employed only part of the period or absent most of it:
+      // they are paid by the days, at the daily rate.
+      const partial = g.outside > 0
+      const heavy = !partial && unpaid > paid + 1e-9
+      if ((partial || heavy) && !wholePeriodOnLeave) {
+        byDays = true
+        const full = round2(paid * rate)
+        // most of the period unpaid: never more than the salary less absences
+        // would pay with one day more, so a day more never pays less
+        const oneMore = heavy ? round2(salary - Math.max(0, unpaid - 1) * rate) : salary
+        basicPay = monthlyBasic = round2(Math.max(0, Math.min(full, salary, oneMore)))
+        const span = [
+          employee.hireDate && employee.hireDate > period.start ? `hired ${shortDate(employee.hireDate)}` : '',
+          employee.separationDate && employee.separationDate < period.end ? `last day ${shortDate(employee.separationDate)}` : '',
+        ].filter(Boolean).join(', ')
+        const n = round2(paid)
+        earn(
+          'basic',
+          partial
+            ? `Basic Pay (${n} day/s paid at ${plainAmount(rate)}; ${span})`
+            : `Basic Pay (${n} of ${round2(g.coveredIn)} days paid at ${plainAmount(rate)})`,
+          basicPay,
+          'basic',
+        )
+        notes.push(
+          partial
+            ? `Employed for part of the period (${span}): paid by the days, ${n} day/s × ₱${plainAmount(rate)} = ₱${plainAmount(full)}${full > salary ? `, capped at the period's salary ₱${plainAmount(salary)}` : ''}. Days outside the employment are neither paid nor absences.`
+            : `More than half the days the monthly rate covers this period were unpaid (${round2(unpaid)} of ${round2(g.coveredIn)}): paid by the days, ${n} × ₱${plainAmount(rate)} = ₱${plainAmount(full)}${oneMore < full ? `, but not more than the salary less absences with one day more paid (₱${plainAmount(Math.max(0, oneMore))}), so a day more never pays less` : ''}.`,
+        )
+      } else {
+        basicPay = monthlyBasic = salary
+        earn('basic', 'Basic Pay', basicPay, 'basic')
+      }
     } else {
       // The rate changed inside the period. Monthly-rated for at least half
       // of it, the monthly rate in effect longest pays the period's salary
@@ -1004,26 +1062,37 @@ export function computePayslip(params: ComputePayslipParams): PayslipComputation
       salaryLeft = round2(salaryLeft - taken)
       return taken
     }
-    // a period wholly on maternity leave pays no salary, whatever its number
-    // of workdays (the maternity benefit replaces it)
-    const wholePeriodOnLeave = days.length > 0 && days.every((d) => d.leaveCode === MATERNITY_LEAVE_CODE && d.workedMinutes <= 0)
-    const maternityDeduction = dock(wholePeriodOnLeave ? monthlyBasic : valued((g) => g.maternity, perDay))
+    // paid by the days: the days not paid are already left out
+    const unpaidDock = (amount: number) => (byDays ? 0 : dock(amount))
+    const maternityDeduction = unpaidDock(wholePeriodOnLeave ? monthlyBasic : valued((g) => g.maternity, perDay))
     if (maternityDeduction > 0) {
       earn('maternity', `Maternity leave (${maternityDates.length} day/s, paid as the maternity benefit)`, -maternityDeduction, 'basic')
     }
-    const absenceDeduction = dock(valued((g) => g.absence, perDay))
+    const absenceDeduction = unpaidDock(valued((g) => g.absence, perDay))
     if (absenceDeduction > 0) {
       const n = counted((g) => g.absentDays)
       const share = counted((g) => g.absence)
       earn('absence', `${fixed ? 'Leave without pay' : 'Absences'} (${n} day/s${share !== n ? `, ${share} days' pay` : ''})`, -absenceDeduction, 'basic')
     }
-    const unpaidHolidayDeduction = dock(valued((g) => g.unpaidHoliday, perDay))
+    const unpaidHolidayDeduction = unpaidDock(valued((g) => g.unpaidHoliday, perDay))
     if (unpaidHolidayDeduction > 0) {
       earn('holiday_unpaid', `Regular holiday not paid (${unpaidHolidayDays} day/s)`, -unpaidHolidayDeduction, 'basic')
     }
-    const outsideDeduction = dock(valued((g) => g.outside, perDay))
+    const outsideDeduction = unpaidDock(valued((g) => g.outside, perDay))
     if (outsideDeduction > 0) {
-      earn('outside_employment', `${fixed ? 'Days' : 'Holidays'} before the hire date or after the last day (${outsideEmploymentDays} day/s)`, -outsideDeduction, 'basic')
+      earn('outside_employment', `Days before the hire date or after the last day (${outsideEmploymentDays} day/s)`, -outsideDeduction, 'basic')
+    }
+    // the minimum wage is due for each day paid (the regional wage order):
+    // salary less absences in a long period can fall below it
+    const paidDaysAll = segs.reduce(
+      (s, g, k) => (g.payType === 'monthly' ? s + Math.max(0, seg[k].coveredIn - seg[k].absence - seg[k].unpaidHoliday - seg[k].maternity) : s),
+      0,
+    )
+    const paidForDays = round2(monthlyBasic - maternityDeduction - absenceDeduction - unpaidHolidayDeduction - outsideDeduction)
+    if (!byResults && !byDays && wageFloor > 0 && paidDaysAll > 0 && paidForDays / paidDaysAll + 0.005 < wageFloor) {
+      warnings.push(
+        `Basic pay ₱${plainAmount(paidForDays)} for ${round2(paidDaysAll)} day/s paid is ₱${plainAmount(paidForDays / paidDaysAll)} a day, below ${employee.apprentice ? '75% of ' : ''}the minimum wage ₱${plainAmount(settings.minimumWageDaily)} (the regional wage order): pay the difference as a payroll adjustment (Basic).`,
+      )
     }
     const lateDeduction = dock(valued((g) => g.late, perMin))
     if (lateDeduction > 0) {
@@ -1843,7 +1912,9 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
   const exemptRemaining = Math.max(0, cap - priorExempt - usedThisTaxYear)
   const taxable13 = round2(Math.max(0, gross13 - exemptRemaining))
 
-  notes.push(`13th month = 1/12 of YTD basic pay ₱${ytdBasic.toLocaleString()} (PD 851).`)
+  notes.push(
+    `13th month = 1/12 of YTD basic pay ₱${ytdBasic.toLocaleString()} (PD 851). Basic pay leaves out overtime, premium, night differential and holiday pay, cost-of-living allowances and leave converted to cash unless a contract or company practice treats them as basic salary (Revised Guidelines on the Implementation of the 13th Month Pay Law): a daily-paid employee's pay for an unworked regular holiday is holiday pay, while a monthly rate already includes its holidays. Pay a policy that counts more as a payroll adjustment.`,
+  )
   if (alreadyPaid > 0) notes.push(`Less 13th month already paid this year: ₱${alreadyPaid.toLocaleString()}.`)
   notes.push(
     `Tax-exempt cap for 13th month + other benefits: ₱${cap.toLocaleString()}; already used this tax year: ₱${round2(priorExempt + usedThisTaxYear).toLocaleString()}.`,
@@ -1936,6 +2007,15 @@ function computeThirteenthMonth(params: ComputePayslipParams): PayslipComputatio
       notes.push(
         `₱${taxable13.toLocaleString()} of the 13th month pay exceeds the exemption cap: taxed at ${Math.round(bracket.rate * 100)}%, the rate of the bracket of the regular monthly pay (RR 2-98 Sec. 2.79(B)(3)).`,
       )
+    }
+    // never more than the pay after SSS: a catch-up of earlier short
+    // withholding (cumulative average method) continues in later payrolls
+    const bearable = round2(Math.max(0, gross13 - sss.ee - sss.mpfEe))
+    if (withholdingTax > bearable) {
+      notes.push(
+        `Withholding tax due ₱${plainAmount(withholdingTax)}, but this 13th month pays ₱${plainAmount(bearable)} after SSS: ₱${plainAmount(bearable)} is withheld and the rest follows in later payrolls (or the year-end adjustment).`,
+      )
+      withholdingTax = bearable
     }
   }
 

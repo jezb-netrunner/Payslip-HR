@@ -76,8 +76,10 @@ describe('maternity leave is paid as the maternity benefit, not as salary (RA 11
 
   it('docks only the leave days when the leave starts mid-period', () => {
     const slip = pay(monthly, WORKDAYS.slice(0, 5), [maternity('2026-08-24')])
-    // Aug 24–28 and 31: six weekdays
-    expect(slip.earnings.find((l) => l.code === 'maternity')).toMatchObject({ amount: -8275.86, label: 'Maternity leave (8 day/s, paid as the maternity benefit)' })
+    // Aug 24–28 and 31: six weekdays of the eleven on leave, more than half:
+    // paid by the days, the five worked × 1,379.31
+    expect(slip.earnings.find((l) => l.code === 'basic')).toMatchObject({ amount: 6896.55, label: 'Basic Pay (5 of 11 days paid at 1,379.31)' })
+    expect(slip.trace.notes.some((n) => n.startsWith('Maternity leave, 8 day/s'))).toBe(true)
     expect(slip.trace.warnings.some((w) => w.startsWith('Maternity leave from Aug 24:'))).toBe(true)
   })
 
@@ -137,10 +139,11 @@ describe('PhilHealth employee share paid by the national government', () => {
 })
 
 describe('salary deductions never exceed the salary', () => {
-  it('caps a fully absent period at the period salary', () => {
+  it('pays a fully absent period nothing', () => {
     const slip = pay(monthly, [])
-    expect(slip.earnings.find((l) => l.code === 'absence')?.amount).toBe(-15000)
+    expect(slip.earnings.find((l) => l.code === 'basic')).toMatchObject({ amount: 0, label: 'Basic Pay (0 of 11 days paid at 1,379.31)' })
     expect(slip.basicPay).toBe(0)
+    expect(slip.grossPay).toBe(0)
   })
 })
 
@@ -321,8 +324,10 @@ describe('review fixes (2026-10-24)', () => {
       })
     expect(run(daily).earnings.find((l) => l.code === 'holiday')).toBeUndefined()
     const m = run(monthly)
-    // Aug 17–20 are docked as absences; Aug 21, the holiday before the hire, as well
-    expect(m.earnings.find((l) => l.code === 'outside_employment')?.amount).toBe(-1379.31)
+    // hired Aug 24: paid by the days employed (Aug 24–28, 31); Aug 17–21 are outside the employment
+    expect(m.earnings.find((l) => l.code === 'basic')?.amount).toBe(8275.86)
+    expect(m.earnings.find((l) => l.code === 'outside_employment')).toBeUndefined()
+    expect(m.absentDays).toBe(0)
     expect(m.trace.warnings.some((w) => w.startsWith('Regular holiday not paid'))).toBe(false)
   })
 })

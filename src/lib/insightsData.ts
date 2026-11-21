@@ -25,7 +25,7 @@ import { supabase } from './supabase'
 
 const WHO = 'name:employee_snapshot->>name, employee_no:employee_snapshot->>employee_no, department:employee_snapshot->>department, position:employee_snapshot->>position, pay_type:employee_snapshot->>pay_type'
 const PAY =
-  'earnings, deductions, gross_pay, net_pay, withholding_tax, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_er, pagibig_er, overtime_hours, night_diff_hours, late_minutes, undertime_minutes, absent_days, days_worked, hours_worked'
+  'earnings, deductions, gross_pay, basic_pay, net_pay, withholding_tax, sss_ee, sss_mpf_ee, philhealth_ee, pagibig_ee, sss_er, sss_mpf_er, sss_ec_er, philhealth_er, pagibig_er, overtime_hours, night_diff_hours, late_minutes, undertime_minutes, absent_days, days_worked, hours_worked'
 
 type Loaded = Omit<SlipRow, 'employee_snapshot'> & { name: string; employee_no: string; department: string; position: string; pay_type: string; days?: unknown }
 

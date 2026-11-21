@@ -369,6 +369,7 @@ export default function MyAttendance() {
           <Field label="Reason" hint="Corrections are reviewed and logged; the original punch stays on record.">
             <Textarea
               rows={3}
+              maxLength={500}
               value={form.reason}
               onChange={(e) => setForm({ ...form, reason: e.target.value })}
               placeholder="e.g. Forgot to clock out — actual end of shift was 6:10 PM"

@@ -304,7 +304,10 @@ function EmployeeList({ entity }: { entity: Entity }) {
 }
 
 function rateLabel(e: Employee) {
-  return e.pay_type === 'monthly' ? `${money(Number(e.monthly_rate))}/mo` : `${money(Number(e.daily_rate))}/day`
+  const rate = Number(e.pay_type === 'monthly' ? e.monthly_rate : e.daily_rate)
+  // a worker paid by results with no rate is paid by the outputs
+  if (rate === 0 && e.output_pay === 'basic') return 'Paid by results'
+  return e.pay_type === 'monthly' ? `${money(rate)}/mo` : `${money(rate)}/day`
 }
 
 function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen: () => void }) {
@@ -340,10 +343,11 @@ function EmployeeCard({ e, today, onOpen }: { e: Employee; today: string; onOpen
           <span className="text-slate-300">·</span>
           <span className="truncate">{EMPLOYMENT_STATUS_LABELS[e.employment_status]}</span>
         </p>
-        <p className="flex min-w-0 items-center gap-2">
-          <Wallet className="size-4 shrink-0 text-slate-400" />
-          <span className="truncate">
-            {rateLabel(e)} · {FREQUENCY_LABELS[e.pay_frequency]} · {PAYMENT_METHOD_LABELS[e.payment_method]}
+        <p className="flex min-w-0 items-start gap-2">
+          <Wallet className="mt-0.5 size-4 shrink-0 text-slate-400" />
+          {/* wraps rather than cutting the payment method off */}
+          <span className="min-w-0">
+            {rateLabel(e)} · {FREQUENCY_LABELS[e.pay_frequency]} · <span className="whitespace-nowrap">{PAYMENT_METHOD_LABELS[e.payment_method]}</span>
           </span>
         </p>
         <p className="flex items-center gap-2">

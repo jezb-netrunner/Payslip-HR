@@ -21,6 +21,8 @@ import {
 } from './insights'
 
 const fact = (over: Partial<SlipFact>): SlipFact => ({
+  // the 13th month basis follows the basic pay unless a test sets it
+  thirteenthBasis: over.basic ?? 10000,
   employeeId: 'e1',
   name: 'Ana Cruz',
   employeeNo: 'E1',
@@ -89,6 +91,21 @@ describe('periods', () => {
 })
 
 describe('payslip facts', () => {
+  it("counts a worker paid by results' output as basic pay, and the 13th month basis as stored", () => {
+    const zero = { sss_ee: 0, sss_mpf_ee: 0, philhealth_ee: 0, pagibig_ee: 0, sss_er: 0, sss_mpf_er: 0, sss_ec_er: 0, philhealth_er: 0, pagibig_er: 0 }
+    const f = toSlipFact({
+      employee_id: 'e1', run_type: 'regular', period_month: '2026-10-01', period_start: '2026-10-01', period_end: '2026-10-15',
+      employee_snapshot: { name: 'Liza Mendoza', employee_no: 'E5', department: 'Ops', position: 'Sewer', pay_type: 'daily' },
+      earnings: [
+        { code: 'output', label: 'Output: shirts', amount: 6000, bir: 'basic' },
+        { code: 'output', label: 'Output: commission', amount: 1000, bir: 'commission' },
+      ],
+      deductions: [], gross_pay: 7000, basic_pay: 6000, net_pay: 7000, withholding_tax: 0, ...zero,
+      overtime_hours: 0, night_diff_hours: 0, late_minutes: 0, undertime_minutes: 0, absent_days: 0, days_worked: 6, hours_worked: 48,
+    })
+    expect(f).toMatchObject({ basic: 6000, thirteenthBasis: 6000, allowances: 0, other: 1000, gross: 7000 })
+  })
+
   it('sorts the lines into the cost parts and keeps gross whole', () => {
     const f = toSlipFact({
       employee_id: 'e1',

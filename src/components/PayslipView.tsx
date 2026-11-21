@@ -41,11 +41,14 @@ export default function PayslipView({
   run,
   company,
   showTrace = false,
+  initials,
 }: {
   slip: Payslip
   run: PayslipRunInfo
   company: PayslipCompany
   showTrace?: boolean
+  /** the avatar's letters, first and last name (as every other screen shows them); the snapshot has the full name only */
+  initials?: string
 }) {
   const snap = slip.employee_snapshot as Record<string, string>
   const employer = employerFor(slip, company)
@@ -79,7 +82,7 @@ export default function PayslipView({
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <Avatar name={snap.name ?? '?'} size="md" className="mt-0.5" />
+          <Avatar name={snap.name ?? '?'} initials={initials} size="md" className="mt-0.5" />
           <div className="min-w-0">
           <p className="text-lg font-bold text-ink-900">{snap.name}</p>
           <p className="text-xs text-slate-500">

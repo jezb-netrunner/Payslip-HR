@@ -192,7 +192,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
           </IconButton>
           <Avatar name={name} initials={personInitials(employee)} size="lg" />
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold text-ink-900">{name}</h1>
+            <h1 className="break-words text-xl font-bold text-ink-900">{name}</h1>
             <div className="mt-1 flex flex-wrap gap-1.5">
               {separated ? (
                 <Badge tone="slate">Separated</Badge>
@@ -205,8 +205,9 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
             </div>
           </div>
         </div>
-        <span className="hidden h-12 w-px bg-slate-200 xl:block" />
-        <dl className="flex flex-wrap gap-x-8 gap-y-3">
+        {/* beside the name only where both fit on one line: below it, a divider would hang alone */}
+        <span className="hidden h-12 w-px bg-slate-200 2xl:block" />
+        <dl className="flex basis-full flex-wrap gap-x-8 gap-y-3 2xl:basis-auto">
           <HeaderFact label="Client" value={entity.name} />
           <HeaderFact label="Employee ID" value={employee.employee_no} />
           <HeaderFact label="Position" value={employee.position || '—'} />

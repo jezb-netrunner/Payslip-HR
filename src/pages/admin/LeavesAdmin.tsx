@@ -84,10 +84,32 @@ function Leaves({ entity }: { entity: Entity }) {
     load()
   }, [load])
 
+  /**
+   * The days a request charges, counted again from the employee's schedule
+   * and the holidays: the employee's own count is not trusted for the balance.
+   */
+  async function chargedDays(r: RequestFull): Promise<number> {
+    const type = r.leave_types ?? undefined
+    if (countsCalendarDays(type)) return leaveDays(type, r.start_date, r.end_date, [])
+    const [rows, hol] = await Promise.all([
+      fetchScheduleRows({ employeeId: r.employee_id }, r.start_date, r.end_date),
+      getHolidaysBetween(entity.id, r.start_date, r.end_date),
+    ])
+    const emp = r.employees
+    const schedule = emp ? (resolversFor([emp], rows).get(emp.id) ?? emp.work_schedule) : []
+    return requestDays(leaveDays(type, r.start_date, r.end_date, schedule, hol), r.half_day)
+  }
+
   async function review(id: string, approve: boolean) {
     if (busyId) return
     setBusyId(id)
     try {
+      const req = pending.find((x) => x.id === id)
+      const days = approve && req ? await chargedDays(req) : undefined
+      if (days !== undefined && days <= 0) {
+        toast('error', 'This request covers no scheduled workday of the employee: there is nothing to approve. Reject it, or correct the schedule first.')
+        return
+      }
       const { data: userData } = await supabase.auth.getUser()
       const { data, error } = await supabase
         .from('leave_requests')
@@ -96,12 +118,15 @@ function Leaves({ entity }: { entity: Entity }) {
           reviewed_by: userData.user?.id ?? null,
           reviewed_at: new Date().toISOString(),
           review_notes: notes[id] || null,
+          ...(days !== undefined ? { days } : {}),
         })
         .eq('id', id)
         .eq('status', 'pending')
         .select('id')
       if (error) throw error
       if (!data || data.length === 0) toast('error', 'This request is no longer pending (the employee may have cancelled it).')
+      else if (approve && req && days !== undefined && days !== Number(req.days))
+        toast('success', `Leave approved, charging ${plural(days, 'day')} from the schedule (the request said ${Number(req.days)}).`)
       else toast('success', approve ? 'Leave approved — payroll will treat these days accordingly.' : 'Leave rejected.')
     } catch (err) {
       toast('error', errorMessage(err, 'Review failed'))
@@ -277,6 +302,7 @@ function Leaves({ entity }: { entity: Entity }) {
                     <Input
                       aria-label="Review note"
                       placeholder="Note (optional)"
+                      maxLength={1000}
                       value={notes[r.id] ?? ''}
                       onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })}
                       className="w-full sm:w-48"
@@ -505,7 +531,7 @@ function FileLeaveModal({
                     : `${plural(days, 'scheduled workday')} (holidays and rest days not counted).`}
         </p>
         <Field label="Reason">
-          <Textarea rows={2} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
+          <Textarea rows={2} maxLength={500} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
         </Field>
         <Toggle checked={f.approve} onChange={(v) => setF({ ...f, approve: v })} label="Record as approved (otherwise it waits in Pending)" />
         <Button className="w-full" disabled={busy || !counted} onClick={save}>
