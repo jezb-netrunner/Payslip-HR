@@ -20,6 +20,7 @@ import type {
   TaxRemittance,
   TimeEntry,
 } from './db'
+import { HALF_DAY_LABELS } from './leave'
 import { manilaDateStr, manilaHHMM } from './manila'
 import { stampRows, type ReportStamp } from './reportStamp'
 import type { XlsxCell, XlsxColumn, XlsxSheet } from './xlsx'
@@ -310,11 +311,12 @@ export function backupSheets(d: BackupData, stampFor: (title: string) => ReportS
       'Leave',
       [
         col('Employee No', 'text', 12), col('Employee', 'text', 28), col('Leave type', 'text', 18), col('Start', 'text', 12), col('End', 'text', 12),
-        col('Days', 'number'), col('Status'), col('Reason', 'text', 30), col('Review notes', 'text', 30), col('Filed at', 'text', 17),
+        col('Days', 'number'), col('Half day', 'text', 11), col('Status'), col('Reason', 'text', 30), col('Review notes', 'text', 30),
+        col('Filed at', 'text', 17),
       ],
       d.leaves.map((l) => [
-        ...person(employees.get(l.employee_id)), l.leave_types?.name ?? '', l.start_date, l.end_date, num(l.days), l.status, l.reason,
-        l.review_notes ?? '', manilaDateTime(l.created_at),
+        ...person(employees.get(l.employee_id)), l.leave_types?.name ?? '', l.start_date, l.end_date, num(l.days),
+        l.half_day ? HALF_DAY_LABELS[l.half_day] : '', l.status, l.reason, l.review_notes ?? '', manilaDateTime(l.created_at),
       ]),
     ),
     sheet(

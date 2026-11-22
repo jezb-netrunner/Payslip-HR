@@ -411,6 +411,8 @@ export default function Insights({ entity }: { entity: Entity }) {
 
 function ReportTable({ table: t }: { table: Table }) {
   const right = (kind: string) => kind !== 'text'
+  // many money columns (the cost report has ten): compact cells, headers that wrap
+  const compact = t.columns.length > 7
   return (
     <section>
       <h3 className="mb-2 text-sm font-bold text-ink-900">{t.title}</h3>
@@ -421,7 +423,7 @@ function ReportTable({ table: t }: { table: Table }) {
           <thead>
             <tr>
               {t.columns.map((c) => (
-                <Th key={c.key} className={right(c.kind) ? 'text-right' : ''}>{c.label}</Th>
+                <Th key={c.key} compact={compact} wrap={compact && right(c.kind)} className={right(c.kind) ? 'text-right' : ''}>{c.label}</Th>
               ))}
             </tr>
           </thead>
@@ -429,7 +431,7 @@ function ReportTable({ table: t }: { table: Table }) {
             {t.rows.map((r, i) => (
               <tr key={i}>
                 {t.columns.map((c, j) => (
-                  <Td key={c.key} className={`${right(c.kind) ? 'text-right tabular-nums' : ''} ${j === 0 ? 'whitespace-nowrap font-semibold text-ink-900' : ''}`}>
+                  <Td key={c.key} compact={compact} className={`${right(c.kind) ? 'whitespace-nowrap text-right tabular-nums' : ''} ${j === 0 ? 'whitespace-nowrap font-semibold text-ink-900' : ''}`}>
                     {cellText(r[c.key], c.kind)}
                   </Td>
                 ))}
@@ -438,7 +440,7 @@ function ReportTable({ table: t }: { table: Table }) {
             {t.total && (
               <tr className="bg-slate-50">
                 {t.columns.map((c) => (
-                  <Td key={c.key} className={`font-bold text-ink-900 ${right(c.kind) ? 'text-right tabular-nums' : ''}`}>
+                  <Td key={c.key} compact={compact} className={`font-bold text-ink-900 ${right(c.kind) ? 'whitespace-nowrap text-right tabular-nums' : ''}`}>
                     {cellText(t.total![c.key], c.kind)}
                   </Td>
                 ))}

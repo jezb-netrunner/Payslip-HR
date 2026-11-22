@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Briefcase, TrendingUp } from 'lucide-react'
+import { Briefcase, ShieldCheck, TrendingUp } from 'lucide-react'
 import { Badge, Card, PageHeader, Spinner } from '../../components/ui'
 import { useAuth } from '../../lib/auth'
 import type { CareerEvent } from '../../lib/db'
@@ -129,6 +129,20 @@ export default function MyProfile() {
               ))}
             </ol>
           )}
+        </Card>
+      </div>
+      <div className="mt-6">
+        <Card title="Your data and your rights" icon={<ShieldCheck />}>
+          <p className="text-sm text-slate-600">
+            Your employer keeps this record to pay you and to report to the BIR, SSS, PhilHealth and Pag-IBIG: your
+            personal details and government numbers, your attendance and leave, and your pay and deductions. Only your
+            employer's HR and payroll administrators, and the payroll service that runs this system for them, can see
+            it.
+          </p>
+          <p className="mt-2 text-sm text-slate-600">
+            Under the Data Privacy Act of 2012 you may ask what is held about you, ask for a correction, and raise a
+            concern: through your HR or payroll officer, or your employer's data protection officer.
+          </p>
         </Card>
       </div>
     </div>

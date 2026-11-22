@@ -3,7 +3,8 @@
 -- replica built by run.sh (database phr_test); matching hashes mean the live
 -- database has exactly the tested tables, columns, constraints, indexes,
 -- policies (and the storage bucket policies), functions, function and
--- table grants (anon, authenticated) and
+-- table grants (anon, authenticated; TRUNCATE / REFERENCES / TRIGGER
+-- included since 2026-11-21, so table_grants hashes before that differ) and
 -- triggers. Function bodies are compared
 -- without carriage returns (text pasted into the SQL editor from Windows
 -- arrives with CRLF line endings, which change nothing).
@@ -22,9 +23,10 @@ fn as (select string_agg(proname || '(' || pg_get_function_identity_arguments(oi
       from pg_proc where pronamespace = 'public'::regnamespace),
 fg as (select string_agg(proname || ':' || has_function_privilege('anon', oid, 'execute') || ':' || has_function_privilege('authenticated', oid, 'execute'), ';' order by proname, pg_get_function_identity_arguments(oid)) s
       from pg_proc where pronamespace = 'public'::regnamespace),
-tgr as (select string_agg(c.relname || ':' || has_table_privilege('anon', c.oid, 'select,insert,update,delete')
+tgr as (select string_agg(c.relname || ':' || has_table_privilege('anon', c.oid, 'select,insert,update,delete,truncate,references,trigger')
         || ':' || has_table_privilege('authenticated', c.oid, 'select') || has_table_privilege('authenticated', c.oid, 'insert')
-        || has_table_privilege('authenticated', c.oid, 'update') || has_table_privilege('authenticated', c.oid, 'delete'), ';' order by c.relname) s
+        || has_table_privilege('authenticated', c.oid, 'update') || has_table_privilege('authenticated', c.oid, 'delete')
+        || has_table_privilege('authenticated', c.oid, 'truncate,references,trigger'), ';' order by c.relname) s
       from pg_class c where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'),
 spol as (select string_agg(tablename || ':' || policyname || ':' || cmd || ':' || roles::text || ':' || coalesce(qual, '') || ':' || coalesce(with_check, ''), ';' order by tablename, policyname) s, count(*) n
       from pg_policies where schemaname = 'storage'),

@@ -22,6 +22,7 @@ import { supabase } from '../../lib/supabase'
 import { fetchAll } from '../../lib/fetchAll'
 import { errorMessage } from '../../lib/errors'
 import { FREQUENCY_LABELS } from '../../lib/labels'
+import { HALF_DAY_LABELS, type HalfDay } from '../../lib/leave'
 import { lockedKeys } from '../../lib/locks'
 import { notifyPendingChanged, onPendingChanged } from '../../lib/pending'
 import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
@@ -159,6 +160,8 @@ export default function Timesheets() {
 interface LeaveMark {
   name: string
   paid: boolean
+  /** half a day of leave: the other half still takes its time in/out */
+  half?: HalfDay
 }
 
 /** One time in/out pair. A day can hold several (split shift). */
@@ -200,20 +203,31 @@ function spanMinutes(timeIn: string, timeOut: string): number | null {
 
 /** Approved leaves in a date range, by employee|date. */
 async function leaveMarks(entityId: string, start: string, end: string, employeeId?: string): Promise<Map<string, LeaveMark>> {
-  let q = supabase
-    .from('leave_requests')
-    .select('employee_id, start_date, end_date, leave_types(name, paid)')
-    .eq('entity_id', entityId)
-    .eq('status', 'approved')
-    .lte('start_date', end)
-    .gte('end_date', start)
-  if (employeeId) q = q.eq('employee_id', employeeId)
-  const { data, error } = await q
-  if (error) throw error
+  type Loaded = { employee_id: string; start_date: string; end_date: string; half_day: HalfDay | null; leave_types: { name: string; paid: boolean } | null }
+  const data = await fetchAll<Loaded>((f, t) => {
+    let q = supabase
+      .from('leave_requests')
+      .select('employee_id, start_date, end_date, half_day, leave_types(name, paid)')
+      .eq('entity_id', entityId)
+      .eq('status', 'approved')
+      .lte('start_date', end)
+      .gte('end_date', start)
+    if (employeeId) q = q.eq('employee_id', employeeId)
+    return q.order('id').range(f, t)
+  })
   const out = new Map<string, LeaveMark>()
-  for (const l of (data ?? []) as unknown as { employee_id: string; start_date: string; end_date: string; leave_types: { name: string; paid: boolean } | null }[]) {
+  // whole-day leaves first: a half day beside one adds nothing
+  const list = data.slice().sort((a, b) => Number(!!a.half_day) - Number(!!b.half_day))
+  for (const l of list) {
+    const mark: LeaveMark = { name: l.leave_types?.name ?? 'Leave', paid: l.leave_types?.paid ?? false, ...(l.half_day ? { half: l.half_day } : {}) }
     for (const d of eachDate(l.start_date > start ? l.start_date : start, l.end_date < end ? l.end_date : end)) {
-      out.set(rowKey(l.employee_id, d), { name: l.leave_types?.name ?? 'Leave', paid: l.leave_types?.paid ?? false })
+      const k = rowKey(l.employee_id, d)
+      const had = out.get(k)
+      if (!had) out.set(k, mark)
+      // the morning and the afternoon on leave: the whole day
+      else if (had.half && mark.half && had.half !== mark.half) {
+        out.set(k, { name: had.name === mark.name ? had.name : `${had.name} + ${mark.name}`, paid: had.paid && mark.paid })
+      }
     }
   }
   return out
@@ -416,32 +430,35 @@ function RowCells({
   const label = `${fullName(row.employee)} ${fmtDate(row.date)}`
   return (
     <>
-      <Td>
+      <Td pad="px-4 py-1 sm:py-3">
+        <span className="mb-0.5 block text-[11px] font-semibold text-slate-500 sm:hidden">Time in</span>
         <Input
           type="time"
           aria-label={`Time in, ${label}`}
           value={row.timeIn}
           disabled={row.locked || disabled}
           onChange={(e) => onChange({ timeIn: e.target.value })}
-          className={`w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
+          className={`w-full sm:w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
         />
         {inNext && <p className="mt-0.5 text-[10px] text-violet-600">next day</p>}
       </Td>
-      <Td>
+      <Td pad="px-4 py-1 sm:py-3">
+        <span className="mb-0.5 block text-[11px] font-semibold text-slate-500 sm:hidden">Time out</span>
         <Input
           type="time"
           aria-label={`Time out, ${label}`}
           value={row.timeOut}
           disabled={row.locked || disabled}
           onChange={(e) => onChange({ timeOut: e.target.value })}
-          className={`w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
+          className={`w-full sm:w-32 ${changed(row) ? 'border-accent-400 bg-accent-50' : ''}`}
         />
         {overnight && <p className="mt-0.5 text-[10px] text-violet-600">next day</p>}
       </Td>
-      <Td className="whitespace-nowrap text-xs text-slate-500">
+      <Td className="whitespace-nowrap text-xs text-slate-500" pad="px-4 py-1 sm:py-3">
+        <span className="font-semibold sm:hidden">Worked </span>
         {net === null ? (row.timeIn && !row.timeOut ? <Badge tone="amber">no time out</Badge> : '—') : fmtHours(net)}
       </Td>
-      <Td>
+      <Td pad="px-4 py-1 sm:py-3">
         <div className="flex items-center gap-2 whitespace-nowrap">
           {row.locked ? (
             <span className="flex items-center gap-1 text-[11px] text-slate-400" title="Paid in a finalized payroll run — void and reissue the run to edit">
@@ -462,7 +479,7 @@ function RowCells({
                 <button
                   type="button"
                   onClick={() => onChange({ timeIn: '', timeOut: '' })}
-                  className="text-[11px] font-semibold text-slate-400 hover:text-rose-600"
+                  className="text-xs font-semibold text-slate-600 underline-offset-2 hover:text-rose-700 hover:underline"
                 >
                   Clear
                 </button>
@@ -496,6 +513,7 @@ function DayBadges({ row, showHoliday }: { row: Row; showHoliday: boolean }) {
       {row.leave && (
         <Badge tone="violet">
           {row.leave.name}
+          {row.leave.half ? ` (half day: ${HALF_DAY_LABELS[row.leave.half]})` : ''}
           {row.leave.paid ? '' : ' (unpaid)'}
         </Badge>
       )}
@@ -632,7 +650,8 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
         <EmptyState title="No employees" sub="Nobody is employed on this date." />
       ) : (
         <TableShell>
-          <thead className="bg-slate-50">
+          {/* on phones each pair is a stacked row (name, schedule, then time in and out side by side) */}
+          <thead className="hidden bg-slate-50 sm:table-header-group">
             <tr>
               <Th>Employee</Th>
               <Th>Schedule</Th>
@@ -647,8 +666,8 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
               const first = shown[i - 1]?.dayKey !== r.dayKey
               const last = shown[i + 1]?.dayKey !== r.dayKey
               return (
-                <tr key={r.key} className={r.locked ? 'bg-slate-50/70' : ''}>
-                  <Td>
+                <tr key={r.key} className={`grid grid-cols-2 items-start pb-2 sm:table-row sm:pb-0 ${r.locked ? 'bg-slate-50/70' : ''}`}>
+                  <Td className="col-span-2" pad="px-4 pt-3 pb-1 sm:py-3">
                     {first ? (
                       <>
                         <p className="font-semibold text-slate-800">{fullName(r.employee)}</p>
@@ -658,7 +677,7 @@ function DailySheet({ entity, onDirty }: { entity: Entity; onDirty: (n: number) 
                       <p className="pl-3 text-xs text-slate-400">↳ another pair</p>
                     )}
                   </Td>
-                  <Td className="text-xs">
+                  <Td className="col-span-2 text-xs" pad="px-4 py-1 sm:py-3">
                     {first && (
                       <div className="flex flex-wrap items-center gap-1">
                         {r.shift && (
@@ -876,7 +895,7 @@ function EmployeeSheet({
             </p>
           )}
           <TableShell>
-            <thead className="bg-slate-50">
+            <thead className="hidden bg-slate-50 sm:table-header-group">
               <tr>
                 <Th>Date</Th>
                 <Th>Day</Th>
@@ -891,9 +910,9 @@ function EmployeeSheet({
                 const first = rows[i - 1]?.dayKey !== r.dayKey
                 const last = rows[i + 1]?.dayKey !== r.dayKey
                 return (
-                  <tr key={r.key} className={r.locked ? 'bg-slate-50/70' : ''}>
-                    <Td className="whitespace-nowrap font-semibold">{first ? fmtDate(r.date) : ''}</Td>
-                    <Td className="text-xs">
+                  <tr key={r.key} className={`grid grid-cols-2 items-start pb-2 sm:table-row sm:pb-0 ${r.locked ? 'bg-slate-50/70' : ''}`}>
+                    <Td className="whitespace-nowrap font-semibold" pad="px-4 pt-3 pb-1 sm:py-3">{first ? fmtDate(r.date) : ''}</Td>
+                    <Td className="text-xs" pad="px-4 pt-3 pb-1 sm:py-3">
                       {first ? (
                         <div className="flex flex-wrap items-center gap-1">
                           <span>{new Date(`${r.date}T00:00:00`).toLocaleDateString('en-PH', { weekday: 'short' })}</span>
@@ -1015,6 +1034,7 @@ function Corrections({ entity }: { entity: Entity }) {
                 <Input
                   aria-label="Review note"
                   placeholder="Review note (optional)"
+                  maxLength={1000}
                   value={notes[r.id] ?? ''}
                   onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })}
                   className="w-full sm:w-52"
