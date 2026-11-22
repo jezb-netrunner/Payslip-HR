@@ -61,9 +61,11 @@ describe.each(['split', 'first_period'] as const)('timing %s: earlier slot paid 
       finalize(w.id)
     }
     const oct = weeks.flatMap((w) => slipsOf(w.id))
-    // attendance starts Oct 1, so Sep 28–30 are docked: October paid ₱25,862.07 → SSS MSC 26,000
-    // (EE 1,000 + MPF 300; ER 2,000 + MPF 600 + EC 30), PhilHealth and Pag-IBIG on the rate
-    expect(sumEe(oct)).toBe(2250)
-    expect(sumEr(oct)).toBe(3580)
+    // attendance starts Oct 1, so Sep 28–30 are absences, three of week 1's five
+    // workdays: that week is paid by the days (2 × ₱1,379.31). October paid
+    // ₱25,258.62 → SSS MSC 25,500 (EE 1,000 + MPF 275; ER 2,000 + MPF 550 + EC 30),
+    // PhilHealth and Pag-IBIG on the rate
+    expect(sumEe(oct)).toBe(2225)
+    expect(sumEr(oct)).toBe(3530)
   })
 })

@@ -69,6 +69,32 @@ describe('year-end: 13th month after the annualizing payroll', () => {
     const [row] = buildAlphalist({ year: 2026, entity: ent as never, employees: db.t.employees as never, payslips: slips.map((p) => ({ employee_id: p.employee_id, fact: toAnnualFact(p) })), taxYears: [], annual: BIR_ANNUAL_2023 })
     expect(row.summary.variance).toBe(0)
   })
+  it('leaves out someone whose 13th month was paid in full when they left: no empty payslip', async () => {
+    const ent = addEntity()
+    const left = addEmployee(ent, { monthly_rate: 30000, first_name: 'Left', last_name: 'June', separation_date: '2026-06-30', separation_reason: 'resignation' })
+    const stays = addEmployee(ent, { monthly_rate: 30000, first_name: 'Stays', last_name: 'On' })
+    const hired = addEmployee(ent, { monthly_rate: 30000, first_name: 'New', last_name: 'Hire', hire_date: '2026-12-16' })
+    addAttendance(left, '2026-01-01', '2026-06-30')
+    addAttendance(stays, '2026-01-01', '2026-12-31')
+    for (let m = 1; m <= 12; m++) {
+      const mm = String(m).padStart(2, '0')
+      await runAndFinalize(ent, { period_start: `2026-${mm}-01`, period_end: `2026-${mm}-15`, pay_date: `2026-${mm}-15` })
+      if (m < 12) await runAndFinalize(ent, { period_start: `2026-${mm}-16`, period_end: endOfMonth(`2026-${mm}-01`), pay_date: endOfMonth(`2026-${mm}-01`) })
+      // the 13th month of the employee who left, with the final pay
+      if (m === 6) await runAndFinalize(ent, { run_type: 'thirteenth_month', period_start: '2026-01-01', period_end: '2026-12-31', pay_date: '2026-07-10', employee_ids: [left.id] })
+    }
+    const run = addRun(ent, { run_type: 'thirteenth_month', period_start: '2026-01-01', period_end: '2026-12-31', pay_date: '2026-12-20' })
+    const res = await computeRun(run as never, ent as never)
+    const slips = db.t.payslips.filter((p) => p.payroll_run_id === run.id)
+    // only the employee still owed a 13th month gets a payslip
+    expect(slips.map((p) => p.employee_id)).toEqual([stays.id])
+    expect(res.computed).toBe(1)
+    expect(res.totals.employees).toBe(1)
+    const note = (id: string) => res.warnings.find((w) => w.employee === `${db.t.employees.find((e) => e.id === id)!.first_name} ${db.t.employees.find((e) => e.id === id)!.last_name}`)?.warnings[0] ?? ''
+    expect(note(left.id)).toMatch(/already paid in full/)
+    expect(note(hired.id)).toMatch(/no basic pay on finalized payrolls of 2026/)
+    finalize(run.id)
+  })
   it('a 13th month after the payroll that settled a separation trues SSS up', async () => {
     const ent = addEntity()
     const emp = addEmployee(ent, { monthly_rate: 25000, separation_date: '2026-12-15', separation_reason: 'resignation' })

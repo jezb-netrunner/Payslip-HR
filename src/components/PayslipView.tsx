@@ -3,7 +3,7 @@ import type { Entity, Payslip, PayrollRun } from '../lib/db'
 import { fmtDate, fmtPeriod, money } from '../lib/format'
 import { FREQUENCY_LABELS, PAYMENT_METHOD_LABELS } from '../lib/labels'
 import { Avatar, Badge, Button } from './ui'
-import { employerFor, roundingLines } from '../lib/payslip'
+import { attendanceFacts, employerFor, payslipRate, roundingLines } from '../lib/payslip'
 import { tinLine } from '../lib/reportStamp'
 import { useReportStamp } from '../lib/useReportStamp'
 import { logActivity } from '../lib/activity'
@@ -41,11 +41,14 @@ export default function PayslipView({
   run,
   company,
   showTrace = false,
+  initials,
 }: {
   slip: Payslip
   run: PayslipRunInfo
   company: PayslipCompany
   showTrace?: boolean
+  /** the avatar's letters, first and last name (as every other screen shows them); the snapshot has the full name only */
+  initials?: string
 }) {
   const snap = slip.employee_snapshot as Record<string, string>
   const employer = employerFor(slip, company)
@@ -72,12 +75,14 @@ export default function PayslipView({
   const trace = slip.computation_trace
   const rounding = roundingLines(slip)
   const computedNet = Number(slip.gross_pay) - Number(slip.total_deductions)
+  const rate = payslipRate(slip)
+  const attendance = attendanceFacts(slip)
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <Avatar name={snap.name ?? '?'} size="md" className="mt-0.5" />
+          <Avatar name={snap.name ?? '?'} initials={initials} size="md" className="mt-0.5" />
           <div className="min-w-0">
           <p className="text-lg font-bold text-ink-900">{snap.name}</p>
           <p className="text-xs text-slate-500">
@@ -98,6 +103,23 @@ export default function PayslipView({
           </Button>
         </div>
       </div>
+
+      {(rate || attendance.length > 0) && (
+        <dl className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs">
+          {rate && (
+            <div>
+              <dt className="text-slate-500">Pay rate</dt>
+              <dd className="font-semibold text-ink-900">{money(rate.amount)} a {rate.per}</dd>
+            </div>
+          )}
+          {attendance.map((f) => (
+            <div key={f.label}>
+              <dt className="text-slate-500">{f.label}</dt>
+              <dd className="font-semibold text-ink-900">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-slate-200">

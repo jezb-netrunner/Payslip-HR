@@ -11,7 +11,7 @@ import { remittances1601C } from './remittance'
 import { computeSss, computeWithholdingTax } from './statutory'
 import { periodsThisYear, periodWithholding } from './withholding'
 import { philhealthNgFor, philhealthNgProblem } from './philhealth'
-import { filingCalendar, type DueDate } from './dueDates'
+import { EDITABLE_FILINGS, filingCalendar, type DueDate } from './dueDates'
 import { round2, type DayComputation, type DayType, type PayLine, type PayrollEmployeeInput, type PayrollSettingsInput, type PeriodInput } from './types'
 
 const settings: PayrollSettingsInput = {
@@ -347,23 +347,53 @@ describe('C4: de minimis ceilings (RR 29-2025) and leave converted to cash', () 
     expect(split(run(rice(2500)))).toEqual({ exempt: 2500, excess: 0 })
   })
 
-  it('rice subsidy 2,700: exempt 2,500, the 200 above the ceiling is taxable', () => {
+  it('rice subsidy 2,700: exempt 2,500; the 200 above the ceiling is an "other benefit" under the 90,000 exemption', () => {
     const slip = run(rice(2700))
     expect(split(slip)).toEqual({ exempt: 2500, excess: 200 })
-    expect(slip.earnings.find((l) => l.code === 'de_minimis_excess')).toMatchObject({ taxable: true, bir: 'other_supplementary' })
+    // RR 2-98 Sec. 2.78.1(A)(3), last proviso (RR 11-2018): the excess over a
+    // ceiling is part of "other benefits", taxable only beyond the 90,000
+    expect(slip.earnings.find((l) => l.code === 'de_minimis_excess')).toMatchObject({ taxable: false, bir: 'other_benefits' })
+    // nothing of it is taxed while the year's exemption has room: the same
+    // taxable pay and tax as with the subsidy at its ceiling
+    const atCeiling = run(rice(2500))
+    expect(slip.taxableIncome).toBe(atCeiling.taxableIncome)
+    expect(slip.withholdingTax).toBe(atCeiling.withholdingTax)
+    expect(slip.grossPay).toBe(round2(atCeiling.grossPay + 200))
+  })
+
+  it('pay above a ceiling is taxed once the 90,000 exemption is used up', () => {
+    const none = computePayslip({ employee: { ...employee, ...rice(2700) }, settings: monthly, period: november, tables: DEFAULT_TABLES, days: [], runType: 'regular', benefitsExemptLeft: 0 })
+    const atCeiling = run(rice(2500))
+    expect(none.taxableIncome).toBe(round2(atCeiling.taxableIncome + 200))
+    expect(none.withholdingTax).toBeGreaterThan(atCeiling.withholdingTax)
+    // 150 of the exemption left: 50 of the 200 is taxed
+    const some = computePayslip({ employee: { ...employee, ...rice(2700) }, settings: monthly, period: november, tables: DEFAULT_TABLES, days: [], runType: 'regular', benefitsExemptLeft: 150 })
+    expect(some.taxableIncome).toBe(round2(atCeiling.taxableIncome + 50))
+  })
+
+  it("the year's summary pools pay above a ceiling with the 13th month and other benefits", () => {
+    const slip = run(rice(2700))
+    const fact = { payMonth: '2026-11-01', isMwe: false, earnings: slip.earnings, contributionsEe: 0, unionDues: 0, withholdingTax: 0 }
+    const thirteenth = { payMonth: '2026-12-01', isMwe: false, earnings: [{ amount: 89900, bir: 'thirteenth' as const, taxable: false }], contributionsEe: 0, unionDues: 0, withholdingTax: 0 }
+    const year = summarizeYear([fact, thirteenth], DEFAULT_TABLES.bir_annual)
+    expect(year.deMinimis).toBe(2500)
+    expect(year.thirteenthOtherBenefits).toBe(90100)
+    expect(year.thirteenthOtherBenefitsExempt).toBe(90000)
+    expect(year.taxable13thOtherBenefits).toBe(100)
   })
 
   it('counts what earlier payrolls of the month already paid under the same ceiling', () => {
     expect(split(run(rice(1500), monthly, { rice: { month: 1500, semester: 1500, year: 1500 } }))).toEqual({ exempt: 1000, excess: 500 })
   })
 
-  it('a client granting 15 VL days: 14 unused days converted → 12 days de minimis, 2 taxable', () => {
+  it('a client granting 15 VL days: 14 unused days converted → 12 days de minimis, 2 days other benefits', () => {
     const conversion = { oneTimeEarnings: [{ label: 'Unused VL converted (14 days)', amount: 14 * 1149.43, category: 'de_minimis' as const, leaveDays: 14 }] }
     const slip = run(conversion, { ...monthly, paidVlDaysPerYear: 15 })
     const dm = slip.earnings.find((l) => l.bir === 'de_minimis')
     const taxable = slip.earnings.find((l) => l.code === 'de_minimis_excess')
     expect(dm).toMatchObject({ leaveDays: 12, amount: 13793.16 })
-    expect(taxable).toMatchObject({ leaveDays: 2, amount: 2298.86, taxable: true })
+    // the 2 days above the 12-day ceiling join the other benefits under the 90,000 exemption
+    expect(taxable).toMatchObject({ leaveDays: 2, amount: 2298.86, taxable: false, bir: 'other_benefits' })
   })
 
   it('a SIL-only client: 5 SIL days converted to cash are all taxable (O7)', () => {
@@ -660,6 +690,14 @@ describe('C9: filing due dates', () => {
   it('1601-C: the 10th of the next month, December on 15 January (manual filing)', () => {
     expect(due(rows, '1601c', '2026-03-01')?.due).toBe('2026-04-10')
     expect(due(rows, '1601c', '2026-12-01')?.due).toBe('2027-01-15')
+  })
+
+  it('13th month: paid by 24 December, reported to DOLE by 15 January (Labor Advisory 21-2026); neither is changed per year', () => {
+    expect(due(rows, 'thirteenth_pay', '2026-01-01')?.due).toBe('2026-12-24')
+    expect(due(rows, 'dole_13th', '2026-01-01')).toMatchObject({ due: '2027-01-15', note: '' })
+    // later years: DOLE sets the date anew each year
+    expect(due(filingCalendar(2027, client, []), 'dole_13th', '2027-01-01')?.note).toMatch(/labor advisory/)
+    expect(EDITABLE_FILINGS).not.toContain('dole_13th')
   })
 
   it('1601-C on eFPS: 15/14/13/12/11 days after month-end for groups A to E', () => {

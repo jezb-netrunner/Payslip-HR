@@ -644,10 +644,24 @@ export function Segmented<K extends string>({
   )
 }
 
-export function Th({ children, className = '' }: { children?: ReactNode; className?: string }) {
+export function Th({
+  children,
+  className = '',
+  compact = false,
+  wrap = false,
+  ...rest
+}: {
+  children?: ReactNode
+  className?: string
+  /** tighter padding, for wide numeric tables */
+  compact?: boolean
+  /** let a long header break onto two lines */
+  wrap?: boolean
+} & Pick<React.ThHTMLAttributes<HTMLTableCellElement>, 'colSpan' | 'rowSpan' | 'title' | 'scope'>) {
   return (
     <th
-      className={`whitespace-nowrap bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 ${className}`}
+      {...rest}
+      className={`${wrap ? 'whitespace-normal' : 'whitespace-nowrap'} bg-slate-100 ${compact ? 'px-2.5 py-2.5' : 'px-4 py-3'} text-left text-xs font-semibold text-slate-600 ${className}`}
     >
       {children}
     </th>
@@ -658,15 +672,22 @@ export function Td({
   children,
   className = '',
   colSpan,
+  compact = false,
+  pad,
 }: {
   children?: ReactNode
   className?: string
   colSpan?: number
+  /** tighter padding and smaller text, for wide numeric tables */
+  compact?: boolean
+  /** padding classes replacing the default (two classes for one property don't override each other) */
+  pad?: string
 }) {
   // the caller's text colour must win, so only colour cells that don't set one
   const color = /(^|\s)text-(slate|brand|ink|rose|emerald|amber|leaf|accent)-/.test(className) ? '' : 'text-slate-700'
+  const padding = pad ?? (compact ? 'px-2.5 py-2.5' : 'px-4 py-3')
   return (
-    <td colSpan={colSpan} className={`px-4 py-3 text-sm ${color} ${className}`}>
+    <td colSpan={colSpan} className={`${padding} ${compact ? 'text-xs' : 'text-sm'} ${color} ${className}`}>
       {children}
     </td>
   )

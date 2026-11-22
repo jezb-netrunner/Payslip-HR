@@ -89,7 +89,7 @@ import { PayHistoryTab, PayRateModal } from './PayHistoryTab'
 import { currentAndUpcoming, rateText } from '../../lib/payHistory'
 import { eachDate, endOfMonth, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
-import { dayTimeline } from '../../lib/timeline'
+import { dayTimeline, halfLeavesOn } from '../../lib/timeline'
 import type { AllowanceBasis, AllowanceCategory, DeMinimisData, DeMinimisKind, OutputPayClass, PayFrequency, PayItemType } from '../../payroll/types'
 import type { PayRateReason } from '../../payroll/payRates'
 import { ALLOWANCE_DE_MINIMIS, ceilingText, DE_MINIMIS_LABELS, fetchDeMinimis } from '../../lib/deMinimis'
@@ -192,7 +192,7 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
           </IconButton>
           <Avatar name={name} initials={personInitials(employee)} size="lg" />
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-bold text-ink-900">{name}</h1>
+            <h1 className="break-words text-xl font-bold text-ink-900">{name}</h1>
             <div className="mt-1 flex flex-wrap gap-1.5">
               {separated ? (
                 <Badge tone="slate">Separated</Badge>
@@ -205,8 +205,9 @@ function EmployeeRecord({ tab, onTab: setTab }: { tab: string; onTab: (tab: stri
             </div>
           </div>
         </div>
-        <span className="hidden h-12 w-px bg-slate-200 xl:block" />
-        <dl className="flex flex-wrap gap-x-8 gap-y-3">
+        {/* beside the name only where both fit on one line: below it, a divider would hang alone */}
+        <span className="hidden h-12 w-px bg-slate-200 2xl:block" />
+        <dl className="flex basis-full flex-wrap gap-x-8 gap-y-3 2xl:basis-auto">
           <HeaderFact label="Client" value={entity.name} />
           <HeaderFact label="Employee ID" value={employee.employee_no} />
           <HeaderFact label="Position" value={employee.position || '—'} />
@@ -303,7 +304,7 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
         .order('clock_in'),
       supabase
         .from('leave_requests')
-        .select('start_date, end_date, leave_types(name)')
+        .select('start_date, end_date, half_day, leave_types(name)')
         .eq('employee_id', employee.id)
         .eq('status', 'approved')
         .lte('start_date', end)
@@ -318,10 +319,11 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
     setEntries((ent.data ?? []) as TimeEntry[])
     setHolidays(hol.data)
     setLeaves(
-      ((lv.data ?? []) as unknown as { start_date: string; end_date: string; leave_types: { name: string } | null }[]).map((l) => ({
+      ((lv.data ?? []) as unknown as { start_date: string; end_date: string; half_day: 'am' | 'pm' | null; leave_types: { name: string } | null }[]).map((l) => ({
         start_date: l.start_date,
         end_date: l.end_date,
         label: l.leave_types?.name ?? 'Leave',
+        ...(l.half_day ? { half: l.half_day } : {}),
       })),
     )
     setLoading(false)
@@ -342,17 +344,17 @@ function AttendanceTab({ employee, entity }: { employee: Employee; entity: Entit
       d,
       entries.filter((e) => e.work_date === d),
       scheduleOf,
-      { graceMinutes, standardHoursPerDay, holidays },
+      { graceMinutes, standardHoursPerDay, holidays, halfLeaves: halfLeavesOn(leaves, d) },
     ),
   )
-  // charged leave days, as leave is counted elsewhere: scheduled workdays, not holidays
-  const leaveDays = new Set(
-    leaves.flatMap((l) =>
-      eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date).filter(
-        (d) => leaveWorkdays(d, d, scheduleOf, holidays) > 0,
-      ),
-    ),
-  ).size
+  // charged leave days, as leave is counted elsewhere: scheduled workdays, not holidays (a half day counts half)
+  const charged = new Map<string, number>()
+  for (const l of leaves) {
+    for (const d of eachDate(l.start_date < start ? start : l.start_date, l.end_date > end ? end : l.end_date)) {
+      if (leaveWorkdays(d, d, scheduleOf, holidays) > 0) charged.set(d, Math.min(1, (charged.get(d) ?? 0) + (l.half ? 0.5 : 1)))
+    }
+  }
+  const leaveDays = [...charged.values()].reduce((sum, n) => sum + n, 0)
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white">
@@ -564,6 +566,10 @@ function ProfileTab({ employee, onSaved, onSchedule }: { employee: Employee; onS
 
         <Card title="Notes" icon={<StickyNote />}>
           <Textarea rows={2} value={f.notes ?? ''} onChange={(e) => set('notes', e.target.value)} />
+          <p className="mt-1.5 text-xs text-slate-500">
+            Part of the employee's own record: not shown in their portal, but theirs to see on request (Data Privacy
+            Act, right of access). Keep it to facts you would disclose to them.
+          </p>
         </Card>
 
         <Button disabled={busy} onClick={save} className="w-full">

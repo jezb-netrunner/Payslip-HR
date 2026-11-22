@@ -137,7 +137,8 @@ describe('payslip: absences, tardiness and overtime', () => {
     expect(slip.trace.warnings).toContain(
       '1 scheduled workday without a complete time in/out or approved leave is charged as absence (Aug 17). If the employee worked, enter the missing time and recompute.',
     )
-    // days before the hire date are absences in pay, but no one's missing time
+    // days before the hire date are outside the employment: neither paid nor
+    // absences, and no one's missing time
     const hired = computePayslip({
       employee: { ...monthlyEmployee, hireDate: '2026-08-18' },
       settings,
@@ -146,7 +147,7 @@ describe('payslip: absences, tardiness and overtime', () => {
       days: attendance(entries),
       runType: 'regular',
     })
-    expect(hired.absentDays).toBe(1)
+    expect(hired.absentDays).toBe(0)
     expect(hired.trace.warnings.filter((w) => w.includes('charged as absence'))).toEqual([])
     expect(slip.lateMinutes).toBe(30)
     expect(slip.withholdingTax).toBe(283.87)

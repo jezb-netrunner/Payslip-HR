@@ -34,6 +34,7 @@ import { useEntity } from '../../lib/entity'
 import { errorMessage } from '../../lib/errors'
 import { fetchAll } from '../../lib/fetchAll'
 import { fmtDate, fullName, plural } from '../../lib/format'
+import { HALF_DAY_LABELS } from '../../lib/leave'
 import { lockedKeys } from '../../lib/locks'
 import { addDays, eachDate, isoWeekday, todayManila } from '../../lib/manila'
 import { fetchScheduleRows, fetchShiftTemplates, resolversFor, type ScheduleRows, type ShiftTemplate } from '../../lib/schedules'
@@ -108,10 +109,10 @@ function Roster({ entity, onShifts }: { entity: Entity; onShifts: () => void }) 
         fetchScheduleRows({ entityId: entity.id }, week, weekEnd),
         fetchShiftTemplates(entity.id),
         getHolidaysBetween(entity.id, week, weekEnd),
-        fetchAll<{ employee_id: string; start_date: string; end_date: string; leave_types: { name: string } | null }>((f, t) =>
+        fetchAll<{ employee_id: string; start_date: string; end_date: string; half_day: 'am' | 'pm' | null; leave_types: { name: string } | null }>((f, t) =>
           supabase
             .from('leave_requests')
-            .select('employee_id, start_date, end_date, leave_types(name)')
+            .select('employee_id, start_date, end_date, half_day, leave_types(name)')
             .eq('entity_id', entity.id)
             .eq('status', 'approved')
             .lte('start_date', weekEnd)
@@ -123,10 +124,21 @@ function Roster({ entity, onShifts }: { entity: Entity; onShifts: () => void }) 
       ])
       if (my !== seq.current) return
       const leaveBy = new Map<string, string>()
+      const halves = new Map<string, { name: string; half: 'am' | 'pm' }[]>()
       for (const l of leaves) {
         for (const d of eachDate(l.start_date > week ? l.start_date : week, l.end_date < weekEnd ? l.end_date : weekEnd)) {
-          leaveBy.set(`${l.employee_id}|${d}`, l.leave_types?.name ?? 'Leave')
+          const k = `${l.employee_id}|${d}`
+          const name = l.leave_types?.name ?? 'Leave'
+          if (!l.half_day) leaveBy.set(k, name)
+          else halves.set(k, [...(halves.get(k) ?? []), { name, half: l.half_day }])
         }
+      }
+      for (const [k, hs] of halves) {
+        // a whole-day leave on the date wins over a half day
+        if (leaveBy.has(k)) continue
+        // the morning and the afternoon on leave: the whole day
+        const both = hs.some((h) => h.half === 'am') && hs.some((h) => h.half === 'pm')
+        leaveBy.set(k, both ? [...new Set(hs.map((h) => h.name))].join(' + ') : `Half day: ${hs[0].name} (${HALF_DAY_LABELS[hs[0].half]})`)
       }
       setData({
         week,

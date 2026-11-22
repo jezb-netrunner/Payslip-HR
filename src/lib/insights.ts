@@ -178,6 +178,8 @@ export interface SlipRow {
   earnings: PayslipLine[] | null
   deductions: PayslipLine[] | null
   gross_pay: number
+  /** the 13th month basis the payroll stored (basic salary earned); older rows may lack it */
+  basic_pay?: number | null
   net_pay: number
   withholding_tax: number
   sss_ee: number
@@ -203,8 +205,10 @@ export interface SlipFact extends Who {
   month: string
   runType: RunType
   periodEnd: string | null
-  /** earned basic: basic pay less absences, tardiness and undertime, plus hours past a short shift */
+  /** earned basic: basic pay less absences, tardiness and undertime, plus hours past a short shift (a worker paid by results: the output pay) */
   basic: number
+  /** the 13th month basis: basic salary earned as the payroll counted it (PD 851) */
+  thirteenthBasis: number
   overtime: number
   nightDiff: number
   /** holiday, rest-day and special-day premiums */
@@ -247,7 +251,7 @@ export function whoOf(employeeId: string, snap: Record<string, unknown> | null |
   }
 }
 
-const BASIC_CODES = new Set(['basic', 'absence', 'late', 'undertime', 'extra_hours'])
+const BASIC_CODES = new Set(['basic', 'absence', 'late', 'undertime', 'extra_hours', 'maternity', 'holiday_unpaid', 'outside_employment'])
 const PREMIUM_CODES = new Set(['restday', 'special', 'holiday', 'restday_wage', 'restday_premium', 'special_premium', 'holiday_premium'])
 const LOAN_CODES = new Set(['other:sss_loan', 'other:pagibig_loan', 'other:company_loan'])
 
@@ -263,7 +267,8 @@ export function toSlipFact(r: SlipRow): SlipFact {
   let tardinessDeduction = 0
   for (const l of r.earnings ?? []) {
     const a = n(l.amount)
-    if (BASIC_CODES.has(l.code)) {
+    // a worker paid by results: the output pay is the basic pay
+    if (BASIC_CODES.has(l.code) || (l.code === 'output' && l.bir === 'basic')) {
       basic += a
       if (l.code === 'absence') absenceDeduction -= a
       if (l.code === 'late' || l.code === 'undertime') tardinessDeduction -= a
@@ -289,6 +294,7 @@ export function toSlipFact(r: SlipRow): SlipFact {
     runType: r.run_type,
     periodEnd: r.period_end,
     basic: round2(basic),
+    thirteenthBasis: round2(r.basic_pay === null || r.basic_pay === undefined ? basic : n(r.basic_pay)),
     overtime: round2(overtime),
     nightDiff: round2(nightDiff),
     premiums: round2(premiums),
@@ -339,7 +345,8 @@ export function toDayFacts(who: Who, days: unknown): DayFact[] {
       expected,
       worked: n(d.workedMinutes) > 0,
       absent: d.absent === true,
-      onLeave: expected && (d.onPaidLeave === true || d.onUnpaidLeave === true),
+      // a half-day leave with no time for the other half counts as a leave day
+      onLeave: expected && (d.onPaidLeave === true || d.onUnpaidLeave === true || (d.halfLeave != null && !(n(d.workedMinutes) > 0))),
       lateMinutes: n(d.lateMinutes),
       undertimeMinutes: n(d.undertimeMinutes),
     })
@@ -618,7 +625,7 @@ export function costReport(all: SlipFact[], range: MonthRange, by: GroupBy, toda
     if (total.er > 0) {
       insights.push({ tone: 'info', text: `Employer SSS, PhilHealth and Pag-IBIG added ${money(total.er)} — ${pct(ratio(total.er, total.gross))} on top of gross pay.` })
     }
-    const basicEarned = sum(facts.filter((f) => f.runType !== 'thirteenth_month'), (f) => f.basic)
+    const basicEarned = sum(facts.filter((f) => f.runType !== 'thirteenth_month'), (f) => f.thirteenthBasis)
     if (basicEarned > 0) {
       insights.push({
         tone: 'info',
@@ -1153,13 +1160,13 @@ export function headcountReport(all: PersonRow[], range: MonthRange, today: stri
     })
   }
   if (pay.minimumWageDaily > 0) {
-    // apprentices and learners may be paid 75% of the minimum (Labor Code Arts. 61 and 73)
+    // an apprentice's training allowance is at least 75% of the minimum wage (RA 12063)
     const floorOf = (e: PersonRow) => pay.minimumWageDaily * (e.employment_status === 'apprentice' ? EMPLOYMENT.apprenticeShareOfMinimumWage.value : 1)
     const below = activeNow.filter((e) => dailyEquivalent(e, pay.workingDaysPerYear) + 0.005 < floorOf(e))
     if (below.length) {
       insights.push({
         tone: 'warn',
-        text: `Paid below the client's minimum wage setting (${money(pay.minimumWageDaily)} a day${pay.minimumWageRegion ? `, ${pay.minimumWageRegion}` : ''}; 75% of it for apprentices and learners): ${names(below.map((e) => `${name(e)} (${money(dailyEquivalent(e, pay.workingDaysPerYear))})`))}. Check the rate, or the exemption that allows it.`,
+        text: `Paid below the client's minimum wage setting (${money(pay.minimumWageDaily)} a day${pay.minimumWageRegion ? `, ${pay.minimumWageRegion}` : ''}; 75% of it for apprentices): ${names(below.map((e) => `${name(e)} (${money(dailyEquivalent(e, pay.workingDaysPerYear))})`))}. Check the rate, or the exemption that allows it.`,
       })
     }
   }

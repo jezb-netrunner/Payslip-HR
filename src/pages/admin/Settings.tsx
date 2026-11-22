@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Banknote, Building2, Coins, FileText, Hash, Scale, SlidersHorizontal } from 'lucide-react'
+import { Banknote, Building2, Coins, FileText, Hash, Scale, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { Button, Card, Field, Input, NoClient, PageHeader, Select, Textarea, Toggle } from '../../components/ui'
 import { useToast } from '../../components/toast'
 import { useAuth } from '../../lib/auth'
@@ -51,6 +51,7 @@ function settingsRangeProblem(s: Entity): string | null {
 
 function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Promise<void> }) {
   const toast = useToast()
+  const { isCompanyAdmin } = useAuth()
   const [s, setS] = useState<Entity>(initial)
   const [busy, setBusy] = useState(false)
   useEffect(() => setS(initial), [initial])
@@ -115,6 +116,10 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           bir_filing_method: s.bir_filing_method,
           efps_group: s.bir_filing_method === 'efps' ? s.efps_group : null,
           pagibig_due_day: s.pagibig_due_day === null || String(s.pagibig_due_day) === '' ? null : Number(s.pagibig_due_day),
+          // only a company admin changes the four-eyes rule (the database refuses anyone else)
+          ...(isCompanyAdmin && initial.require_second_approver !== undefined && !!s.require_second_approver !== !!initial.require_second_approver
+            ? { require_second_approver: !!s.require_second_approver }
+            : {}),
         })
         .eq('id', s.id)
       if (error) throw error
@@ -212,7 +217,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
           </Card>
           <Card title="Minimum wage" icon={<Coins />}>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Wage region">
+              <Field label="Wage region" className="sm:col-span-2">
                 <Select value={s.minimum_wage_region} onChange={(e) => set('minimum_wage_region', e.target.value)}>
                   <option value="">Select…</option>
                   {PH_REGIONS.map((r) => (
@@ -247,7 +252,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 ))}
               </Select>
             </Field>
-            <Field label="Contribution deduction timing" hint="How monthly SSS / PhilHealth / Pag-IBIG are spread">
+            <Field label="Contribution deduction timing" hint="How monthly SSS / PhilHealth / Pag-IBIG are spread" className="sm:col-span-2">
               <Select
                 value={s.contribution_deduction_timing}
                 onChange={(e) => set('contribution_deduction_timing', e.target.value as Entity['contribution_deduction_timing'])}
@@ -272,7 +277,7 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
             <Field label="Days from period end to pay date" hint="Used to suggest the pay date of new runs">
               <Input type="number" value={s.pay_date_lag_days} onChange={(e) => set('pay_date_lag_days', e.target.value as unknown as number)} />
             </Field>
-            <Field label="BIR 1601-C filing" hint="Sets the due dates under BIR & Reports">
+            <Field label="BIR 1601-C filing" hint="Sets the due dates under BIR & Reports" className="sm:col-span-2">
               <Select value={s.bir_filing_method} onChange={(e) => set('bir_filing_method', e.target.value as Entity['bir_filing_method'])}>
                 <option value="manual">Manual / eBIRForms (10th of the next month)</option>
                 <option value="efps">eFPS</option>
@@ -288,7 +293,9 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
                 </Select>
               </Field>
             )}
-            <Field label="Pag-IBIG due day (next month)" hint="As your Pag-IBIG branch sets it; blank until entered">
+            <Field
+              label="Pag-IBIG due day (next month)"
+              hint="From your schedule in Virtual Pag-IBIG for Employers: HDMF Circular 499-2026 (from 21 Aug 2026) makes eSRS mandatory and replaced the remittance schedule of Circular 275. Reported windows by the first letter of the employer's registered name (PIA, 7 Nov 2026; check your eSRS schedule): A–F the 1st–7th, G–N the 5th–11th, O–Z and numbers the 9th–15th. Enter the last day of yours. Blank until entered">
               <Input type="number" min={1} max={31} value={s.pagibig_due_day ?? ''} onChange={(e) => set('pagibig_due_day', e.target.value as unknown as number)} />
             </Field>
           </div>
@@ -381,6 +388,28 @@ function SettingsForm({ initial, onSaved }: { initial: Entity; onSaved: () => Pr
               />
             </div>
           </Card>
+          {initial.require_second_approver !== undefined && (
+            <Card title="Payroll approval" icon={<ShieldCheck />}>
+              <div className="space-y-2">
+                {isCompanyAdmin ? (
+                  <Toggle
+                    checked={!!s.require_second_approver}
+                    onChange={(v) => set('require_second_approver', v)}
+                    label="Require a second person to finalize payroll (four eyes)"
+                  />
+                ) : (
+                  <p className="text-sm text-slate-700">
+                    A second person must finalize payroll: <b>{s.require_second_approver ? 'required' : 'not required'}</b>
+                  </p>
+                )}
+                <p className="text-xs text-slate-500">
+                  When required, the admin who computed a draft cannot finalize it: another admin of this client (or a
+                  company admin) reviews and finalizes it, and the payroll records both. Needs at least two admins who
+                  can open this client. {isCompanyAdmin ? '' : 'Only a company admin can change this.'}
+                </p>
+              </div>
+            </Card>
+          )}
           <Card title="Payslip" icon={<FileText />}>
             <Field label="Footer note">
               <Textarea rows={2} value={s.payslip_footer_note} onChange={(e) => set('payslip_footer_note', e.target.value)} />

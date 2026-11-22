@@ -8,7 +8,19 @@ import type { Employee, Entity, Holiday, LeaveRequest, LeaveType } from '../../l
 import { useEntity } from '../../lib/entity'
 import { errorMessage } from '../../lib/errors'
 import { fmtDate, fullName, plural } from '../../lib/format'
-import { countsCalendarDays, eligibleFrom, leaveDays, leaveDaysInYear, notYetUsable, showsBalance, usableOn } from '../../lib/leave'
+import {
+  countsCalendarDays,
+  eligibleFrom,
+  halfDayAllowed,
+  leaveDays,
+  leaveDaysInYear,
+  leaveLength,
+  notYetUsable,
+  requestDays,
+  showsBalance,
+  usableOn,
+  type HalfDay,
+} from '../../lib/leave'
 import { fetchScheduleRows, resolversFor } from '../../lib/schedules'
 import { useEmployeeSchedule } from '../../lib/useEmployeeSchedule'
 import { todayManila } from '../../lib/manila'
@@ -72,10 +84,32 @@ function Leaves({ entity }: { entity: Entity }) {
     load()
   }, [load])
 
+  /**
+   * The days a request charges, counted again from the employee's schedule
+   * and the holidays: the employee's own count is not trusted for the balance.
+   */
+  async function chargedDays(r: RequestFull): Promise<number> {
+    const type = r.leave_types ?? undefined
+    if (countsCalendarDays(type)) return leaveDays(type, r.start_date, r.end_date, [])
+    const [rows, hol] = await Promise.all([
+      fetchScheduleRows({ employeeId: r.employee_id }, r.start_date, r.end_date),
+      getHolidaysBetween(entity.id, r.start_date, r.end_date),
+    ])
+    const emp = r.employees
+    const schedule = emp ? (resolversFor([emp], rows).get(emp.id) ?? emp.work_schedule) : []
+    return requestDays(leaveDays(type, r.start_date, r.end_date, schedule, hol), r.half_day)
+  }
+
   async function review(id: string, approve: boolean) {
     if (busyId) return
     setBusyId(id)
     try {
+      const req = pending.find((x) => x.id === id)
+      const days = approve && req ? await chargedDays(req) : undefined
+      if (days !== undefined && days <= 0) {
+        toast('error', 'This request covers no scheduled workday of the employee: there is nothing to approve. Reject it, or correct the schedule first.')
+        return
+      }
       const { data: userData } = await supabase.auth.getUser()
       const { data, error } = await supabase
         .from('leave_requests')
@@ -84,12 +118,15 @@ function Leaves({ entity }: { entity: Entity }) {
           reviewed_by: userData.user?.id ?? null,
           reviewed_at: new Date().toISOString(),
           review_notes: notes[id] || null,
+          ...(days !== undefined ? { days } : {}),
         })
         .eq('id', id)
         .eq('status', 'pending')
         .select('id')
       if (error) throw error
       if (!data || data.length === 0) toast('error', 'This request is no longer pending (the employee may have cancelled it).')
+      else if (approve && req && days !== undefined && days !== Number(req.days))
+        toast('success', `Leave approved, charging ${plural(days, 'day')} from the schedule (the request said ${Number(req.days)}).`)
       else toast('success', approve ? 'Leave approved — payroll will treat these days accordingly.' : 'Leave rejected.')
     } catch (err) {
       toast('error', errorMessage(err, 'Review failed'))
@@ -248,7 +285,7 @@ function Leaves({ entity }: { entity: Entity }) {
                   <p className="text-sm font-bold text-slate-800">
                     {r.employees ? fullName(r.employees) : '—'}
                     <span className="ml-2 font-normal text-slate-500">
-                      {r.leave_types?.name} · {plural(Number(r.days), 'day')}
+                      {r.leave_types?.name} · {leaveLength(r)}
                     </span>{' '}
                     <Badge tone={r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : r.status === 'pending' ? 'amber' : 'slate'}>
                       {r.status}
@@ -265,6 +302,7 @@ function Leaves({ entity }: { entity: Entity }) {
                     <Input
                       aria-label="Review note"
                       placeholder="Note (optional)"
+                      maxLength={1000}
                       value={notes[r.id] ?? ''}
                       onChange={(e) => setNotes({ ...notes, [r.id]: e.target.value })}
                       className="w-full sm:w-48"
@@ -358,7 +396,7 @@ function FileLeaveModal({
   const [employees, setEmployees] = useState<Employee[]>([])
   // holidays of the range they were loaded for: the day count must never use another range's
   const [holidays, setHolidays] = useState<{ range: string; list: Holiday[] } | null>(null)
-  const [f, setF] = useState({ employeeId: '', typeId: '', start: today, end: today, reason: '', approve: true })
+  const [f, setF] = useState({ employeeId: '', typeId: '', start: today, end: today, half: '' as HalfDay | '', reason: '', approve: true })
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -391,8 +429,11 @@ function FileLeaveModal({
   // workdays follow the employee's schedule for those dates (patterns, roster changes)
   const sched = useEmployeeSchedule(employee ?? null, f.start, f.end)
   const counted = holidays?.range === range && sched.ready
-  const days =
+  const whole =
     employee && counted && f.end >= f.start ? leaveDays(type, f.start, f.end, sched.resolve ?? employee.work_schedule, holidays.list) : 0
+  // a half day is one date of a leave counted in working days
+  const half = halfDayAllowed(type, f.start, f.end) ? f.half : ''
+  const days = requestDays(whole, half)
 
   async function save() {
     if (!counted) return
@@ -409,6 +450,7 @@ function FileLeaveModal({
         start_date: f.start,
         end_date: f.end,
         days,
+        half_day: half || null,
         reason: f.reason.trim(),
         status: f.approve ? 'approved' : 'pending',
         ...(f.approve
@@ -456,6 +498,15 @@ function FileLeaveModal({
             <Input type="date" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
           </Field>
         </div>
+        {halfDayAllowed(type, f.start, f.end) && (
+          <Field label="How much of the day">
+            <Select value={f.half} onChange={(e) => setF({ ...f, half: e.target.value as HalfDay | '' })}>
+              <option value="">Whole day</option>
+              <option value="am">Half day: the morning</option>
+              <option value="pm">Half day: the afternoon</option>
+            </Select>
+          </Field>
+        )}
         {opens && type && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {notYetUsable(type, opens)} It can be filed sooner only if this employee has {f.start.slice(0, 4)} credits
@@ -473,10 +524,14 @@ function FileLeaveModal({
                 ? 'Counting workdays…'
                 : countsCalendarDays(type)
                   ? `${plural(days, 'calendar day')} (${type?.name ?? 'this leave'} runs in calendar days).`
-                  : `${plural(days, 'scheduled workday')} (holidays and rest days not counted).`}
+                  : half
+                    ? days > 0
+                      ? `Half a scheduled workday: the ${half === 'am' ? 'morning' : 'afternoon'} is on leave, and the other half is paid from the time in/out recorded for it.`
+                      : 'Not a scheduled workday: no leave is needed.'
+                    : `${plural(days, 'scheduled workday')} (holidays and rest days not counted).`}
         </p>
         <Field label="Reason">
-          <Textarea rows={2} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
+          <Textarea rows={2} maxLength={500} value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} />
         </Field>
         <Toggle checked={f.approve} onChange={(v) => setF({ ...f, approve: v })} label="Record as approved (otherwise it waits in Pending)" />
         <Button className="w-full" disabled={busy || !counted} onClick={save}>
