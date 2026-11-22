@@ -908,17 +908,36 @@ Postgres 16) on PRs and branch pushes; the deploy calls it first. Merged
 Dependabot's minor/patch group (supabase-js 2.119, React 19.3, oxlint 1.91,
 vite 8.3.6): tests/build/audit clean; oxlint 1.91 adds `react(immutability)`
 and `react(purity)` warnings on old patterns (cleanup `stale` flags, `new
-Date()` in render): 54 → 62 warnings, none new code. Majors (TypeScript 7,
-vitest 5, @types/node 26, the actions bumps) left to their PRs, now checked
-by CI. Tests 538 → 561 vitest, 19 SQL suites. Changed screens re-shot in the
+Date()` in render): 54 → 62 warnings, none new code. The majors went
+through their own PRs once CI checked them (entry below). Tests 538 → 561 vitest, 19 SQL suites. Changed screens re-shot in the
 harness at 1280/390 px: no page errors, no overflow. Then (owner: "yes, apply
 the migration and merge") the migration went live and PR #29 merged; and
 (owner: "revoke the MAINTAIN privilege too") `revoke_maintain` went live with
 CI moved to Postgres 17 (see *Current deployed state*).
 
+### 2026-11-22 — Dependabot majors merged (owner: "merge the TypeScript 7 PR if it passed", then "merge the other Dependabot PRs if they pass")
+
+Every open Dependabot PR merged after its CI passed: TypeScript 7.0.2 (#25),
+@types/node 26.6.6 (#26), actions/checkout 7.0.1 (#21), actions/setup-node
+7.1.0 (#20), vitest 5.1.0 (#24), and the Pages trio actions/configure-pages
+6.0.0 (#18), upload-pages-artifact 5.0.0 (#22), deploy-pages 5.0.1 (#19).
+The final deploy (Pages run 31, `1eb085d`) re-ran every check on the
+combined `main` and published: green. No code change was needed for any of
+them (`tsc -b` under TypeScript 7, the vitest config in `vite.config.ts`
+under vitest 5). How it went: lesson *Dependabot PRs: CI checks most of
+them, the deploy checks the Pages actions*.
+
 ---
 
 ## Current deployed state (update when it changes)
+
+**2026-11-22 (00:04 UTC): `main` = `1eb085d`, deployed (Pages run 31
+green); no Dependabot PR open.** Toolchain: TypeScript ~7.0.2, vitest ^5.1.0,
+vite ^8.3.6, oxlint ^1.91.0, @types/node ^26.6.6, React ^19.3.1,
+supabase-js ^2.119.0. Workflows pinned to commits: checkout v7.0.1,
+setup-node v7.1.0, configure-pages v6.0.0, upload-pages-artifact v5.0.0,
+deploy-pages v5.0.1; CI's database job on `postgres:17`. Database unchanged
+by these (last migration `20261121235208 revoke_maintain`).
 
 **2026-11-21 (23:52 UTC): `20261121235208 revoke_maintain` is live** (owner:
 "revoke the MAINTAIN privilege too", then "go ahead and merge it after
@@ -2694,6 +2713,21 @@ results were legally wrong at both ends and no warning fired.
 Why it mattered: final pay is due within 30 days (LA 06-20) and nothing in
 the app said so; the 13th month run for one employee and a final_pay run
 after the last day both already worked, they only needed the prompt.
+
+### Dependabot PRs: CI checks most of them, the deploy checks the Pages actions (process lesson, 2026-11-22)
+
+> Merge a Dependabot PR when `ci.yml` is green on its latest head; npm bumps and checkout/setup-node are exercised there. configure-pages, upload-pages-artifact and deploy-pages run only in `deploy-pages.yml` on `main`: merge the three together (the artifact and deploy versions must match) and treat the deploy as their test — a failed deploy leaves the last good site up, revert if it fails.
+
+Details that cost time: PRs opened before `ci.yml` existed had no runs and
+Dependabot did not rebase them (no conflict) — `update_pull_request_branch`
+(GitHub MCP) merges `main` into them and triggers CI. Two PRs editing
+adjacent lines (checkout and setup-node, both in the two workflows; two
+lockfile bumps) conflict after the first merges: Dependabot rebases the
+second within a couple of minutes and CI re-runs — merge with
+`expectedHeadSha` of the new head. Merging several PRs back to back starts a
+deploy per merge, and the `pages` concurrency group cancels all but the last
+(runs 27–30 "cancelled" is expected). Combinations of bumps are only tested
+together by that final deploy's checks job.
 
 ### Parallel forks spend the usage limit, not time (process lesson, 2026-11-11)
 
