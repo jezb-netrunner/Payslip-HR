@@ -7,7 +7,10 @@
 import { endOfMonth } from '../lib/manila'
 import { DEADLINES } from './law'
 
-export type Filing = '1601c' | 'sss' | 'philhealth' | 'pagibig' | 'refunds' | '2316_employees' | '1604c' | '2316_bir'
+export type Filing = '1601c' | 'sss' | 'philhealth' | 'pagibig' | 'refunds' | '2316_employees' | '1604c' | '2316_bir' | 'thirteenth_pay' | 'dole_13th'
+
+/** Filings whose date can be changed per year (filing_due_dates_filing_check); the 13th month dates come from law.ts only. */
+export const EDITABLE_FILINGS: readonly Filing[] = ['1601c', 'sss', 'philhealth', 'pagibig', 'refunds', '2316_employees', '1604c', '2316_bir']
 
 export interface FilingClient {
   filing: 'manual' | 'efps'
@@ -48,6 +51,8 @@ export const FILING_LABELS: Record<Filing, string> = {
   '2316_employees': 'BIR 2316 to employees (separated employees: the last pay day)',
   '1604c': 'BIR 1604-C and alphalist',
   '2316_bir': 'BIR copies of the 2316s and the Annex F list',
+  thirteenth_pay: '13th month pay to employees',
+  dole_13th: 'DOLE report on 13th month pay',
 }
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -95,7 +100,7 @@ export function filingCalendar(
     rows.push({
       filing: 'pagibig', period,
       due: client.pagibigDueDay ? dayOf(year, m + 1, client.pagibigDueDay) : '',
-      basis: 'Entered by the client (HDMF circular not verified)',
+      basis: 'Entered by the client from its eSRS schedule (HDMF Circular 499-2026 replaced the windows of Circular 275)',
       note: client.pagibigDueDay ? '' : 'Enter the Pag-IBIG due day in Client Settings',
     })
   }
@@ -105,6 +110,11 @@ export function filingCalendar(
     { filing: '2316_employees', period: yearStart, due: dayOf(year + 1, 1, D.form2316EmployeesJanuaryDay.value), basis: D.form2316EmployeesJanuaryDay.source, note: '' },
     { filing: '1604c', period: yearStart, due: dayOf(year + 1, 1, D.form1604cJanuaryDay.value), basis: D.form1604cJanuaryDay.source, note: '' },
     { filing: '2316_bir', period: yearStart, due: dayOf(year + 1, 2, D.form2316BirFebruaryDay.value), basis: D.form2316BirFebruaryDay.source, note: '' },
+    { filing: 'thirteenth_pay', period: yearStart, due: dayOf(year, 12, D.thirteenthMonthDecemberDay.value), basis: D.thirteenthMonthDecemberDay.source, note: '' },
+    {
+      filing: 'dole_13th', period: yearStart, due: dayOf(year + 1, 1, D.dole13thMonthReportJanuaryDay.value), basis: D.dole13thMonthReportJanuaryDay.source,
+      note: year === 2026 ? '' : "DOLE sets this date in each year's labor advisory: check it",
+    },
   )
   return rows.map((r) => {
     const o = overrides.find((x) => x.filing === r.filing && x.period === r.period)

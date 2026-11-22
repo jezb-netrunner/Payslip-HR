@@ -32,7 +32,7 @@ const OFFLINE = "Can't reach the server right now. Check your connection and try
 export function guardProblem(status: number, p: GuardPayload): string {
   switch (p.error) {
     case 'locked':
-      return `Too many failed sign-ins: this account is locked until ${p.locked_until ? manilaStamp(new Date(p.locked_until)) : 'later'}. A company admin can unlock it sooner.`
+      return `Too many failed sign-ins: this account is locked until ${p.locked_until ? manilaStamp(new Date(p.locked_until)) : 'later'}. A company admin can unlock it sooner, or reset your password with "Forgot password?" (the emailed link lifts the lock).`
     case 'invalid':
       return 'Wrong email or password. Five failed sign-ins in a row lock the account for 30 minutes.'
     case 'deactivated':

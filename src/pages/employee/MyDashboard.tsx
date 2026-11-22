@@ -217,7 +217,7 @@ export default function MyDashboard() {
       </StatGroup>
 
       <Modal open={viewing !== null} onClose={() => setViewing(null)} title="Payslip" wide>
-        {viewing && entity && <PayslipView slip={viewing} run={runFromSlip(viewing)} company={entity} />}
+        {viewing && entity && <PayslipView slip={viewing} run={runFromSlip(viewing)} company={entity} initials={employee ? personInitials(employee) : undefined} />}
       </Modal>
     </div>
   )

@@ -105,6 +105,10 @@ sign-ins until the window ends.
 - Leaves: per-client leave types (seeded from statutory templates),
   per-employee credits, approvals that feed payroll, leaves filed by HR for
   an employee, and revoking an approved leave (until its days are paid).
+  A leave for one date can be a **half day** (the morning or the
+  afternoon): it charges half a day, payroll pays the half on leave (no
+  lateness or undertime for it) and the other half from the time in/out on
+  record — with no time in/out at all, that half is an absence
   A leave type can require months of service: **Service Incentive Leave opens
   after 12 months** (Labor Code Art. 95), enforced by the database; credits
   set for a year grant it sooner
@@ -173,6 +177,30 @@ completed on their own first or last payroll. Withholding tax uses the BIR
 table for the run's frequency, and the tax year follows the **pay date**
 (a December 16–31 payroll paid in January is next year's compensation).
 
+A monthly rate pays **salary less absences** in an ordinary period. Someone
+employed for only part of a period (hired or separated inside it), or with
+more than half of the days the rate covers unpaid, is **paid by the days**:
+the daily rate × the days paid, capped at the period's salary and never more
+than salary less absences would pay with one day more (so a day more never
+pays less). A period has 9 to 13 workdays while the salary pays the
+divisor's average, so salary less absences alone paid a nine-workday period
+for no work and a hire's first days below the minimum wage. Days outside the
+employment are neither paid nor absences.
+
+**Final pay**: the payroll holding a separation names the 13th month pay to
+the last day and the leave credits left; its *Final pay still due* card
+creates the leaver's 13th month run (once that payroll is final) and adds
+the leave conversion (unused service incentive leave converts to cash, Labor
+Code Art. 95; other leave as company policy says) — due within 30 days of the
+last day (DOLE Labor Advisory 06-20).
+
+**Journal entry**: each run downloads a balanced debit/credit voucher —
+salaries and wages, allowances, commissions, 13th month and benefits,
+employer contributions, rounding; the SSS maternity benefit advanced as a
+receivable from SSS; contributions, tax, loans and other deductions payable;
+advances and receivables from employees; net pay payable by payment method.
+Account names are generic for the accountant to map to the chart of accounts.
+
 Safety rules enforced by the database: a draft can only be finalized if it
 was fully computed after its latest input change (attendance, leave,
 adjustments, rates or client settings); nobody is paid twice for the same
@@ -237,24 +265,24 @@ key or import into the **BIR Alphalist Data Entry and Validation Module**,
 which produces the DAT file to submit; the return itself is filed through
 eBIRForms / eFPS.
 
-## Philippine statutory compliance (verified Aug 2026, reviewed Oct 24, 2026, updated Oct 26, 2026 per the owner's compliance spec)
+## Philippine statutory compliance (verified Aug 2026, reviewed Oct 24, 2026, updated Oct 26, 2026 per the owner's compliance spec, re-checked Nov 11, 2026)
 
 | Item | Basis | Implementation |
 |---|---|---|
 | Withholding tax | TRAIN (RA 10963), Annex E RR 11-2018, tables effective 1 Jan 2023 onward; supplementary pay RR 2-98 Sec. 2.79(B)(3) and (5)(a) | Period tables versioned in DB; supplementary pay at the regular pay's bracket, or the cumulative average method (zero-bracket regular pay, supplementary ≥ regular, or an earlier employer) for the rest of the year |
 | Year-end adjustment | NIRC Secs. 79(F), 83(A); RR 2-98 Sec. 2.79(B)(5)(b) | Last payroll paid in December or the separation pay: annual table on actual pay; a shortfall is withheld only as far as the pay goes, the employer advancing the rest (receivable); refunds by 25 Jan reduce that month's 1601-C |
-| De minimis | RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 29-2025 (from 6 Jan 2026); RR 5-2011 (exclusive list) | Ceilings versioned in `legal_parameters`; each benefit named; the excess, and anything not on the list, taxable; unused VL to cash de minimis up to 12 days for a client granting 5+ VL days, SIL-only conversion taxable (setting) |
+| De minimis | RR 2-98 Sec. 2.78.1(A)(3) as amended by RR 11-2018 (last proviso) and RR 29-2025 (ceilings from 6 Jan 2026); RR 5-2011 (exclusive list) | Ceilings versioned in `legal_parameters`; each benefit named; pay above a ceiling is an "other benefit" sharing the ₱90,000 exemption with the 13th month (taxed only beyond it); anything not on the list taxable; unused VL to cash de minimis up to 12 days for a client granting 5+ VL days, SIL-only conversion taxable (setting) |
 | SSS | RA 11199, 15% (10% ER / 5% EE) since Jan 2025; MSC ₱5k–₱35k; MySSS Pension Booster (MPF) above ₱20k; EC ₱10/₱30; all remuneration of the SSS month (Secs. 8(f), 8(h); IRR Rule 12) | One MSC on the month's total — OT, premiums, allowances, de minimis, bonuses, the 13th month (setting) — except a Christmas bonus and allowances subject to liquidation; the closing payroll settles it with a refund line; maternity leave months at the usual amounts |
 | PhilHealth | RA 11223 (UHC), 5% of basic salary, floor ₱10k / ceiling ₱100k, 50/50; employee half paid by the government for solo parents and PWDs (Circulars 2026-0015, 2026-0017; RA 11228) | Odd centavo carried by employer (official convention); NG share shown, neither deducted nor remitted, from the first month through the month before the ID's expiry |
 | Pag-IBIG | RA 9679, HDMF Circular 460: max fund salary ₱10k; EE 1%/2%, ER 2% | On basic salary plus allowances, capped |
-| 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap | Dedicated run type; cap tracked across the tax year; the excess taxed when paid as supplementary pay; SSS compensation of its month |
-| OT / ND / premiums / holiday pay | Labor Code Arts. 86–94, 100; IRR Book III Rule IV Secs. 1, 6, 10 | Per-day engine with computation trace; unworked regular holidays paid (the workday-before absence rule is a client setting, off by default); small retail/service establishments (< 10 workers) can be exempt from holiday pay |
+| 13th month | PD 851: 1/12 of basic earned in the year, due Dec 24; ₱90k exemption cap; Revised Guidelines: basic salary leaves out overtime, premium, night differential and holiday pay, COLA and leave converted to cash unless a contract or practice includes them; DOLE Labor Advisory 21-2026 (report by 15 Jan 2027) | Dedicated run type; cap tracked across the tax year; the excess taxed when paid as supplementary pay, never more than the 13th month pays; SSS compensation of its month; pro-rated to the last day for a leaver (a 13th month run ending on the separation date); a daily-paid worker's unworked regular holiday is holiday pay (not in the basis), a monthly rate already includes its holidays |
+| OT / ND / premiums / holiday pay | Labor Code Arts. 86–94, 100; IRR Book III Rule IV Secs. 1, 6, 10 | Per-day engine with computation trace; unworked regular holidays paid (the workday-before absence rule is a client setting, off by default); a regular holiday worked for part of the day pays the day's 100% in full plus the pay for the hours worked (Art. 94(a), (b)); a night shift's premiums follow the day it started, and the review names hours that ran into or out of a holiday; small retail/service establishments (< 10 workers) can be exempt from holiday pay |
 | Hours of work & schedules | Art. 83 (8 hours), Art. 85 + IRR Book III Rule I §7 (meal ≥ 60 min unpaid; shorter meals and rests ≤ 20 min are hours worked), Art. 91 (weekly rest day), DOLE DA 02-04 (compressed workweek) | Each date measured against its own shift; compressed days regular up to the shift (max 12 h; ≤ 5 days and 48 h a week) |
 | Leaves | Art. 95 (SIL after 12 months), RA 11861 (solo parent, 6 months), RA 9710 (women, 6 months), RA 11210 (maternity 105 calendar days), RA 8187, RA 9262 | Service requirements enforced; maternity paid as the SSS benefit + salary differential (tax-exempt, 2316 item 37, outside the ₱90k pool), not as salary; contributions continue at the usual amounts, the employee's shares taken from the maternity pay; DOLE exemption from the differential recorded with its validity |
-| Deductions | Art. 113, IRR Book III Rule VIII §10 (DO 195-18) | Company loans, HMO and other deductions need the employee's written authorization date |
-| Minimum wage | RA 6727 regional wage orders (e.g. NCR-28, ₱755 from Sep 26, 2026); MWE exemption RA 9504; apprentices/learners 75% (Arts. 61, 73) | Per-client wage region and rate; MWE exempt package; payslip warnings when a rate is below the floor or an MWE is paid above the minimum |
+| Deductions | Art. 113, IRR Book III Rule VIII §10 (DO 195-18) | Company loans, HMO and other deductions need the employee's written authorization date; a payroll never collects more than it pays — contributions, tax, loans and other deductions stop at the pay, and what did not fit waits for a later payroll, stays in its balance or becomes a receivable |
+| Minimum wage | RA 6727 regional wage orders (e.g. NCR-28, ₱755 from Sep 26, 2026); MWE exemption RA 9504; apprentices 75% (RA 12063, which replaced Labor Code Arts. 57–77) | Per-client wage region and rate; MWE exempt package; payslip warnings when a rate is below the floor or an MWE is paid above the minimum |
 | Holidays | 2026: Proclamations 1006 / 1189 / 1264; 2027: Proclamation 1427 | National list + per-client local holidays |
-| Due dates | BIR 1601-C / 1604-C form pages, RR 26-2002, NIRC Secs. 79(F), 83; RR 11-2018; SSS Circular 2019-012; PhilHealth payment schedule | Calendar per client: 1601-C (manual or eFPS group), SSS, PhilHealth by employer number, Pag-IBIG as entered; weekends and holidays noted, not moved; extensions per year |
+| Due dates | BIR 1601-C / 1604-C form pages, RR 26-2002, NIRC Secs. 79(F), 83; RR 11-2018; SSS Circular 2019-012; PhilHealth payment schedule; HDMF Circular 499-2026; PD 851; DOLE LA 21-2026 | Calendar per client: 1601-C (manual or eFPS group), SSS, PhilHealth by employer number, Pag-IBIG as entered from the client's eSRS schedule, 13th month pay (Dec 24) and its DOLE report (Jan 15, set by each year's advisory); weekends and holidays noted, not moved; extensions per year (not for the two 13th month dates) |
 
 Legal values the logic uses (premium rates, thresholds, deadlines) live in
 `src/payroll/law.ts`, each with its effective date and source. Statutory
@@ -300,10 +328,19 @@ reminds company admins when this year's check is due).
 3. Finalized payslips are immutable; attendance already paid is locked.
    Finalize gives the payroll and each payslip a control number (PR-000001,
    PS-000001 per client, never reused) and refuses a payroll whose payslip
-   lines or totals don't add up. A posted payroll is never edited: **void
-   and reissue** archives it with the reason (kept on record, printed VOID)
-   and returns it to draft. Finalize and void are atomic database functions
-   that also maintain loan balances and the cash-rounding carry.
+   lines or totals don't add up, or one with a negative net pay. A posted
+   payroll is never edited: **void and reissue** archives it with the reason
+   (kept on record, printed VOID) and returns it to draft. Finalize and void
+   are atomic database functions that also maintain loan balances and the
+   cash-rounding carry. A run can only be created as a draft, and who
+   created it, who completed its computation and who finalized it are set by
+   the database from the session (as are the reviewer of a leave and the
+   author of a payroll adjustment), never taken from the request.
+   **Four eyes** (per client, switched by company admins): the admin who
+   computed a draft cannot finalize it. Before finalizing, the run page
+   compares the draft with the last payroll of the same kind: who was added
+   or dropped, net pay that moved by 20% or more, and anyone the run covers
+   without a payslip.
 4. Sensitive changes are audit-logged by database triggers (who, when, what,
    which client) — including login-code changes made through the edge
    function and leave / correction reviews; bookkeeping writes (draft
@@ -391,7 +428,11 @@ npm run lint       # oxlint
 
 The app is a static SPA (Supabase is the backend), so GitHub Pages hosts it.
 `.github/workflows/deploy-pages.yml` builds and deploys on every push to
-`main` (tests must pass first).
+`main`, after `.github/workflows/ci.yml` passes: lint, the unit and flow
+tests, the build, and the SQL / RLS suite on a fresh Postgres 16. The same
+checks run on every pull request (Dependabot's included) and branch push —
+merge a dependency update only when they are green, and protect `main` so
+they are required (Settings → Branches).
 
 1. One-time: repo **Settings → Pages → Source: “GitHub Actions”**.
 2. Push to `main` (or run the workflow manually from the Actions tab).
@@ -441,7 +482,11 @@ Migrations are in `supabase/migrations/` and the edge functions are in
 with it **off**: it is called before there is a session). Both need the
 edge-function secret `ADMIN_PASSWORD_PEPPER` (32+ random characters; never
 change it: admin passwords and employee login codes are kept keyed with it).
-The employee sign-in migration (`*_employee_sign_in_guard.sql`), both
+The internal-controls migration (`*_internal_controls.sql`) and its front
+end can go live in either order: the screens hide the second-person setting
+until the column exists, and the database ignores the actor columns an older
+front end still sends. The employee sign-in migration
+(`*_employee_sign_in_guard.sql`), both
 functions and the front end go live together: apply the migration, deploy
 both functions, then merge to `main`. Codes set before it map to the old
 address and must be set again (Login tab). The CAS-controls
@@ -503,12 +548,28 @@ MEMORY.md         # running memory log: session history, deployed state, lessons
 
 - The BIR reports are working data for the BIR Alphalist module and
   eBIRForms; the app does not generate the DAT file or file returns.
+- A half-day leave is half the shift's working hours, not a clock window:
+  it covers the hours not worked up to half the shift (the morning or
+  afternoon named decides only whether lateness or undertime is excused
+  first). Leave by the hour is not supported, and maternity leave (calendar
+  days) has no half day.
+- Holiday and special-day premiums follow the day a shift started. A night
+  shift that runs into or out of a holiday is flagged in the review with
+  the hours involved; a company that counts holiday hours by the calendar
+  day adds or takes back the difference with an adjustment. One holiday per
+  date: two regular holidays on the same day (300%) need an adjustment.
 - The SSS maternity benefit and the salary differential are entered as
   adjustments (the SSS figure comes from the SSS portal); payroll only stops
   paying the leave days as salary and reminds you.
 - De minimis benefits must be named when entered; the ceilings (RR 29-2025)
-  are applied per month, semester or year, the excess taxed.
+  are applied per month, semester or year, and pay above a ceiling counts
+  toward the ₱90,000 exemption for the 13th month pay and other benefits.
 - NCR-27 (suspended, in litigation) is not applied and no contingent
   top-up report is built: no client is in NCR.
+- Leave requests: the database keeps a leave's charge between 0 and its
+  calendar days; approval in the app counts the days again from the
+  employee's schedule and holidays. Reasons are capped at 500 characters,
+  and an employee has at most 20 pending leave requests, 31 pending time
+  corrections and 5 pending cash-advance requests.
 - This software assists with compliance but is not legal advice — always
   reconcile remittances with each agency's official schedules and forms.

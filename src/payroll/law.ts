@@ -71,6 +71,14 @@ export const DEADLINES = {
   bir1601cDecemberDay: { value: 15, effectiveFrom: '2018-01-01', source: 'BIR Form 1601-C (January 2018 ENCS) page' },
   /** 1601-C on eFPS: days after the month's end for groups A to E */
   bir1601cEfpsDays: { value: { A: 15, B: 14, C: 13, D: 12, E: 11 }, effectiveFrom: '2002-12-01', source: 'BIR Form 1601-C page; RR 26-2002' },
+  /** 13th month pay: paid not later than this day of December (PD 851; Revised Guidelines on the 13th Month Pay Law) */
+  thirteenthMonthDecemberDay: { value: 24, effectiveFrom: '1975-12-16', source: 'PD 851; Revised Guidelines on the Implementation of the 13th Month Pay Law; DOLE Labor Advisory No. 21, Series of 2026' },
+  /**
+   * The employer's 13th month pay report to DOLE: day of January of the next
+   * year. DOLE sets it in each year's advisory (2026 pay: 15 January 2027,
+   * through its online compliance portal); check the new advisory each November.
+   */
+  dole13thMonthReportJanuaryDay: { value: 15, effectiveFrom: '2026-11-06', source: 'DOLE Labor Advisory No. 21, Series of 2026 (report through the DOLE online compliance portal)' },
   /** year-end refunds of over-withheld tax: day of January of the next year */
   refundsJanuaryDay: { value: 25, effectiveFrom: '2018-01-01', source: 'NIRC Sec. 79(F)' },
   /** BIR Form 2316 to employees: day of January (on separation, the last pay day) */
@@ -120,8 +128,17 @@ export const HOURS = {
 
 /** Wages and employment. */
 export const EMPLOYMENT = {
-  /** apprentices and learners may be paid this share of the applicable minimum wage */
-  apprenticeShareOfMinimumWage: { value: 0.75, effectiveFrom: LABOR_CODE, source: 'Labor Code Arts. 61 and 73' },
+  /**
+   * an apprentice's training allowance: this share of the applicable minimum
+   * wage at least. The Labor Code's chapters on apprentices and learners
+   * (Arts. 57 to 77) were repealed by RA 12063, which keeps the 75% for
+   * apprentices; learnership is no longer a category of its own.
+   */
+  apprenticeShareOfMinimumWage: {
+    value: 0.75,
+    effectiveFrom: LABOR_CODE,
+    source: 'RA 12063 (Enterprise-Based Education and Training Framework Act, 2024) and its implementing rules; before it, Labor Code Arts. 61 and 73',
+  },
   /** probationary employment: six months, 180 days counted with the first day excluded */
   probationDays: {
     value: 180,

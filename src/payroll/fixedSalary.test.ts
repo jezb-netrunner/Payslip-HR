@@ -87,13 +87,14 @@ describe('fixed salary without timekeeping', () => {
     expect(slip.earnings.find((l) => l.code === 'absence')).toMatchObject({ label: 'Leave without pay (1 day/s)', amount: -3678.16 })
   })
 
-  it('deducts the workdays before a mid-period hire', () => {
+  it('pays a mid-period hire by the days employed', () => {
     const slip = pay({ ...executive, hireDate: '2026-09-09' }, noEntries())
-    // Sep 1–4, 7–8: 6 workdays before the hire
-    expect(slip.earnings.find((l) => l.code === 'outside_employment')).toMatchObject({
-      label: 'Days before the hire date or after the last day (6 day/s)',
-      amount: -22068.97,
+    // Sep 9–11, 14–15: 5 workdays employed × 3,678.16
+    expect(slip.earnings.find((l) => l.code === 'basic')).toMatchObject({
+      label: 'Basic Pay (5 day/s paid at 3,678.16; hired Sep 9)',
+      amount: 18390.8,
     })
+    expect(slip.earnings.find((l) => l.code === 'outside_employment')).toBeUndefined()
   })
 
   it("keeps the holiday absence rule to leave without pay: the workdays it doesn't time count as worked", () => {

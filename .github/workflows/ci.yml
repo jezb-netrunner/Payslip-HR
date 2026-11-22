@@ -1,0 +1,57 @@
+# Checks every pull request (Dependabot's included) and every branch push:
+# lint, the unit and flow tests, the production build, and the SQL / RLS
+# suite (supabase/tests/run.sh replays every migration on a fresh Postgres
+# with the Supabase stub, on PostgreSQL 17 like live). The deploy workflow
+# calls this first, so main
+# deploys only what passes.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit and flow tests
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # the live project runs PostgreSQL 17 (its MAINTAIN privilege is tested in suite 28)
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Migrations and SQL / RLS suites
+        run: supabase/tests/run.sh

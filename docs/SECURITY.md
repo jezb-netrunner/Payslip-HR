@@ -26,9 +26,12 @@ PDF) leave the system: they are as sensitive as the database.
 - **Access rules in the database.** Row-level security on every table:
   admins reach only their clients, employees only their own records, and
   employees can never write attendance or payslips. Signed-out callers have
-  no table privileges at all. 25 SQL suites test the rules on a replica of
-  every migration (`supabase/tests/run.sh`); `fingerprint.sql` proves live
-  runs the tested schema.
+  no table privileges at all, and signed-in ones no TRUNCATE, REFERENCES or
+  TRIGGER (row-level security does not cover TRUNCATE). Request queues have
+  limits (reason length, pending requests per employee). 19 SQL suites test
+  the rules on a replica of every migration (`supabase/tests/run.sh`, also
+  run by CI on every pull request); `fingerprint.sql` proves live runs the
+  tested schema.
 - **Admin sign-in** (`auth-guard`): 12+ character passwords screened against
   known breaches, five failures lock the account for 30 minutes, two-step
   sign-in (authenticator app) for every admin, one active session, and the
@@ -115,5 +118,40 @@ PDF) leave the system: they are as sensitive as the database.
 Nothing is purged automatically: payslips, attendance and the audit trail
 (with its full copies of changed records, government numbers included) stay
 until deleted. Payroll records must be kept for the BIR and labor-law
-periods; agree a retention period with counsel and clients, then remove
-what is past it.
+periods: employment and payroll records at least three years from the last
+entry (Omnibus Rules, Book III, Rule X), and the tax records five years
+from the return's deadline under the NIRC as amended by RA 11976 (RR
+7-2024, which replaced the ten years of RR 17-2013), longer while an
+assessment, protest or refund claim is pending. Agree a retention period
+with counsel and clients, then remove what is past it.
+
+## Known limits (accepted, with what to do)
+
+- **A stolen admin password alone opens nothing, but it can sign the real
+  admin out.** The sign-in guard admits a session at the password step, so
+  someone who knows the password (and not the authenticator code) displaces
+  the admin's session each time they try, and can change the password. They
+  reach no data: the database answers only a session that verified the
+  second factor. If an admin keeps being signed out, treat the password as
+  stolen: use **Forgot password?** (the emailed link sets a new one and
+  lifts any lock).
+- **Lockouts and the employee sign-in budget can be used to annoy.** Five
+  wrong passwords lock an admin account for 30 minutes (the reset link gets
+  the admin back in at once), and 50 wrong employee codes for a client
+  within 15 minutes pause that client's employee sign-ins until the window
+  ends. Both go on the audit trail with the caller's address. They guard
+  against guessing, which matters more: a login code has about 2.8 trillion
+  possibilities and the budget allows fewer than 5,000 tries a day.
+- **The site can't forbid framing with a header** (GitHub Pages sends none,
+  and a `<meta>` policy can't carry `frame-ancestors`), so the app itself
+  refuses to start inside another page's frame. A host that sends real
+  headers (Cloudflare Pages, Netlify) should also send
+  `Content-Security-Policy: frame-ancestors 'none'`.
+- **An employee can read their own record through the API**, including the
+  profile's *Notes* field and career events HR entered. That matches the
+  right of access; keep notes to what you would disclose.
+- **Payslips are computed in the admin's browser** and stored as drafts. The
+  database checks that a draft adds up, is complete and current, has no
+  negative net pay, and (optionally) was computed by someone other than its
+  finalizer, and it records both people; it does not recompute the pay.
+  Turn on the second-person rule where a client has two payroll admins.

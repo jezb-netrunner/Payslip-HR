@@ -225,10 +225,10 @@ export default function TimeReport({
             .order('id')
             .range(f, t),
         ),
-        fetchAll<{ employee_id: string; start_date: string; end_date: string; leave_types: { name: string; paid: boolean } | null }>((f, t) =>
+        fetchAll<{ employee_id: string; start_date: string; end_date: string; half_day: 'am' | 'pm' | null; leave_types: { name: string; paid: boolean } | null }>((f, t) =>
           supabase
             .from('leave_requests')
-            .select('employee_id, start_date, end_date, leave_types(name, paid)')
+            .select('employee_id, start_date, end_date, half_day, leave_types(name, paid)')
             .eq('entity_id', entity.id)
             .eq('status', 'approved')
             .lte('start_date', to)
@@ -252,6 +252,7 @@ export default function TimeReport({
           end_date: l.end_date,
           name: l.leave_types?.name ?? 'Leave',
           paid: l.leave_types?.paid ?? false,
+          half_day: l.half_day ?? null,
         })),
       })
     } catch (err) {
@@ -605,6 +606,13 @@ function DayRemarks({ day }: { day: ReportDay }) {
       {day.holiday && <Badge tone={day.holiday.kind === 'regular' ? 'red' : 'amber'}>{day.holiday.name}</Badge>}
       {!day.scheduled && <Badge tone="slate">rest day</Badge>}
       {day.leave && <Badge tone="violet">{day.leave.name}{day.leave.paid ? '' : ' (unpaid)'}</Badge>}
+      {day.halfLeave && (
+        <Badge tone="violet">
+          half day: {day.halfLeave.name}
+          {day.halfLeave.unpaidDays > 0 && day.halfLeave.paidDays === 0 ? ' (unpaid)' : ''}
+        </Badge>
+      )}
+      {day.halfLeave && day.halfLeave.absentDays > 0 && <Badge tone="red">other half absent</Badge>}
       {day.absent && <Badge tone="red">absent</Badge>}
       {day.missingTimeOut && <Badge tone="amber">no time out</Badge>}
       {day.corrected && <Badge tone="blue">corrected on request</Badge>}

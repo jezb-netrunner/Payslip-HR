@@ -49,7 +49,7 @@ import { useEntity } from '../../lib/entity'
 import { errorMessage } from '../../lib/errors'
 import { fetchAll } from '../../lib/fetchAll'
 import { fmtDate, fmtDateTime, fmtTin, money } from '../../lib/format'
-import { todayManila } from '../../lib/manila'
+import { manilaDateStr, todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import {
   billedBefore,
@@ -352,7 +352,7 @@ function ConsultantList({
             <div className="mt-3 flex flex-wrap gap-2">
               {c.signed_off_at ? (
                 <Badge tone={concerns.length ? 'amber' : 'green'} wrap>
-                  Signed off by {c.signed_off_by}, {fmtDate(c.signed_off_at.slice(0, 10))}
+                  Signed off by {c.signed_off_by}, {fmtDate(manilaDateStr(new Date(c.signed_off_at)))}
                   {concerns.length ? ` · ${concerns.length} answer${concerns.length === 1 ? '' : 's'} pointing to employment` : ''}
                 </Badge>
               ) : (

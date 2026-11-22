@@ -14,7 +14,7 @@ import { todayManila } from '../../lib/manila'
 import { supabase } from '../../lib/supabase'
 import { alphalistCsv, annexFCsv, buildAlphalist, form2316Items, FORM_2316_LABELS, type AlphalistRow, type Form2316Item, type YearEndRate } from '../../payroll/alphalist'
 import { remittances1601C, type RemittanceMonth } from '../../payroll/remittance'
-import { FILING_LABELS, filingCalendar, type DueDate, type DueDateOverride } from '../../payroll/dueDates'
+import { EDITABLE_FILINGS, FILING_LABELS, filingCalendar, type DueDate, type DueDateOverride } from '../../payroll/dueDates'
 import { ewtYearCalendar, type EwtDue, type EwtDueOverride } from '../../payroll/ewtDueDates'
 import { round2 } from '../../payroll/types'
 import { fetchFinalizedPayslipsForTaxYear, fetchOpeningBalances, fetchTaxYears, toAnnualFact, type YearPayslip } from '../../payroll/service'
@@ -281,48 +281,50 @@ function Alphalist({ entity, year }: { entity: Entity; year: number }) {
               <TableShell>
                 <thead className="bg-slate-50">
                   <tr>
-                    <Th>Employee</Th>
-                    <Th>Employed</Th>
-                    <Th className="text-right">Gross</Th>
-                    <Th className="text-right">Non-taxable</Th>
-                    <Th className="text-right">Taxable</Th>
-                    <Th className="text-right">Tax due</Th>
-                    <Th className="text-right">Withheld</Th>
-                    <Th className="text-right">Balance</Th>
-                    <Th></Th>
+                    <Th compact>Employee</Th>
+                    <Th compact>Employed</Th>
+                    <Th compact className="text-right">Gross</Th>
+                    <Th compact className="text-right">Non-taxable</Th>
+                    <Th compact className="text-right">Taxable</Th>
+                    <Th compact className="text-right">Tax due</Th>
+                    <Th compact className="text-right">Withheld</Th>
+                    <Th compact className="text-right">Balance</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {list.map((r) => (
                     <tr key={r.employee.id} className="hover:bg-slate-50">
-                      <Td>
-                        <p className="font-semibold">{r.employee.last_name}, {r.employee.first_name}</p>
+                      <Td compact className="min-w-48">
+                        <p className="flex items-center gap-2 font-semibold">
+                          <span className="whitespace-nowrap">{r.employee.last_name}, {r.employee.first_name}</span>
+                          {/* in the name cell: a last column scrolls out of view on narrower screens */}
+                          <button onClick={() => setViewing(r)} className="flex shrink-0 items-center gap-1 text-xs font-semibold text-brand-600">
+                            <FileText className="size-3.5" /> 2316
+                          </button>
+                        </p>
                         <p className="text-xs text-slate-400">
                           TIN {r.employee.tin || '—'} · {r.statusCode}
                           {r.separationCode && ` · separated (${r.separationCode})`}
                           {r.substitutedFiling && ' · substituted filing'}
                         </p>
                       </Td>
-                      <Td className="whitespace-nowrap text-xs">{fmtDate(r.from)} – {fmtDate(r.to)}</Td>
-                      <Td className="text-right">{money(r.summary.gross)}</Td>
-                      <Td className="text-right">{money(r.summary.totalNonTaxable)}</Td>
-                      <Td className="text-right">{money(r.summary.totalTaxablePresent)}</Td>
-                      <Td className="text-right">{money(r.summary.taxDue)}</Td>
-                      <Td className="text-right">
+                      <Td compact className="text-xs">
+                        <span className="whitespace-nowrap">{fmtDate(r.from)} –</span> <span className="whitespace-nowrap">{fmtDate(r.to)}</span>
+                      </Td>
+                      <Td compact className="whitespace-nowrap text-right">{money(r.summary.gross)}</Td>
+                      <Td compact className="whitespace-nowrap text-right">{money(r.summary.totalNonTaxable)}</Td>
+                      <Td compact className="whitespace-nowrap text-right">{money(r.summary.totalTaxablePresent)}</Td>
+                      <Td compact className="whitespace-nowrap text-right">{money(r.summary.taxDue)}</Td>
+                      <Td compact className="whitespace-nowrap text-right">
                         {money(r.summary.withheldAsAdjusted + r.summary.prevTaxWithheld)}
                         {(r.summary.withheldDec > 0 || r.summary.refunded > 0) && (
-                          <p className="text-[11px] text-slate-400">
+                          <p className="whitespace-normal text-[11px] text-slate-400">
                             Dec {money(r.summary.withheldDec)}{r.summary.refunded > 0 ? ` · refunded ${money(r.summary.refunded)}` : ''}
                           </p>
                         )}
                       </Td>
-                      <Td className={`text-right font-semibold ${r.summary.variance === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      <Td compact className={`whitespace-nowrap text-right font-semibold ${r.summary.variance === 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {money(r.summary.variance)}
-                      </Td>
-                      <Td>
-                        <button onClick={() => setViewing(r)} className="flex items-center gap-1 text-xs font-semibold text-brand-600">
-                          <FileText className="size-3.5" /> 2316
-                        </button>
                       </Td>
                     </tr>
                   ))}
@@ -819,29 +821,47 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
   }, [entity.id, year, month, reload])
 
   const rows = useMemo(() => {
-    const m = new Map<string, { name: string; no: string; sss: string; ph: string; hdmf: string; v: number[] }>()
+    const m = new Map<string, { name: string; no: string; sss: string; ph: string; hdmf: string; v: number[]; mpf: [number, number] }>()
     for (const s of slips ?? []) {
       const snap = s.employee_snapshot as Record<string, string>
-      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0, 0] }
+      const cur = m.get(s.employee_id) ?? { name: snap.name, no: snap.employee_no, sss: snap.sss_no ?? '', ph: snap.philhealth_no ?? '', hdmf: snap.pagibig_no ?? '', v: [0, 0, 0, 0, 0, 0, 0, 0, 0], mpf: [0, 0] as [number, number] }
       const add = [
         Number(s.sss_ee) + Number(s.sss_mpf_ee), Number(s.sss_er) + Number(s.sss_mpf_er), Number(s.sss_ec_er),
         Number(s.sss_mpf_ee) + Number(s.sss_mpf_er), Number(s.philhealth_ee), Number(s.philhealth_er), Number(s.philhealth_ng ?? 0),
         Number(s.pagibig_ee), Number(s.pagibig_er),
       ]
       cur.v = cur.v.map((x, i) => Math.round((x + add[i]) * 100) / 100)
+      cur.mpf = [round2(cur.mpf[0] + Number(s.sss_mpf_ee)), round2(cur.mpf[1] + Number(s.sss_mpf_er))]
       m.set(s.employee_id, cur)
     }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name))
   }, [slips])
   const tot = rows.reduce((acc, r) => acc.map((x, i) => Math.round((x + r.v[i]) * 100) / 100), [0, 0, 0, 0, 0, 0, 0, 0, 0])
   const cols = ['SSS EE', 'SSS ER', 'EC', 'of which MPF', 'PhilHealth EE', 'PhilHealth ER', 'PhilHealth NG (not remitted)', 'Pag-IBIG EE', 'Pag-IBIG ER']
+  const SHORT_COLS = ['EE', 'ER', 'EC', 'of which MPF', 'EE', 'ER', 'NG (not remitted)', 'EE', 'ER']
+  // the first column of each agency's group
+  const GROUP_START = [0, 4, 7]
+  // The file each agency's collection list is keyed from: the regular SSS
+  // contribution apart from the MPF (MySSS Pension Booster) and EC, and each
+  // agency's total to remit.
+  const fileCols = [
+    'SSS EE (regular)', 'SSS ER (regular)', 'EC (ER)', 'MPF EE', 'MPF ER', 'SSS total to remit',
+    'PhilHealth EE', 'PhilHealth ER', 'PhilHealth total to remit', 'PhilHealth NG share (not remitted)',
+    'Pag-IBIG EE', 'Pag-IBIG ER', 'Pag-IBIG total to remit',
+  ]
+  const fileRow = (v: number[], mpf: [number, number]) => [
+    round2(v[0] - mpf[0]), round2(v[1] - mpf[1]), v[2], mpf[0], mpf[1], round2(v[0] + v[1] + v[2]),
+    v[4], v[5], round2(v[4] + v[5]), v[6],
+    v[7], v[8], round2(v[7] + v[8]),
+  ]
+  const totMpf = rows.reduce<[number, number]>((a, r) => [round2(a[0] + r.mpf[0]), round2(a[1] + r.mpf[1])], [0, 0])
 
   return (
     <Card
       title={`Contributions for ${fmtMonth(`${year}-${month}-01`)} (payroll month)`}
       actions={
         <div className="flex flex-wrap gap-2">
-          <Select value={month} onChange={(e) => setMonth(e.target.value)} className="w-36">
+          <Select value={month} onChange={(e) => setMonth(e.target.value)} className="w-44">
             {MONTHS.map((mm) => (
               <option key={mm} value={mm}>{fmtMonth(`${year}-${mm}-01`)}</option>
             ))}
@@ -851,9 +871,9 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
             disabled={rows.length === 0}
             onClick={() =>
               downloadCsv(`contributions_${entity.code}_${year}-${month}.csv`, [
-                ['Employee No', 'Employee', 'SSS No', 'PhilHealth No', 'Pag-IBIG MID', ...cols],
-                ...rows.map((r) => [r.no, r.name, r.sss, r.ph, r.hdmf, ...r.v]),
-                ['', 'TOTAL', '', '', '', ...tot],
+                ['Employee No', 'Employee', 'SSS No', 'PhilHealth No', 'Pag-IBIG MID', ...fileCols],
+                ...rows.map((r) => [r.no, r.name, r.sss, r.ph, r.hdmf, ...fileRow(r.v, r.mpf)]),
+                ['', 'TOTAL', '', '', '', ...fileRow(tot, totMpf)],
               ], stamp(`Contributions for ${fmtMonth(`${year}-${month}-01`)}`))
             }
           >
@@ -871,29 +891,38 @@ function Contributions({ entity, year }: { entity: Entity; year: number }) {
       ) : (
         <TableShell>
           <thead className="bg-slate-50">
+            {/* grouped by agency, short column names: all nine fit at laptop width */}
             <tr>
-              <Th>Employee</Th>
-              {cols.map((c) => (
-                <Th key={c} className="text-right">{c}</Th>
+              <Th rowSpan={2}>Employee</Th>
+              <Th colSpan={4} className="border-l border-slate-200 text-center">SSS</Th>
+              <Th colSpan={3} className="border-l border-slate-200 text-center">PhilHealth</Th>
+              <Th colSpan={2} className="border-l border-slate-200 text-center">Pag-IBIG</Th>
+            </tr>
+            <tr>
+              {SHORT_COLS.map((c, i) => (
+                <Th key={i} className={`whitespace-nowrap text-right ${GROUP_START.includes(i) ? 'border-l border-slate-200' : ''}`} title={cols[i]}>{c}</Th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((r) => (
               <tr key={r.no + r.name}>
-                <Td>
-                  <p className="font-semibold">{r.name}</p>
-                  <p className="text-xs text-slate-400">SSS {r.sss || '—'} · PH {r.ph || '—'} · HDMF {r.hdmf || '—'}</p>
+                <Td className="min-w-44">
+                  <p className="whitespace-nowrap font-semibold">{r.name}</p>
+                  <p className="text-[11px] leading-4 text-slate-400">
+                    <span className="whitespace-nowrap">SSS {r.sss || '—'}</span> · <span className="whitespace-nowrap">PH {r.ph || '—'}</span> ·{' '}
+                    <span className="whitespace-nowrap">HDMF {r.hdmf || '—'}</span>
+                  </p>
                 </Td>
                 {r.v.map((x, i) => (
-                  <Td key={i} className="text-right text-xs">{money(x)}</Td>
+                  <Td key={i} className={`whitespace-nowrap text-right text-xs ${GROUP_START.includes(i) ? 'border-l border-slate-100' : ''}`}>{money(x)}</Td>
                 ))}
               </tr>
             ))}
             <tr className="bg-slate-50 font-bold">
               <Td>Total</Td>
               {tot.map((x, i) => (
-                <Td key={i} className="text-right text-xs">{money(x)}</Td>
+                <Td key={i} className={`whitespace-nowrap text-right text-xs ${GROUP_START.includes(i) ? 'border-l border-slate-100' : ''}`}>{money(x)}</Td>
               ))}
             </tr>
           </tbody>
@@ -1007,9 +1036,11 @@ function DueDates({ entity, year }: { entity: Entity; year: number }) {
             </Td>
             <Td className={`text-xs ${r.note.startsWith('Falls on') || r.note.includes('. Falls on') ? 'text-amber-700' : 'text-slate-500'}`}>{r.note || '—'}</Td>
             <Td>
-              <button onClick={() => setEditing({ row: r, due: r.due, note: r.overridden ? r.note : '' })} className="flex items-center gap-1 text-xs font-semibold text-brand-600">
-                <Pencil className="size-3.5" /> Change
-              </button>
+              {EDITABLE_FILINGS.includes(r.filing) && (
+                <button onClick={() => setEditing({ row: r, due: r.due, note: r.overridden ? r.note : '' })} className="flex items-center gap-1 text-xs font-semibold text-brand-600">
+                  <Pencil className="size-3.5" /> Change
+                </button>
+              )}
             </Td>
           </tr>
         ))}
